@@ -1,0 +1,322 @@
+\documentclass{standalone}
+\usepackage{tikz}
+\usepackage{animate}
+\usepackage{graphicx}
+\usetikzlibrary{fit, positioning, arrows.meta, shapes, calc}
+
+\begin{document}
+
+\begin{animateinline}[controls, loop]{3}
+\multiframe{49}{iFrame=0+1}{
+
+\begin{tikzpicture}[
+    >=Stealth,
+    label_text/.style={
+        fill=white,
+        inner sep=2pt,
+        font=\bfseries\itshape
+    },
+    image_node/.style={
+        inner sep=0pt
+    }
+]
+
+% Explicit Spacious Bounding Box
+\path [use as bounding box] (-4, -8) rectangle (26, 8);
+
+% Macro for drawing 3D Convolution Blocks
+% Usage: \convblock{x}{y}{width}{height}{depth}
+\def\convblock#1#2#3#4#5{
+    \pgfmathsetmacro{\w}{#3/2}
+    \pgfmathsetmacro{\h}{#4/2}
+    \pgfmathsetmacro{\dx}{#5*0.6}
+    \pgfmathsetmacro{\dy}{#5*0.4}
+    
+    % Top face
+    \filldraw[fill=orange!50!brown, draw=brown!80!black, thick, line join=round]
+        (#1-\w, #2+\h) -- (#1+\w, #2+\h) -- (#1+\w+\dx, #2+\h+\dy) -- (#1-\w+\dx, #2+\h+\dy) -- cycle;
+    % Right face
+    \filldraw[fill=orange!70!brown, draw=brown!80!black, thick, line join=round]
+        (#1+\w, #2-\h) -- (#1+\w, #2+\h) -- (#1+\w+\dx, #2+\h+\dy) -- (#1+\w+\dx, #2-\h+\dy) -- cycle;
+    % Front face
+    \filldraw[fill=orange!40!brown, draw=brown!80!black, thick, line join=round]
+        (#1-\w, #2-\h) rectangle (#1+\w, #2+\h);
+}
+
+% -----------------------------------------------------
+% 1. Input Image Nodes (Left Side)
+% -----------------------------------------------------
+\node[image_node] (image) at (0, 4) {\includegraphics[width=4cm, height=2cm, keepaspectratio]{crops/2305.04298v1-Figure1-1/image.png}};
+\node[below=0.1cm of image, font=\sffamily] {Image};
+
+\node[image_node] (map) at (0, 0) {\includegraphics[width=3cm, height=2.5cm, keepaspectratio]{crops/2305.04298v1-Figure1-1/map.png}};
+\node[right=0.2cm of map, align=left, font=\sffamily] {Offline\\LiDAR map};
+
+\node[image_node] (depth) at (0, -4) {\includegraphics[width=4cm, height=2cm, keepaspectratio]{crops/2305.04298v1-Figure1-1/depth.png}};
+\node[below=0.1cm of depth, font=\sffamily] {Projected depth};
+
+% Left side input arrows
+\draw[->, thick] (image.west) -- ++(-1.0, 0) |- (map.west);
+\node[right] at (-3.0, 2) {$\mathcal{P}_o$}; % Positioned relative to the updated path
+\draw[->, thick] (map.south) -- (depth.north);
+
+% -----------------------------------------------------
+% 2. Image Encoder (Top Branch)
+% -----------------------------------------------------
+\convblock{3.6}{4}{0.3}{3.0}{0.8}
+\convblock{4.2}{4}{0.3}{2.4}{0.8}
+\convblock{4.8}{4}{0.4}{1.8}{0.8}
+\convblock{5.4}{4}{0.4}{1.4}{0.8}
+\convblock{6.0}{4}{0.5}{1.0}{0.8}
+\convblock{6.6}{4}{0.5}{0.6}{0.8}
+\coordinate (enc1_tl) at (3.4, 5.8);
+\coordinate (enc1_br) at (7.3, 2.2);
+\node[fit=(enc1_tl) (enc1_br)] (image_encoder) {};
+\node[label_text] at (5.1, 4) {Image Encoder};
+
+% -----------------------------------------------------
+% 3. LiDAR Encoder (Bottom Branch)
+% -----------------------------------------------------
+\convblock{3.6}{-4}{0.3}{3.0}{0.8}
+\convblock{4.2}{-4}{0.3}{2.4}{0.8}
+\convblock{4.8}{-4}{0.4}{1.8}{0.8}
+\convblock{5.4}{-4}{0.4}{1.4}{0.8}
+\convblock{6.0}{-4}{0.5}{1.0}{0.8}
+\convblock{6.6}{-4}{0.5}{0.6}{0.8}
+\coordinate (enc2_tl) at (3.4, -2.2);
+\coordinate (enc2_br) at (7.3, -5.8);
+\node[fit=(enc2_tl) (enc2_br)] (lidar_encoder) {};
+\node[label_text] at (5.1, -4) {LiDAR Encoder};
+
+% Connections from Inputs to Encoders
+\draw[->, thick] (image.east) -- (image_encoder.west |- image.east);
+\draw[->, thick] (depth.east) -- (lidar_encoder.west |- depth.east);
+
+% -----------------------------------------------------
+% 4. Correlation Block
+% -----------------------------------------------------
+\node[draw=violet!50!black, fill=violet!70!blue, text=white, thick, minimum width=1.0cm, minimum height=4.5cm, inner sep=0pt] (correlation) at (8.5, 0) {\rotatebox{-90}{\textbf{\textit{\Large Correlation}}}};
+
+% Connections from Encoders to Correlation (FIXED SYNTAX)
+\draw[->, thick] (image_encoder.east) -- ([yshift=1.5cm]correlation.west);
+\draw[->, thick] (lidar_encoder.east) -- ([yshift=-1.5cm]correlation.west);
+
+% -----------------------------------------------------
+% 5. 3D Cost Volume
+% -----------------------------------------------------
+\pgfmathsetmacro{\cvx}{11.0}
+\pgfmathsetmacro{\cvy}{0}
+\pgfmathsetmacro{\cvw}{1.3}
+\pgfmathsetmacro{\cvh}{1.0}
+\pgfmathsetmacro{\cvdx}{0.8}
+\pgfmathsetmacro{\cvdy}{0.6}
+
+% Back face
+\filldraw[fill=red!5!white, draw=red!20, thick, opacity=0.6] (\cvx-\cvw+\cvdx, \cvy-\cvh+\cvdy) rectangle (\cvx+\cvw+\cvdx, \cvy+\cvh+\cvdy);
+% Inner heat lines
+\draw[red!60, line width=1.5pt, opacity=0.7] (\cvx-\cvw+0.5+\cvdx, \cvy-\cvh+0.5+\cvdy) -- (\cvx+\cvw-0.5+\cvdx, \cvy-\cvh+0.5+\cvdy) -- (\cvx+\cvw-0.5+\cvdx, \cvy+\cvh-0.5+\cvdy);
+\draw[red!80, line width=2pt, opacity=0.8] (\cvx-\cvw+0.3, \cvy-\cvh+0.3) -- (\cvx+\cvw-0.3, \cvy-\cvh+0.3) -- (\cvx+\cvw-0.3, \cvy+\cvh-0.3);
+\fill[red!40, opacity=0.5] (\cvx, \cvy-\cvh+0.1) rectangle (\cvx+0.5, \cvy+\cvh-0.2);
+% Bottom face
+\filldraw[fill=red!10!white, draw=red!20, thick, opacity=0.6] (\cvx-\cvw, \cvy-\cvh) -- (\cvx+\cvw, \cvy-\cvh) -- (\cvx+\cvw+\cvdx, \cvy-\cvh+\cvdy) -- (\cvx-\cvw+\cvdx, \cvy-\cvh+\cvdy) -- cycle;
+% Top face
+\filldraw[fill=red!10!white, draw=red!20, thick, opacity=0.6] (\cvx-\cvw, \cvy+\cvh) -- (\cvx+\cvw, \cvy+\cvh) -- (\cvx+\cvw+\cvdx, \cvy+\cvh+\cvdy) -- (\cvx-\cvw+\cvdx, \cvy+\cvh+\cvdy) -- cycle;
+% Right face
+\filldraw[fill=red!10!white, draw=red!20, thick, opacity=0.6] (\cvx+\cvw, \cvy-\cvh) -- (\cvx+\cvw, \cvy+\cvh) -- (\cvx+\cvw+\cvdx, \cvy+\cvh+\cvdy) -- (\cvx+\cvw+\cvdx, \cvy-\cvh+\cvdy) -- cycle;
+% Front face
+\filldraw[fill=red!15!white, draw=red!30, thick, opacity=0.6] (\cvx-\cvw, \cvy-\cvh) rectangle (\cvx+\cvw, \cvy+\cvh);
+
+\coordinate (cv_tl) at (\cvx-\cvw-0.2, \cvy+\cvh+\cvdy+0.2);
+\coordinate (cv_br) at (\cvx+\cvw+\cvdx+0.2, \cvy-\cvh-0.2);
+\node[fit=(cv_tl) (cv_br)] (cost_volume) {};
+\node[below] at (\cvx+0.4, \cvy-\cvh-0.1) {3D Cost volume};
+
+% Connection Correlation to Cost Volume
+\draw[->, thick] (correlation.east) -- (cost_volume.west |- correlation.east);
+
+% -----------------------------------------------------
+% 6. Position Embeddings
+% -----------------------------------------------------
+\pgfmathsetmacro{\pex}{11.0}
+\pgfmathsetmacro{\pey}{4.0}
+\foreach \i in {4,3,2,1,0} {
+    \filldraw[fill=gray!15, draw=gray!60, thick] (\pex - 0.8 + \i*0.15, \pey - 1.0 + \i*0.15) rectangle (\pex + 0.8 + \i*0.15, \pey + 1.0 + \i*0.15);
+}
+\coordinate (pe_tl) at (\pex - 1.0, \pey + 1.8);
+\coordinate (pe_br) at (\pex + 1.6, \pey - 1.2);
+\node[fit=(pe_tl) (pe_br)] (pos_embeddings) {};
+\node[above] at (\pex+0.4, \pey+1.6) {Position embeddings};
+
+% -----------------------------------------------------
+% 7. Element-wise Add (Plus) Node
+% -----------------------------------------------------
+\node[draw=black, circle, thick, inner sep=0pt, minimum size=0.6cm, fill=white] (plus) at (14.0, 4.0) {\Large $+$};
+
+% Connections to Plus (FIXED SYNTAX)
+\draw[->, thick] (pos_embeddings.east |- plus.west) -- (plus.west);
+\draw[->, thick] (cost_volume.east) -- (plus.south);
+
+% -----------------------------------------------------
+% 8. POET Block
+% -----------------------------------------------------
+\node[draw=black, thick, fill=cyan!10, minimum width=3.8cm, minimum height=2.4cm, align=center] (poet) at (17.5, 4.0) {
+    \textbf{\textit{\textcolor{red}{\Large POET}}} \\[0.2cm] 
+    \textbf{\textcolor{red}{PO}}se \textbf{\textcolor{red}{E}}stimator \\ 
+    \textbf{\textcolor{red}{T}}ransformer
+};
+% POET self-loop
+\draw[->, thick] ([xshift=1cm]poet.north) -- ++(0, 0.8) -| ([xshift=-0.5cm]poet.north);
+
+% Connection Plus to POET
+\draw[->, thick] (plus.east) -- (poet.west);
+
+% -----------------------------------------------------
+% 9. Relative Pose (Frustums)
+% -----------------------------------------------------
+% Left Frustum
+\draw[thick, line join=round] (21.4, 4.4) -- (21.8, 4.7) -- (21.8, 3.7) -- (21.4, 3.4) -- cycle;
+\draw[thick] (22.2, 3.8) -- (21.4, 4.4);
+\draw[thick] (22.2, 3.8) -- (21.8, 4.7);
+\draw[thick] (22.2, 3.8) -- (21.8, 3.7);
+\draw[thick] (22.2, 3.8) -- (21.4, 3.4);
+\draw[thin] (21.6, 4.55) -- (21.6, 3.55); % camera plane detail
+
+% Right Frustum
+\draw[thick, line join=round] (24.0, 4.4) -- (23.6, 4.7) -- (23.6, 3.7) -- (24.0, 3.4) -- cycle;
+\draw[thick] (23.2, 3.8) -- (24.0, 4.4);
+\draw[thick] (23.2, 3.8) -- (23.6, 4.7);
+\draw[thick] (23.2, 3.8) -- (23.6, 3.7);
+\draw[thick] (23.2, 3.8) -- (24.0, 3.4);
+\draw[thin] (23.8, 4.55) -- (23.8, 3.55); % camera plane detail
+
+% Double arrow
+\draw[<->, thick] (22.3, 3.9) to[bend right=25] node[below] {$\mathcal{P}_\Delta$} (23.1, 3.9);
+
+% Fit group for Relative Pose
+\coordinate (rp_tl) at (21.2, 5.0);
+\coordinate (rp_br) at (24.2, 2.8);
+\node[fit=(rp_tl) (rp_br)] (rel_pose) {};
+\node[below] at (22.7, 3.2) {Relative pose};
+
+% Connection POET to Relative Pose
+\draw[->, thick] (poet.east) -- (rel_pose.west |- poet.east);
+
+% -----------------------------------------------------
+% 10. Multiply Node & Outputs
+% -----------------------------------------------------
+\node[draw=black, circle, thick, inner sep=0pt, minimum size=0.6cm, fill=white] (multiply) at (22.7, 0.5) {\Large $\times$};
+
+% Connection Relative Pose to Multiply
+\draw[->, thick] (rel_pose.south) -- (multiply.north);
+
+% P_o input to Multiply
+\draw[<-, thick] (multiply.east) -- ++(1.5, 0) node[right] {$\mathcal{P}_o$};
+
+% Optimized vehicle pose
+\node[image_node] (opt_pose) at (22.7, -3.0) {\includegraphics[width=3.5cm, height=2cm, keepaspectratio]{crops/2305.04298v1-Figure1-1/final_pose.png}};
+\node[below=0.1cm of opt_pose, align=center, font=\sffamily] {Optimized\\vehicle pose};
+
+% Connection Multiply to Optimized Pose
+\draw[->, thick] (multiply.south) -- (opt_pose.north);
+
+% -----------------------------------------------------
+% 11. Main Dashed Bounding Box & Legend
+% -----------------------------------------------------
+\draw[thick, dashed] (2.5, 7.0) rectangle (20.5, -6.0);
+\node[fill=white, font=\Large\bfseries, inner sep=5pt] at (11.5, 7.0) {Image-to-LiDAR map localization network};
+
+% Legend Box
+\draw[dashed, thick] (14.5, -3.5) rectangle (19.5, -5.5);
+\convblock{15.2}{-4.0}{0.2}{0.6}{0.4}
+\node[right, font=\normalsize] at (15.8, -4.0) {Convolution block};
+
+\node[draw=black, circle, thick, inner sep=0pt, minimum size=0.5cm] (leg_plus) at (15.2, -4.9) {$+$};
+\node[right, font=\normalsize] at (15.8, -4.9) {Element-wise add};
+
+% -----------------------------------------------------
+% ANIMATION: Smooth Sliding Bounding Boxes
+% -----------------------------------------------------
+
+% Define Keyframes based on extracted nodes
+\path (image.north west) coordinate (kf0_tl) (image.south east) coordinate (kf0_br);
+\path (map.north west) coordinate (kf1_tl) (map.south east) coordinate (kf1_br);
+\path (depth.north west) coordinate (kf2_tl) (depth.south east) coordinate (kf2_br);
+\path (image_encoder.north west) coordinate (kf3_tl) (image_encoder.south east) coordinate (kf3_br);
+\path (lidar_encoder.north west) coordinate (kf4_tl) (lidar_encoder.south east) coordinate (kf4_br);
+\path (correlation.north west) coordinate (kf5_tl) (correlation.south east) coordinate (kf5_br);
+\path (cost_volume.north west) coordinate (kf6_tl) (cost_volume.south east) coordinate (kf6_br);
+\path (pos_embeddings.north west) coordinate (kf7_tl) (pos_embeddings.south east) coordinate (kf7_br);
+\path (plus.north west) coordinate (kf8_tl) (plus.south east) coordinate (kf8_br);
+\path (poet.north west) coordinate (kf9_tl) (poet.south east) coordinate (kf9_br);
+\path (rel_pose.north west) coordinate (kf10_tl) (rel_pose.south east) coordinate (kf10_br);
+\path (multiply.north west) coordinate (kf11_tl) (multiply.south east) coordinate (kf11_br);
+\path (opt_pose.north west) coordinate (kf12_tl) (opt_pose.south east) coordinate (kf12_br);
+
+% Determine transition parameters
+\pgfmathsetmacro{\framesPerTrans}{4} % Exactly 4 frames between each step
+\pgfmathtruncatemacro{\currentTrans}{min(12, \iFrame / \framesPerTrans)} % CRITICAL: Must be truncatemacro to yield an integer!
+\pgfmathsetmacro{\localProg}{mod(\iFrame, \framesPerTrans) / \framesPerTrans}
+
+% Interpolate between keyframes
+\ifcase\currentTrans
+    % Transition 0: kf0 -> kf1
+    \coordinate (curr_tl) at ($(kf0_tl)!\localProg!(kf1_tl)$);
+    \coordinate (curr_br) at ($(kf0_br)!\localProg!(kf1_br)$);
+\or
+    % Transition 1: kf1 -> kf2
+    \coordinate (curr_tl) at ($(kf1_tl)!\localProg!(kf2_tl)$);
+    \coordinate (curr_br) at ($(kf1_br)!\localProg!(kf2_br)$);
+\or
+    % Transition 2: kf2 -> kf3
+    \coordinate (curr_tl) at ($(kf2_tl)!\localProg!(kf3_tl)$);
+    \coordinate (curr_br) at ($(kf2_br)!\localProg!(kf3_br)$);
+\or
+    % Transition 3: kf3 -> kf4
+    \coordinate (curr_tl) at ($(kf3_tl)!\localProg!(kf4_tl)$);
+    \coordinate (curr_br) at ($(kf3_br)!\localProg!(kf4_br)$);
+\or
+    % Transition 4: kf4 -> kf5
+    \coordinate (curr_tl) at ($(kf4_tl)!\localProg!(kf5_tl)$);
+    \coordinate (curr_br) at ($(kf4_br)!\localProg!(kf5_br)$);
+\or
+    % Transition 5: kf5 -> kf6
+    \coordinate (curr_tl) at ($(kf5_tl)!\localProg!(kf6_tl)$);
+    \coordinate (curr_br) at ($(kf5_br)!\localProg!(kf6_br)$);
+\or
+    % Transition 6: kf6 -> kf7
+    \coordinate (curr_tl) at ($(kf6_tl)!\localProg!(kf7_tl)$);
+    \coordinate (curr_br) at ($(kf6_br)!\localProg!(kf7_br)$);
+\or
+    % Transition 7: kf7 -> kf8
+    \coordinate (curr_tl) at ($(kf7_tl)!\localProg!(kf8_tl)$);
+    \coordinate (curr_br) at ($(kf7_br)!\localProg!(kf8_br)$);
+\or
+    % Transition 8: kf8 -> kf9
+    \coordinate (curr_tl) at ($(kf8_tl)!\localProg!(kf9_tl)$);
+    \coordinate (curr_br) at ($(kf8_br)!\localProg!(kf9_br)$);
+\or
+    % Transition 9: kf9 -> kf10
+    \coordinate (curr_tl) at ($(kf9_tl)!\localProg!(kf10_tl)$);
+    \coordinate (curr_br) at ($(kf9_br)!\localProg!(kf10_br)$);
+\or
+    % Transition 10: kf10 -> kf11
+    \coordinate (curr_tl) at ($(kf10_tl)!\localProg!(kf11_tl)$);
+    \coordinate (curr_br) at ($(kf10_br)!\localProg!(kf11_br)$);
+\or
+    % Transition 11: kf11 -> kf12
+    \coordinate (curr_tl) at ($(kf11_tl)!\localProg!(kf12_tl)$);
+    \coordinate (curr_br) at ($(kf11_br)!\localProg!(kf12_br)$);
+\else
+    % Catch-all to park the box on the final frame
+    \coordinate (curr_tl) at (kf12_tl);
+    \coordinate (curr_br) at (kf12_br);
+\fi
+
+% Draw the sliding box
+\node[draw=red, very thick, dashed, inner sep=5pt, fit=(curr_tl) (curr_br)] {};
+
+\end{tikzpicture}
+}
+\end{animateinline}
+
+\end{document}

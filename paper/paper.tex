@@ -1,0 +1,913 @@
+
+\documentclass{article} % For LaTeX2e
+\usepackage{iclr2026_conference,times}
+
+% Optional math commands from https://github.com/goodfeli/dlbook_notation.
+\input{math_commands.tex}
+\usepackage{marvosym}
+\usepackage{url}
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+%\usepackage{microtype}
+\usepackage{graphicx}
+\expandafter\def\csname ver@subfig.sty\endcsname{}
+\usepackage{booktabs} %
+\usepackage{float}
+\usepackage{bigstrut}
+\usepackage{amsmath}
+\usepackage{wrapfig}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+\usepackage{mathrsfs}
+\usepackage{nicefrac}
+\usepackage{dsfont}
+\usepackage{enumitem}
+\usepackage{subcaption}
+\usepackage{graphicx,subfig}
+
+\usepackage{bxcoloremoji}
+\usepackage{colortbl}
+\definecolor{AutoFigurecolor}{rgb}{0.882, 0.804, 0.737}
+\usepackage{float}
+\usepackage[colorlinks,
+            linkcolor=magenta,
+            anchorcolor=blue,
+            citecolor=gray
+            ]{hyperref}
+            \usepackage{cleveref}
+\setlength\parindent{0pt}
+
+\usepackage[utf8]{inputenc} %
+\usepackage[T1]{fontenc}    %
+\usepackage{url}            %
+\usepackage{booktabs}       %
+\usepackage{amsfonts}       %
+\usepackage{nicefrac}       %
+%\usepackage{microtype}      %
+\usepackage{graphicx}
+\usepackage{subcaption} % Ensure subfigure or subtable environments are used if this package is included.
+\usepackage{amssymb}
+\usepackage{fdsymbol}
+\usepackage{wrapfig}
+\usepackage{lipsum}
+\usepackage{enumitem}
+\usepackage{stackengine}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{color}
+\usepackage{adjustbox}
+
+\usepackage{rotating}
+\usepackage{makecell}
+\usepackage{csquotes}
+\usepackage{multirow}
+\usepackage{fontawesome5}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{fontawesome5}
+\usepackage{xcolor}
+\definecolor{darkblue}{rgb}{0.0, 0.0, 0.0}
+
+\title{AnimateBanana: Programmatic Animation of Process-Oriented Scientific Diagrams}
+\iclrfinalcopy
+% Authors must not appear in the submitted version. They should be hidden
+% as long as the \iclrfinalcopy macro remains commented out below.
+% Non-anonymous submissions will be rejected without review.
+
+\author{
+Minjun Zhu*,
+Zhen Lin*,
+Yixuan Weng*\dagger, \\
+~\textbf{Panzhong Lu},
+\textbf{Qiujie Xie},
+\textbf{Yifan Wei},
+\textbf{Sifan Liu},
+\textbf{Qiyao Sun},
+\textbf{Yue Zhang}\Letter \\
+Engineering School, Westlake University \\
+\texttt{wengsyx@gmail.com; zhangyue@westlake.edu.cn} \\
+\textbf{Project:}\href{https://deepscientist.cc}{https://deepscientist.cc}
+\vspace{0.6em}
+\faGithub\ \href{https://github.com/ResearAI/AutoFigure}{AutoFigure} \quad
+\faGithub\ \href{https://github.com/ResearAI/AutoFigure-Edit}{AutoFigure-Edit} \quad
+\href{https://huggingface.co/datasets/WestlakeNLP/FigureBench}{
+  \raisebox{-0.15em}{\includegraphics[height=1.1em]{hf-logo.png}}
+  \ FigureBench
+}
+}
+
+
+
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to \LaTeX{} to determine where to break
+% the lines. Using \AND forces a linebreak at that point. So, if \LaTeX{}
+% puts 3 of 4 authors names on the first line, and the last on the second
+% line, try using \AND instead of \And before the third author name.
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+\definecolor{OliveGreen}{RGB}{0,0,0}
+\newcommand{\xqj}[1]{\textcolor{OliveGreen}{#1}}
+
+%\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
+\begin{document}
+
+
+\maketitle
+\footnotetext[1]{*~The contributions are equal.}
+\footnotetext[2]{\Letter~Corresponding Author.}
+\footnotetext[3]{\href{https://github.com/ResearAI/AutoFigure}{AutoFigure} is the complete implementation presented in this paper.
+\href{https://github.com/ResearAI/AutoFigure-Edit}{AutoFigure-Edit}  is a new version of AutoFigure that supports fully editable icons and text.}
+
+\begin{abstract}
+Process-oriented scientific diagrams depict dynamic systems through static visual artifacts.  Although animated visual explanations have been shown to improve engagement and knowledge retention, creating them from static diagrams remains a manual and time-consuming process. We present \textbf{\textsc{AnimateBanana}}, a multi-stage multi-agent framework for automatically transforming static process-oriented diagrams into editable visual narratives. \textsc{AnimateBanana} first converts an input diagram into a programmatic representation. It then derives an animation plan over this representation, capturing abstraction hierarchy and presentation order. The resulting plan is rendered into animations using user-specified styles such as progressive reveal, guided traversal, and attention-driven highlighting. The generated animations remain faithful to source figure, preserve editability, and can be exported to popular multimedia presentation formats (SVG, GIF, MP4, PPTX etc.). To enable training and evaluation, we introduce a scalable hybrid data generation pipeline together with \textbf{AnimateBench}, the first benchmark for process-oriented scientific diagram animation. Experimental results and user studies demonstrate that \textsc{AnimateBanana} substantially reduces authoring effort while producing faithful, controllable, and pedagogically effective animations. We further show that the generated animations can be embedded directly into standard PDF documents, transforming static documents into interactive visual experiences. \textsc{AnimateBanana} is used throughout this paper to animate several of its own figures.  Interactive versions of the figures are available in the supplementary material.
+\end{abstract}
+
+\section{Introduction}
+
+Scientific diagrams are among the most effective carriers of technical information. They communicate neural architectures, scientific workflows, biological pathways, algorithms, and engineering systems through compact visual abstractions. However, while the underlying concepts are often dynamic, the medium itself remains static. Readers must infer information flow, temporal progression, and causal relationships from a static image. Even with accompanying text and captions, readers must mentally reconstruct the underlying process.
+
+Prior work in multimedia learning and cognitive science has shown that incremental presentation strategies such as progressive reveal, guided attention, animation, and synchronized narration improve comprehension, knowledge retention, and reduce cognitive load. Consequently, researchers, educators, and industry practitioners routinely animate diagrams during lectures, presentations, tutorials, and explanatory videos. Unfortunately, creating such visual narratives remains largely manual. Authors must decide what to present, in what sequence, at what level of abstraction, and how to guide the viewer's attention throughout the explanation. Producing high-quality animations therefore requires substantial effort, domain expertise, and specialized authoring tools.
+
+Recent advances in multimodal foundation models have enabled impressive progress in scientific figure generation and editing. Systems such as PaperBanana, FigAgent, and AutoFigure can generate publication-quality illustrations and perform sophisticated visual modifications. However, they do not address the problem of transforming static diagrams into editable visual narratives. More importantly, they lack an intermediate representation that supports semantic understanding, animation planning, user-guided editing, and multi-format deployment. The central challenge is not animation alone, but the derivation of a coherent narrative traversal: determining what to present, in what sequence, and at what level of abstraction. Solving this problem requires a representation that captures a diagram's presentation structure rather than merely its appearance.
+
+To address this challenge, we introduce \textsc{AnimateBanana}, a multi-stage multi-agent framework for converting static process-oriented diagrams into editable visual narratives. The framework first translates a diagram into a programmatic TikZ representation, derives an animation plan capturing traversal order and abstraction hierarchy, synthesizes animations in user-specified styles, and finally renders them into multiple deployment formats. A key aspect of our approach is the shift from image-space to program-space reasoning. By transpiling diagrams into TikZ, \textsc{AnimateBanana} reasons directly over explicit entities, symbolic references, and hierarchical structure rather than pixels. The resulting representation serves as the computational substrate for planning, editing, and animation synthesis while preserving full editability.
+
+To support training and evaluation, we construct a scalable hybrid corpus together with AnimateBench, the first benchmark for process-oriented scientific diagram animation. Extensive quantitative evaluations and user studies demonstrate that \textsc{AnimateBanana} generates high-fidelity animations that remain faithful to the source figure while substantially reducing authoring effort and improving comprehensibility.
+
+Finally, \textsc{AnimateBanana} produces animations that render natively inside standard PDF viewers. This transforms conventional PDF documents into interactive visual experiences. Beyond PDFs, \textsc{AnimateBanana} supports compilation into a variety of deployment formats including SVG, GIF, MP4 videos, and PPTX. Effectively, this allows a single diagram representation to be reused across papers, presentations, online media, and interactive learning environments without requiring manual re-authoring.
+
+\textsc{AnimateBanana} is used throughout this paper to animate several of its own methodology figures. Interactive versions are available in the supplementary material.
+
+\section{Related Work}
+
+\noindent\textbf{Scientific visual communication and diagram generation:} Recent advances in multimodal foundation models have accelerated research on automatic scientific visual communication, including the generation of posters, presentation slides, scientific figures, and diagram editing systems~\cite{posteragent,pptagent}. More recent systems such as \emph{PaperBanana}, \emph{FigAgent}, and \textsc{AutoFigure} extend these capabilities to scientific diagram understanding, editing, and generation. Complementary efforts have explored explicit intermediate representations for diagram understanding~\cite{explicitdiagram}, representation learning for computer science diagrams~\cite{rlcsdia}, and diagram parsing through layout and alignment reasoning~\cite{alignmentdiagram,layoutrecovery}. While these methods recover structure or synthesize diagrams, they fundamentally treat diagrams as static artifacts. None addresses the problem of transforming a static process-oriented diagram into an editable visual narrative or models animation planning as a first-class computational task.
+
+\noindent\textbf{Diagram animation and visual storytelling:} Animation has long been recognized as an effective medium for communicating complex information. Prior work has explored animated infographics~\cite{infomotion}, motion figures embedded within research articles~\cite{yourpaperisdead,bringingresearcharticles,motionfigures}, narrative visualization systems~\cite{dataplaywright,narrativevissurvey}, chart animation~\cite{livecharts}, and structured motion graphics generation~\cite{motiongraphicsplan}. These systems demonstrate the value of animation for communication and often provide sophisticated authoring environments. However, they typically assume manually authored visual specifications or operate on restricted visual domains such as charts and infographics. In contrast, \textsc{AnimateBanana} automatically infers an animation narrative directly from a static process-oriented diagram.
+
+\noindent\textbf{Programmatic representations for graphics:} Recent work has explored recovering executable graphics programs from visual inputs through multimodal program synthesis and vision-to-code systems~\cite{beyondnl2code,livesvg}. These approaches primarily reconstruct editable vector graphics or executable programs, typically using representations such as SVG, to faithfully reproduce the input visual content. In contrast, \textsc{AnimateBanana} uses the recovered program not as the final output, but as a shared computational representation over which subsequent reasoning is performed. This representation enables diagram parsing, animation planning, user-guided editing, and multi-format animation synthesis within a unified framework.
+
+Collectively, existing work addresses diagram generation, editing, executable graphics, and animation authoring as largely independent problems. \textsc{AnimateBanana} unifies these directions by treating scientific diagram animation as a representation and planning problem over a shared programmatic representation.
+
+% \section{FigureBench: A Benchmark for Automated Scientific Illustration Generation}
+% \label{sec:figurebench}
+
+% \begin{figure}[t]
+%     \centering
+%     \includegraphics[width=\linewidth]{figures/FigureBench_main_figure.pdf}
+%     %\vspace{-0.35cm}
+%     \caption{The composition of the FigureBench dataset. It features a rich collection of text-figure pairs from four distinct sources~(Paper, Survey, Blog, and TextBook), demonstrating the benchmark's capability to evaluate automatic illustration generation across various domains and complexities. }
+%     \vspace{-0.35cm}
+%     \label{fig:figurebench_composition}
+%     % \vspace{-10pt}
+% \end{figure} 
+
+
+% Automatic scientific illustration aims to constructs a mapping function $G$ that takes long-form scientific text $T$ as input and generates a publication-quality illustration $I_{final}$. In this section, we introduce \textbf{FigureBench}, the first large-scale benchmark for generating scientific illustrations from long-form scientific texts. As depicted in Figure \ref{fig:figurebench_composition}, FigureBench is curated to encompass a wide array of document types, including research papers, surveys, technical blogs, and textbooks, establishing a challenging and diverse testbed to spur research in automatic scientific illustration generation.
+
+% \begin{table}[t]
+% \centering
+% \renewcommand{\arraystretch}{0.85}
+% \caption{Comprehensive Analysis of the FigureBench.}
+% \label{tab:AutoFigure_analysis}
+% \tiny
+% \begin{adjustbox}{width=\textwidth}
+% \begin{tabular}{lccccccc}
+% \toprule
+% \textbf{Category} & \textbf{Number } & \textbf{Text Tokens } & \textbf{Text Density} & \textbf{Components} & \textbf{Colors} & \textbf{Shapes}  \\
+% & (Total)& (Avg.) &(\%, Avg.)&(Avg.)&(Avg.)&(Avg.) \\
+
+% \midrule
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% Paper & 3200&12732 & 42.1 & 5.4 & 6.4 & 6.7  \\
+% Blog  & 20& 4047 & 46.0 & 4.2 & 5.5 & 5.3  \\
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% Survey  & 40&2179 & 43.8 & 5.8 & 7.0 & 6.7  \\
+% Textbook  & 40& 352 & 25.0 & 4.5 & 4.2 & 3.4  \\
+% \midrule
+% \rowcolor[rgb]{ .902,  .834,  .767}
+% \textbf{Total/Average} &\textbf{3300}&\textbf{10300} & \textbf{41.2} & \textbf{5.3} & \textbf{6.2} & \textbf{6.4} \\
+% \bottomrule
+% \end{tabular}
+% \end{adjustbox}
+% \vspace{-0.35cm}
+% \end{table}
+
+% % this area.
+
+% % \textbf{} 
+% % Recognizing that controlling structured information is difficult with direct text-to-image generation, we draw inspiration from the ControlNet~\citep{zhang2023adding} setup. We first ensure **Information Fidelity and Logical Accuracy** of a conditioning map by converting the core semantics of the text, $T_{method}$, into a precise symbolic conditioning map, $S$, while concurrently generating a textual description of its visual style, $A$. The second phase then focuses on **Aesthetic Quality** and **Textual Perfection**, rendering the layout based on the style text $A$ from the first phase and employing a correction mechanism to ensure the perfect presentation of text.
+
+% % Formally, our method constructs a mapping function $G$ that takes raw scientific text content $T$ as input and produces a publication-quality illustration $I_{final}$. The pipeline is designed not only to generate a coherent content layout but also to autonomously design and optimize a matching visual style. Inspired by ControlNet, we first guarantee \textbf{Information Fidelity and Logical Accuracy} via a symbolic conditioning graph, before pursuing \textbf{Aesthetic Quality} and \textbf{Textual Perfection} in rendering.  
+
+% % Our approach aims to build a mapping function $G$ that takes the original scientific text $T$ as input and generates a publication-ready illustration $I_{final}$. The core idea of this pipeline is that it not only generates the content's layout but also autonomously designs and optimizes a matching visual style. Recognizing that controlling structured information is difficult with direct text-to-image generation, we draw inspiration from the ControlNet setup. We first ensure **Information Fidelity and Logical Accuracy** of a conditioning map by converting the core semantics of the text, $T_{method}$, into a precise symbolic conditioning map, $S$, while concurrently generating a textual description of its visual style, $A$. The second phase then focuses on **Aesthetic Quality** and **Textual Perfection**, rendering the layout based on the style text $A$ from the first phase and employing a correction mechanism to ensure the perfect presentation of text.
+
+
+% % We define this as learning a mapping function, $G$, that transforms a long-form, unstructured scientific text, $T$, into a final, publication-ready illustration, $I_{\text{final}}$. The generation process can optionally be guided by a set of reference figures, $\mathcal{R}$, and a textual description of the desired artistic style, $A$. The function is thus defined as:
+% % \[
+% % I_{\text{final}} = G(T, \mathcal{R}, A)
+% % \]
+% % A successful transformation must satisfy three critical constraints: (1) \textbf{Structural Fidelity}: the illustration must accurately represent the core logic, components, and relationships described in text $T$; (2) \textbf{Aesthetic Quality}: the visual presentation must be clear, professional, and adhere to the specified style $A$; and (3) \textbf{Textual Perfection}: all textual elements within the illustration must be rendered with perfect clarity and accuracy, free from the artifacts common in generative models.
+
+% % Addressing a critical gap in evaluation, we introduce FigureBench, the first benchmark for scientific schematic generation that requires models to reason over the full content of a document and assesses performance across diverse scientific sources like papers, blogs, surveys, and textbooks. The goal of FigureBench is to generate a schematic diagram $I$ from a full-length scientific or technical document $T$. This diagram must serve as an effective visual summary, accurately abstracting the core concepts and their relationships described in $T$. Formally, the task is to learn a mapping $f: T \to I$ that maximizes a latent quality function encompassing content fidelity, communicative clarity, and visual aesthetics.
+
+% % We explicitly define the scope of FigureBench to focus on conceptual schematics—such as system architectures, flowcharts, and theoretical models—and exclude data-driven charts (e.g., bar graphs, line plots). This distinction is critical, as the FigureBench task presents a unique triad of challenges: (1) extreme context variation, requiring models to reason over documents ranging from concise blogs to dense research papers; (2) strict structural and topological fidelity, where logical correctness is paramount; and (3) high-level conceptual abstraction, demanding the ability to distill thousands of words into a handful of core visual components. To facilitate research on this new task, we introduce FigureBench, the first large-scale benchmark designed to address these challenges.
+
+
+% \textbf{Data Curation.} 
+% % To create a comprehensive benchmark, we developed FigureBench based on two principles: focusing solely on conceptual illustrations (excluding data-driven charts) and ensuring each visual element is clearly described in the source text. We start with 400 paper-figure pairs from the Research-14K dataset \citep{weng2025cycleresearcher}, which are pre-processed by GPT-5 to select the most relevant illustrations. These pairs were then annotated by two independent reviewers through binary classification, followed by cross-validation. Only pairs approved by both annotators were accepted, resulting in 200 high-quality samples for the final test set.
+% % Automatic scientific illustration aims to constructs a mapping function $G$ that takes long-form scientific text $T$ as input and generates a publication-quality illustration $I_{final}$. 
+% To curate a high-quality test set for this task, we began by randomly sampling 400 scientific papers from the Research-14K dataset \citep{weng2025cycleresearcher}. For each paper, we used GPT-5 to select the single illustration that best represented its core methodology. This resulted in 400 initial paper-figure pairs. We then filtered these pairs, retaining only conceptual illustrations (i.e., excluding data-driven charts) where each key visual element was explicitly described in the source text. To ensure high quality and consistency, each remaining pair was evaluated by two independent annotators. Only pairs that were approved by both annotators were included in the final dataset. This rigorous annotation process yielded a high Inter-Rater Reliability (IRR) of 0.91, resulting in a final test set of 200 high-quality samples.
+
+% To further enhance the diversity of our test data, we manually curated an additional 100 samples from three distinct sources: surveys, technical blogs, and textbooks. For the survey category, we collected structural diagrams (e.g., roadmaps and taxonomies) from recent AI surveys published on arXiv. Textbook samples were sourced from open-licensed educational platforms like OpenStax for their pedagogical clarity, while blog samples were hand-collected from technical outlets such as the ICLR Blog Track to capture modern and accessible visual styles. The entire curation process strictly adhered to open-source licenses, with a detailed breakdown provided in Appendix \ref{appendix:datadetails}. Finally, we leveraged our high-quality curated set of 300 samples (200 from papers and 100 from diverse sources) to fine-tune a vision-language model. This model then served as an automated filter, which we applied to the larger Research-14K corpus~\citep{weng2025cycleresearcher}, resulting in \textbf{a large-scale development set containing 3,000 scientific illustration samples}. 
+
+% \textcolor{darkblue}{We explicitly distinguish the roles of these datasets: the Test Set is strictly reserved for evaluation, whereas the Development Set is designed for training, development and experimental purposes. Although \textsc{AutoFigure} operates as an inference-only pipeline and does not utilize the Development Set for training, we provide this resource to facilitate future exploration of end-to-end or trainable methods by the community.}
+
+% % \xqj{
+% % Additionally, to enhance the diversity of the test data distribution, we also manually curate 100 samples from three other types including survey, technical blogs, and textbooks. For the survey category, we manually collect figures (e.g., structural diagrams such as roadmaps and taxonomies) from recent AI surveys published on arXiv. Textbook samples are sourced from open-licensed educational platforms like OpenStax for their pedagogical clarity, while blog samples are hand-collected from technical outlets (e.g., the ICLR Blog Track) to capture modern and accessible visual styles. The entire curation process strictly adhere to the open-source licenses, with a detailed breakdown provided in Appendix \ref{appendix:datadetails}.
+% % Finally, leveraging these expert-labeled illustration samples, we further fine-tune a vision-language model to serve as an automated filter for a larger scientific corpus (Research-14K), resulting a large-scale development set with \textbf{3,000} scientific illustration samples.} 
+% % 
+% % 
+% % To build the Large-Scale Development Set, we then leveraged these expert-labeled paper samples to fine-tune a Vision-Language Model, which served as an automated filter to process a larger corpus (Research-14K \citep{weng2025cycleresearcher}) and gather 3,000 samples. To supplement this core and ensure diversity, 
+% % we manually curated samples from three other domains. For the Survey category, we sourced figures from recent AI surveys on arXiv, specifically targeting common structural diagrams like roadmaps and taxonomies. Textbook examples were drawn from open-licensed educational platforms like OpenStax for their pedagogical clarity, while Blog samples were manually collected from technical outlets, including the ICLR Blog Track, to capture modern and accessible visual styles. The entire curation process strictly adhered to the open-source licenses of all source materials, with a detailed breakdown provided in Appendix \ref{appendix:datadetails}.
+
+
+% \textbf{Dataset Analysis.} To quantify the characteristics of FigureBench, we conduct a detailed statistical analysis, presented in Table \ref{tab:AutoFigure_analysis}. The analysis confirms the task's significant challenges. For instance, the average Text Tokens metric varies by over an order of magnitude between Textbooks (352) and Papers (12,732), highlighting the need for robust long-context reasoning. Additionally, the high average Text Density (41.2\%), which indicates the proportion of the image area occupied by text, and the varied number of Colors (averaging 6.2), both statistically analyzed using the InternVL 3.5 model \citep{wang2025internvl3_5}, underscore the challenge of balancing informational richness with visual clarity. Moreover, the mean number of Components (5.3) and Shapes (6.4) demonstrates the structural complexity. The collected paper data is also temporally recent from to 2025.
+
+% % We further analyzed the `Paper` subset, which constitutes the core of our benchmark: 37.7\% of papers are from Machine Learning, 33.2\% from Computer Vision, and 11.1\% from Natural Language Processing. 
+
+% % 加入对于Text Density、Colors、Confidence这三个指标的解释
+
+% % To quantify the abstraction difficulty, we consider two key ratios: the Text Compression Ratio (source text tokens vs. in-figure text tokens) and the Concept Abstraction Ratio (e.g., source text paragraphs per visual component). Our findings reveal a significant information bottleneck, confirming that models must distill extensive textual information into a sparse yet complete visual representation.
+
+% % Place your statistics table here
+
+
+% %%% zmj hold 
+% \textbf{Evaluation Metrics.} The evaluation of scientific illustrations is non-trivial, as traditional T2I metrics (e.g., FID~\citep{jayasumana2024rethinking}) are usually misaligned with the requirements for logical and topological correctness. Therefore, our evaluation protocol leverages the \textbf{VLM-as-a-judge paradigm} for structural reasoning and long-context comprehension, consisting of two complementary methods: (1) \textbf{Referenced scoring}, where a VLM is provided with the full text, the ground-truth figure, and the generated image. It assesses the generated image across three dimensions with eight sub-metrics: \textbf{Visual Design} (aesthetic quality, visual expressiveness, professional polish), \textbf{Communication Effectiveness} (clarity, logical flow), and \textbf{Content Fidelity} (accuracy, completeness, appropriateness). The VLM outputs a score and textual reasoning for each sub-dimension, with the Overall score calculated as their average. (2) \textbf{blind pairwise comparison.} In this evaluation setting, the VLM receives the full text and two images (ground-truth and generated) in a randomized order, without knowledge of which is the original. It is asked to select a winner (A, B, or Tie) based on seven criteria including aesthetic quality, clarity, information sophistication, accuracy, completeness, appropriateness, and provide a final choice for the better figure. We note that VLM-as-a-judge paradigm can not fully replace human expertise~\citep{lee2024prometheus, xie2025an}. To this end, we further conduct an \textbf{human evaluation}, for which we recruit ten first-authors to assess generated figures for their own work (\S \ref{subsec:human_evaluations}), providing a gold-standard measure of real-world utility.
+% % \textbf{We recognize, however, that even automated VLM scoring is not a substitute for genuine human expertise. To this end, this paper also introduces an extensive human evaluation, for which we recruited ten first-authors of published papers to assess generated figures for their own work across three distinct tasks (see Appendix \ref{appendix:humanevaluation})}, providing a gold-standard measure of real-world utility.
+
+
+
+
+% %To systematically evaluate the generation of scientific schematics, we introduce \textbf{FigureBench}, the first large-scale benchmark designed for the new task of Automated Scientific Schematic Generation (ASSG). FigureBench provides a comprehensive platform for assessing models on the core challenges of conceptual abstraction, structural fidelity, and visual clarity.
+
+% %\subsection{Task Definition and Data Composition}
+% %The goal of ASSG is to generate a schematic diagram $I$ from a piece of scientific or technical text $T$. This diagram must serve as an effective visual summary, accurately abstracting the core concepts and their relationships described in $T$. Our benchmark facilitates this task with two main components. The first is a \textbf{Gold-Standard Test Set} of 260 manually curated text-figure pairs, predominantly from research papers (200 pairs) and supplemented by diverse sources like surveys, textbooks, and blogs. The second is a \textbf{Large-Scale Development Set} containing 3,000 automatically collected samples from Computer Science papers, designed to support model training and exploration. The detailed data curation methodology, which involves a multi-stage filtering and human verification process, is provided in the Appendix \ref{appendix:figurebench}.
+
+
+
+
+% %筛选出概念图、模型框架图、流程图和结构图等科研示意图（而非实验结果图表、统计数据分析图或真实照片
+% %\subsection{Evaluation Metrics}
+% %Inspired by the \textit{VLM-as-a-judge} paradigm, we propose a comprehensive evaluation protocol based on two primary methods. The first, \textbf{Referenced Scoring}, tasks a powerful VLM to act as an expert reviewer, scoring a generated schematic $I_{gen}$ relative to the ground-truth $I_{gt}$ across eight criteria: \textbf{Accuracy}, \textbf{Aesthetic Quality}, \textbf{Appropriateness}, \textbf{Clarity}, \textbf{Completeness}, \textbf{Logical Flow}, \textbf{Professional Polish}, and \textbf{Visual Expressiveness}. The second method, \textbf{Win-Rate Calculation}, mitigates potential biases by employing a blind, pairwise comparison. In this setup, the VLM is shown both $I_{gt}$ and $I_{gen}$ in randomized order and must choose the better figure, from which a competitive win-rate is calculated.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1.1\linewidth]{figures-ab/High Level Overview Diagram.png}
+    % \vspace{-0.35cm}
+    \caption{A High-Level Overview of the
+     \textsc{AnimateBanana} pipeline}
+    \vspace{-0.35cm}
+    \label{fig:pipeline}
+\end{figure}
+
+\section{\textsc{AnimateBanana}}
+
+
+\textbf{Diagram animation is fundamentally a representation problem rather than a rendering problem.} Before a system can animate a scientific diagram, it must recover an editable representation of the diagram, determine a coherent narrative over its constituent components, and finally compile that narrative into an executable animation. Existing approaches largely operate in image space, directly generating animations or videos from raster inputs. While effective for visual synthesis, such formulations provide limited support for structured reasoning, user control, or post-generation editing.
+
+\textsc{AnimateBanana} addresses this challenge by progressively transforming a static diagram into increasingly structured intermediate representations. Rather than directly predicting an animation, the framework first converts the input figure into an editable programmatic representation, then derives an explicit animation plan describing what should be presented, in what order, and according to a user-specified presentation style, and finally synthesizes executable animation code that can be rendered in multiple deployment formats. Each representation exposes additional semantic structure while remaining grounded in the original diagram, allowing subsequent stages to operate at progressively higher levels of abstraction.
+
+As illustrated in Figure~\ref{fig:pipeline}, the framework comprises three stages. \textbf{Stage I (Diagram TikZifier)} translates the input diagram into a faithful and editable TikZ representation. \textbf{Stage II (Animation Planner)} analyzes the diagram together with its programmatic representation to construct a validated animation sequence. \textbf{Stage III (Diagram Animator)} generates executable TikZ animation code conditioned on the planned sequence and the requested animation style, before exporting the resulting animation to PDF, PPTX, MP4, GIF, and other deployment formats.
+
+Rather than relying on a monolithic model, \textsc{AnimateBanana} decomposes each stage into a collection of specialized agents that collaboratively solve well-defined subproblems, including scaffolding, layout planning, structural composition, animation planning, and animation synthesis. Within every stage, a dedicated critic verifies intermediate outputs and requests revisions before forwarding them downstream. This stage-wise refinement improves robustness, limits error propagation, and preserves modularity throughout the pipeline. The following subsections describe each stage of the framework in detail.
+
+\subsection{TikZ as the Intermediate Representation}
+
+Animating a scientific diagram requires multiple forms of reasoning over the same visual content. The system must first recover the diagram structure, determine a coherent presentation order, and finally synthesize animations that preserve both semantics and appearance of the original figure. Performing each of these reasoning tasks independently in image space is both redundant and error-prone. Instead, \textsc{AnimateBanana} first converts the input diagram into an explicit, editable program representation that becomes the common interface for all subsequent stages.
+
+The chosen program representation must expose the structure of the diagram while remaining fully editable. We instantiate this representation using TikZ. Unlike a raster image, TikZ represents diagram components as modular code blocks connected through symbolic references, making it straightforward to isolate, edit, and reuse individual substructures. Text labels and mathematical expressions remain editable, while relationships between diagram entities are encoded explicitly in the program rather than inferred from pixels. Moreover, TikZ provides a mature animation ecosystem through libraries such as \texttt{animate} and \texttt{animateinline}, enabling the generated representation to be compiled directly into native PDF animations without requiring external rendering frameworks. Consequently, in \textsc{AnimateBanana}, TikZ is not merely an output format; it is the program representation through which all subsequent stages communicate and reason about the diagram.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{figures-ab/Diagram TikZifier.png}
+    % \vspace{-0.35cm}
+    \caption{An Illustrative Overview of our Diagram TikZifier Module}
+    \vspace{-0.35cm}
+    \label{fig:tikzifier}
+\end{figure}
+
+\subsection{Stage I: Diagram TikZifier}
+
+The objective of the Diagram TikZifier is to construct a faithful and editable TikZ representation of the input scientific diagram. This representation serves as the foundation for all subsequent stages, making it essential that both the visual appearance and the structural organization of the original figure are preserved. Rather than generating the complete program in a single step, \textsc{AnimateBanana} progressively constructs the representation through five specialized agents, each solving a distinct subproblem in the translation process. Figure~\ref{fig:tikzifier} illustrates the overall architecture.
+
+\noindent\textbf{Scaffolder.}
+Every TikZ program begins with a document structure and the appropriate collection of libraries. Different classes of scientific diagrams (e.g. flowcharts, neural network architectures, and biochemical pathways) rely on different TikZ capabilities. The Scaffolder establishes this foundation by selecting the required libraries and generating a lightweight program template that subsequent agents progressively populate.
+
+\noindent\textbf{Global Stylist.}
+Scientific diagrams typically reuse a common visual vocabulary. For example, all processing blocks may share the same rounded rectangle style, while all information flows may use identical arrows and colors. Rather than rediscovering these properties for every object, the Global Stylist extracts them once and expresses them as reusable TikZ style definitions. This separation of style from geometry improves consistency while simplifying downstream code generation.
+
+\noindent\textbf{Layout Planner.}
+Before drawing individual objects, the system first recovers the global organization of the diagram. The Layout Planner deliberately ignores visual details and instead focuses on the spatial hierarchy: which components belong together, which groups are nested, and how major regions are arranged. The output is a hierarchical layout description containing placeholders rather than fully instantiated objects, providing a structural blueprint for subsequent generation.
+
+\noindent\textbf{Composer.}
+Given this blueprint, the Composer incrementally materializes the diagram. Placeholders are replaced with concrete TikZ objects, edges are routed between the appropriate entities, and hierarchical groups become nested scopes within the generated program. By separating structural planning from object generation, the Composer can focus exclusively on faithfully reconstructing the vector content of the original diagram.
+
+\noindent\textbf{Raster Integrator.}
+Not every element of a scientific diagram is best represented as vector graphics. Microscopy images, photographs, and externally rendered graphics are often more faithfully preserved as raster assets. The Raster Integrator identifies such elements and incorporates them into the generated TikZ program while maintaining precise spatial alignment with the surrounding vector content. The resulting program constitutes a complete, editable representation of the original figure.
+
+Each agent is accompanied by a dedicated critic that validates its output before it is forwarded to the next stage. This stage-wise verification improves robustness while preventing errors from propagating through the remainder of the pipeline.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{figures-ab/Animation Planner.png}
+    % \vspace{-0.35cm}
+    \caption{An Illustrative Overview of our Animation Planner Module}
+    \vspace{-0.35cm}
+    \label{fig:planner}
+\end{figure}
+\subsection{Stage II: Animation Planner}
+
+Stage I produces a faithful and editable TikZ representation of the input diagram. The next step is to determine how this diagram should be presented as an animation. Stage II transforms the recovered representation into an explicit animation sequence that specifies what should appear, in what order, and according to what level of abstraction. As shown in Figure~\ref{fig:planner}, this stage comprises three specialized agents that progressively construct and validate the animation sequence.
+
+\noindent\textbf{Parser.}
+While the Layout Planner in Stage~I recovers the geometric organization of the diagram, the Diagram Parser interprets its semantic organization. Operating on the recovered TikZ representation, it identifies logical entities, relationships, hierarchical groups, and their dependencies. For example, multiple blocks representing repeated computation may be grouped into a single conceptual module, while arrows are interpreted as information flow rather than independent graphical primitives. The resulting structured representation forms the semantic foundation for animation planning.
+
+\noindent\textbf{Sequencer.}
+Building upon the parsed representation, the Sequencer constructs the animation sequence. It determines the order in which entities are introduced, the granularity at which they are revealed, and how related components are grouped into successive animation steps. For example, an entire subsystem may first be presented as a single unit before progressively revealing its internal components, or multiple entities may be introduced simultaneously when they together represent a single conceptual operation. The output is a structured animation sequence that is independent of the eventual rendering style and can therefore support multiple presentation strategies.
+
+\noindent\textbf{Critic.}
+The Critic evaluates the generated animation sequence for logical consistency and narrative coherence. It verifies that all important entities and relationships are represented, checks that dependencies are respected, and identifies omissions, redundant steps, or inconsistent grouping decisions. Any detected issues are fed back to the planner for refinement before the validated animation sequence is forwarded to the Diagram Animator.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\linewidth]{figures-ab/Diagram Animator.png}
+    % \vspace{-0.35cm}
+    \caption{An Illustrative Overview of our Diagram Animator Module}
+    \vspace{-0.35cm}
+    \label{fig:animator}
+\end{figure}
+\subsection{Stage III: Diagram Animator}
+
+Stage II produces a structured animation sequence that specifies the logical progression of the diagram. The objective of Stage III is to realize this sequence as an executable animation while adhering to a user-specified presentation style. As shown in Figure~\ref{fig:animator}, this stage synthesizes the animation, verifies its correctness, and exports the result to multiple deployment formats.
+
+\noindent\textbf{Animation Designer.}
+The Animation Designer transforms the planned animation sequence into executable TikZ animation code. Given the TikZ representation, the animation sequence, and a user-specified animation style, it synthesizes the commands required to progressively reveal the diagram. For example, the same animation sequence can be realized using progressive reveal, animated bounding boxes, alpha masking, or region-wise highlighting without altering the underlying narrative. This separation of narrative planning from rendering enables multiple presentation styles to be generated from the same animation sequence.
+
+\noindent\textbf{Critic.}
+The Critic verifies that the synthesized animation faithfully realizes the planned sequence while adhering to the requested presentation style. It identifies inconsistencies such as missing animation steps, incorrect reveal order, timing conflicts, or style violations, and iteratively requests revisions until the generated animation satisfies both structural and stylistic requirements.
+
+\noindent\textbf{Diagram Exporter.}
+The generated TikZ animation constitutes an executable representation that can be rendered into multiple deployment formats. In particular, TikZ's animation ecosystem enables native interactive animations that can be viewed directly within standard PDF readers such as Adobe Acrobat and Foxit Reader, eliminating the need for external video players. The same animation can also be exported as PowerPoint presentations, MP4 videos, GIFs, SVG animations, and image sequences, allowing a single animation specification to support diverse presentation environments.
+
+\section{Scalable Training Data Generation}
+
+The primary challenge in training the shared VLM agents underlying \textsc{AnimateBanana} is not the availability of scientific diagrams, but the absence of supervision for the intermediate representations produced throughout the pipeline. Existing datasets primarily provide diagram images, captions, or, in some cases, programmatic reconstructions. In contrast, \textsc{AnimateBanana} requires supervision for multiple intermediate representations, including program scaffolds, global styles, layout plans, semantic parses, animation sequences, and executable animation code. No existing dataset provides aligned supervision across this sequence of representations. Obtaining such supervision manually is prohibitively expensive. Producing a faithful TikZ reconstruction of a scientific diagram requires both domain understanding and expertise in TikZ programming, while constructing coherent animation sequences further requires human judgment regarding traversal order, abstraction level, and presentation strategy. Consequently, scaling a purely manual annotation pipeline to the volume required for training modern vision-language models is impractical.
+
+To overcome this limitation, we adopt a hybrid data generation strategy that combines a relatively small collection of manually curated examples with scalable synthetic data generation. Rather than relying on a single synthesis mechanism, we generate synthetic supervision through two complementary strategies. The first expands existing diagrams by recombining compatible programmatic substructures while preserving visual style and structural consistency. The second synthesizes entirely new TikZ diagrams through a controlled LLM-driven generation pipeline conditioned on high-level diagram attributes. Together, these complementary strategies substantially increase both the scale and diversity of the training corpus while maintaining the quality of intermediate supervision. The following subsections describe these two synthesis strategies and the resulting training corpus.
+
+\subsection{Complementary Synthesis Strategies}
+
+Synthetic training data should simultaneously satisfy two competing objectives. First, it should remain faithful to the visual conventions and structural organization of real scientific diagrams. Second, it should provide sufficient diversity to expose the shared VLM to a broad range of layouts, styles, and semantic structures. Achieving both objectives through a single synthesis mechanism is difficult. Methods that rely solely on existing diagrams tend to preserve realism but are limited in diversity, whereas unconstrained generative models can produce diverse outputs but often violate structural or stylistic conventions.
+
+We therefore adopt two complementary synthesis strategies. The first expands the available training data by recombining compatible substructures from existing diagrams while preserving their underlying visual language. The second synthesizes entirely new diagrams through a controlled LLM-guided generation pipeline conditioned on high-level diagram attributes. Together, these strategies generate a diverse training corpus while preserving the structural fidelity required for learning intermediate program representations. Figure~\ref{fig:data_generation_pipeline} provides an overview of the proposed data generation pipeline.
+
+\noindent\textbf{Style-Preserving Diagram Recombination.}
+Scientific diagrams within the same visual family often share common design principles despite depicting different concepts. We exploit this observation by clustering diagrams according to their visual style and structural characteristics, extracting compatible programmatic substructures, and recombining them to synthesize new diagrams. Since recombination is performed in the program representation rather than pixel space, the generated diagrams preserve visual consistency while substantially increasing structural diversity.
+
+\noindent\textbf{Controlled LLM-Guided Diagram Synthesis.}
+While recombination expands existing design spaces, it cannot generate entirely new diagram families. We therefore complement it with a controlled LLM-guided synthesis pipeline that generates executable TikZ diagrams conditioned on high-level attributes such as scientific domain, diagram category, layout family, visual style, and target complexity. 
+
+For both the strategies, generated candidate diagrams are validated through a sequence of structural and syntactic checks before being admitted into the training corpus, ensuring both diversity and correctness.
+
+\subsection{Training Corpus Statistics}
+
+The resulting training corpus comprises approximately \textbf{[XX,XXX]} scientific diagrams collected from both manually curated and synthetically generated sources. Unlike existing collections that are largely centered around computer science architecture diagrams, our corpus spans a much broader spectrum of scientific communication, including \textbf{[computer science]}, \textbf{[biology]}, \textbf{[chemistry]}, \textbf{[physics]}, \textbf{[medicine]}, \textbf{[engineering]}, and other scientific domains. The corpus further captures substantial diversity in diagram category, visual appearance, structural organization, and representation complexity. We quantify these characteristics through representative statistics including the number of scientific domains, diagram categories, visual style clusters, structural complexity, and representation-level measures such as average TikZ lines of code (LoC), imported libraries, and reusable style macros. Summary statistics are reported in Table~\ref{tab:corpus_statistics}, while representative examples from different scientific domains are shown in Figure~\ref{fig:corpus_examples}.
+
+\section{AnimateBench: A Benchmark for Scientific Diagram Animation}
+
+Existing datasets are not designed to evaluate scientific diagram animation. They either focus on diagram understanding, code generation, or figure reconstruction, and consequently lack the annotations required to assess animation quality, narrative coherence, style controllability, and pedagogical effectiveness. To address this gap, we introduce \textbf{AnimateBench}, a benchmark specifically designed for evaluating automatic scientific diagram animation.
+
+AnimateBench consists entirely of manually curated diagrams that are excluded from the training corpus. Each benchmark instance is annotated with the intermediate representations required for evaluation. AnimateBench is organized into three complementary subsets, each targeting a different aspect of the evaluation process. The \emph{Programmatic} subset enables objective evaluation using exact ground-truth program representations. The \emph{Real Annotated} subset evaluates performance on authentic scientific figures through manually verified structural and semantic annotations. Finally, the \emph{User Study} subset assesses the pedagogical effectiveness of generated animations through controlled human studies.
+
+Together, these subsets enable a comprehensive evaluation of scientific diagram animation, ranging from objective structural correctness to human perception and learning outcomes. Figure~\ref{fig:animatebench_overview} presents an overview of AnimateBench, while Table~\ref{tab:animatebench_statistics} summarizes its composition, annotations, and evaluation coverage across the four animation metric groups introduced in Section~\ref{sec:metrics}.
+
+
+
+
+
+% \section{AnimaTIKZ}
+% \label{sec:AnimaTIKZ}
+% We introduce \textbf{\textsc{AnimaTIKZ}}, a generative framework designed to transform static scientific diagrams into dynamic, incremental animations. To address the challenge of animating diagrams while preserving their native aesthetic, we translate the input into a visual programmatic representation that maintains strict fidelity to the original source diagram. We selected TikZ as the foundational visual programming language, which serves as the common denominator across our architecture.We accomplish this transformation by decomposing the pipeline into three specialized modules, each delegating its operations to an autonomous swarm of agents:
+% \begin{enumerate}
+%     \item \textbf{Diagram Tikzifier}: Converts the diagram into its corresponding TikZ code representation.
+%     \item \textbf{Diagram Analyzer}: Parses the generated code, decomposes the diagram into discrete components, and determines the optimal sequential order for animation.
+%     \item \textbf{Diagram Animator}: Synthesizes the final output by animating the decomposed elements in the determined sequence, applying user-specified animation styles.
+% \end{enumerate}
+% The novelty of our contribution is x-fold. We necessitate the transformation of a diagram from the pixel space to the more structured, modularly defined vector graphic to allow for a more autonomous control of diagram components and its easy extraction via code-level isolation. This formulation also allows us to grant user agency at 
+
+
+
+
+% \begin{figure}
+%     \centering
+%     \includegraphics[width=\linewidth]{figures/AutoFigure_mainfigure.pdf}
+%     % \vspace{-0.35cm}
+%     \caption{An Overview of the
+%      \textsc{AutoFigure}, which decouples structural layout generation from aesthetic rendering. Stage 1 ensures structural fidelity by having a multi-agent system generate and iteratively self-correct a symbolic layout (SVG). Stage 2 renders the validated layout and employs an erase-and-correct module—using OCR and cross-verification—to guarantee perfect textual accuracy with high-fidelity vector overlays. \textbf{This figure is also produced by \textsc{AutoFigure} and serves as a qualitative showcase of its generation quality.}}
+%     \vspace{-0.35cm}
+%     \label{fig:placeholder}
+% \end{figure}
+
+% % We introduce \textbf{\textsc{AutoFigure}}, a novel framework for end-to-end automatic scientific illustration generation. Our approach is built upon the \textbf{Reasoned Rendering} paradigm, which decomposes the generation process into distinct, logical stages to systematically ensure both \textbf{visual clarity} and \textbf{semantic accuracy}.
+
+% We introduce \textbf{\textsc{AutoFigure}}, a \textbf{decoupled generative paradigm} for high-fidelity scientific illustration generation. Our approach tackles the challenge of producing \textbf{semantically accurate} and \textbf{visually coherent} figures by separating the reasoning and rendering processes. Our core innovation lies in a three-stage pipeline. First, we employ a large language model (LLM)  for \textbf{conceptual grounding}, distilling unstructured text into a structured, symbolic blueprint. Second, a novel self-refinement loop—simulating a dialogue between an AI designer and critic—iteratively optimizes this blueprint for structural coherence and logical consistency. Finally, a dedicated rendering stage, featuring a unique erase-and-correct strategy to ensure textual legibility. The following sections detail each phase of this pipeline.
+% % We present a three-stage pipeline: conceptual grounding with an LLM for distilling text into a symbolic blueprint; a self-refinement loop that iteratively optimizes this blueprint; and a rendering stage featuring an erase-and-correct strategy to ensure perfect textual legibility. The following sections detail each phase of this pipeline.
+
+% % We introduce \textbf{\textsc{AutoFigure}}, a novel decoupled generative paradigm designed to produce high-fidelity scientific illustrations. Our approach meticulously separates the reasoning and rendering processes, and the innovation lies in a three-stage pipeline . First, we employ a large language model (LLM) as a zero-shot conceptual parser, distilling unstructured text into a structured, symbolic blueprint. Second, a novel self-refinement loop—simulating a dialogue between an AI designer and critic—iteratively optimizes this blueprint for structural coherence and logical consistency. Finally, a dedicated rendering stage, featuring a unique erase-and-correct strategy for text, ensures the final output is not only aesthetically pleasing but also publication-ready with perfect textual legibility. The following sections detail each phase of this pipeline.
+
+% % we introduce \textbf{\textsc{AutoFigure}}, a novel framework built upon the \textbf{Reasoned Rendering} paradigm. This paradigm decomposes the generation process into distinct, logical stages, ensuring that informational integrity is validated before aesthetic details are applied.  This ensures that visual clarity and semantic accuracy are systematically addressed.
+
+% %Stage I focuses on validating informational integrity, while Stage II handles the aesthetic rendering, allowing for fine-grained control over both aspects.
+
+% \subsection{Stage I: Conceptual Grounding and Layout Generation}
+
+
+% \textcolor{darkblue}{Given a long-form scientific document $T$, Stage~I produces (i) a machine-readable symbolic layout $S_0$ (e.g., SVG/HTML) that specifies the 2D geometry and topology of the schematic, and (ii) a style descriptor $A_0$. We additionally rasterize $S_0$ into a layout reference image $I_0$ that will be used to condition the renderer in Stage~II.}
+
+% \paragraph{Concept Extraction and Symbolic Construction.}  
+
+% \textcolor{darkblue}{Given the input text $T$, the Concept-Extraction agent outputs (a) a distilled methodology summary $T_{\text{method}}$ and
+% (b) a set of entities and relations that will be visualized as nodes and directed edges.
+% We serialize this structure into a markup-based symbolic layout $S_0$ (SVG/HTML) and a category-conditioned style description $A_0$,
+% where $C \in \{\textsc{Paper},\textsc{Survey},\textsc{Blog},\textsc{Textbook}\}$ and $S_0$ encodes a directed graph $G_0=(V_0,E_0)$.
+% All stage prompts and the exact input--output schema are provided in Appendix~M for reproducibility.}
+
+% \begin{figure}[th]
+%     \centering
+%     \includegraphics[width=\linewidth]{figures/autofigure_case_paper.pdf}
+%     \caption{Examples showcasing the versatility of \textsc{AutoFigure} in generating complex scientific illustrations from a diverse range of academic texts. \textcolor{darkblue}{Note that we employ a unified default style (\textit{Delicate and cute cartoon comic style, using Morandi color palette}) solely to ensure visual consistency and readability for comparative analysis. This is a choice of presentation rather than a limitation of the method; users can freely specify or mix arbitrary styles as needed (see in Appendix \ref{app:style}). We present a diverse range of results in Appendix \ref{appendix:cases} to further illustrate our approach.}}
+%     \vspace{-0.3cm}
+%     \label{fig:example}
+% \end{figure}
+ 
+% \paragraph{Critique-and-Refine.}  
+% This step is the core of our "thinking" process, implementing a \textbf{self-refinement loop} that simulates a dialogue between an AI ``designer’’ and an AI ``critic’’, aiming to find the globally optimal layout through iterative search. First, the initial layout $(S_0, A_0)$ is evaluated to get an initial score $q_0$, which is set as the current best version: $(S_{best}, A_{best}) \leftarrow (S_0, A_0)$ and $q_{best} \leftarrow q_0$. Subsequently, in each iteration $i$, the system attempts to generate a superior solution:
+% \begin{align}
+%  F_{best}^{(i)} &= \text{Feedback}(\Phi_{critic}(S_{best}, A_{best})) \\
+%  (S_{cand}^{(i)}, A_{cand}^{(i)}) &= \Phi_{gen}(T_{method}, F_{best}^{(i)}), 
+% \end{align}
+% where the critic $\Phi_{critic}$ evaluates the best-performing layout $(S_{best}, A_{best})$ for alignment, balance, and overlap avoidance, producing textual feedback $F_{best}^{(i)}$. The generator $\Phi_{gen}$ then then uses this feedback to reinterprets $T_{method}$ and produce a candidate layout $(S_{cand}^{(i)}, A_{cand}^{(i)})$ with score $q_{cand}^{(i)}$. If $q_{cand}^{(i)} > q_{best}$, it replaces the current best. The loop continues until a preset limit of N iterations or until the score converges, yielding the final layout $(S_{final}, A_{final})$, a logically consistent, structurally coherent, and aesthetically balanced conditioning layout with style description.
+
+ 
+% \subsection{Stage II: Aesthetic Synthesis and Text Post-processing}
+
+
+% The final stage translates the structurally optimized symbolic blueprint $(S_{final}, A_{final})$ into a high-fidelity illustration $I_{final}$.
+
+
+
+% \textbf{Style-Guided Aesthetic Rendering.} We use a transformation function $\Phi_{prompt}$ \textcolor{darkblue}{(LLM-based)} to convert the $(S_{final}, A_{final})$ into an exhaustive text-to-image prompt, paired with a structural graph derived from $S_{final}$ (which precisely dictates the position and interconnection of all elements). These inputs are fed into a multimodal generative model to render an image $I_{polished}$ that is faithful to the layout structure and perfectly embodies the optimized aesthetic style.
+
+
+% \textbf{Ensuring Textual Accuracy.} \textcolor{darkblue}{We improve text legibility via an erase-and-correct process.
+% First, a non-LLM eraser $\Phi_{\text{erase}}$ removes all text pixels from $I_{\text{polished}}$ to produce a clean background
+% $I_{\text{erased}}=\Phi_{\text{erase}}(I_{\text{polished}})$.
+% Second, a OCR engine $\Phi_{\text{ocr}}$ extracts preliminary strings and bounding boxes
+% $(T_{\text{ocr}},C_{\text{ocr}})=\Phi_{\text{ocr}}(I_{\text{polished}})$.
+% Third, a multimodal verifier $\Phi_{\text{verify}}$ aligns each OCR string with the ground-truth labels $T_{\text{gt}}$ parsed from $S_{\text{final}}$
+% and outputs a corrected text map $T_{\text{corr}}=\Phi_{\text{verify}}(T_{\text{ocr}},T_{\text{gt}})$.
+% Finally, we render $T_{\text{corr}}$ as vector-text overlays at $C_{\text{ocr}}$ on top of $I_{\text{erased}}$ to obtain $I_{\text{final}}$.}
+
+% % This paradigm decouples the generation process into a sequence of distinct phases, ensuring logical integrity is established and verified before aesthetic details are applied. The process begins by addressing the challenge of \textbf{extreme context variation}, using a large language model to parse the full document and distill it into a concise symbolic blueprint. This blueprint then undergoes an iterative refinement process designed to achieve \textbf{high-level conceptual abstraction} and guarantee \textbf{structural and topological fidelity}. Finally, a dedicated rendering and finishing phase produces a visually compelling output while ensuring all text is perfectly legible, meeting a publication-ready standard. The following subsections detail each phase of this pipeline.
+ 
+
+% % \subsection{Phase 1: Parse and Plan - From Unstructured Text to a Symbolic Blueprint}
+% % The initial phase aims to convert an unstructured scientific document $T$ into a structured, machine-readable symbolic layout blueprint, denoted as $L_0$. This stage performs the critical tasks of comprehension and initial ideation. We model this process using a large language model (LLM) as a zero-shot reasoning engine, which performs two sub-steps: \textbf{Core Concept Extraction} to identify key entities and their relationships, and \textbf{Symbolic Scaffolding} to map these concepts onto a graph-based structure. The output, $L_0$, is a graph structure $G_0 = (V_0, E_0)$. In this graph, $V_0 = \{v_1, v_2, \dots, v_k\}$ is a set of vertices representing placeholder objects, where each vertex $v_i$ is a tuple $v_i = (\text{id}_i, \text{pos}_i, \text{size}_i, \text{label}_i, \text{desc}_i)$ containing attributes for a unique identifier, initial position, size, external text label, and a detailed textual description for the content to be rendered. $E_0$ is a set of directed edges that represent the connectors between objects, defining the schematic's topology.
+
+% % \subsection{Phase 2: Iterative Refinement - The "Thinking" Loop}
+% % This phase is the core of \textsc{AutoFigure}'s "thinking" process. Its objective is to take the initial, often imperfect, layout blueprint $L_0$ and iteratively optimize it into a final blueprint $L^*$ that is logically sound, structurally clear, and aesthetically balanced. This is achieved through a \textbf{Critique-and-Refine} loop, simulating a dialogue between an AI "designer" and an AI "reviewer." In each iteration $t$, the process begins with a \textbf{Critique} step, where a VLM assesses the current layout $L_t$ based on internal principles like alignment and balance, generating a structured critique. This is followed by a \textbf{Refine} step, where an LLM receives the layout and critique, interpreting the revisions to modify the symbolic representation and produce an improved blueprint $L_{t+1}$. This loop continues until a quality score surpasses a predefined threshold or a maximum number of iterations is reached, whichever occurs first. We model this as a non-differentiable optimization problem aiming to find a layout $L^*$ that maximizes a latent quality function $Q(L)$:
+% % \begin{equation}
+% %     L^* = \arg\max_{L} Q(L)
+% % \end{equation}
+% % The optimization proceeds iteratively. The critique function $f_{\text{critique}}$ produces a quality score vector $\mathbf{s}_t$ and natural language feedback $\delta_t$. The refinement function $f_{\text{refine}}$ then generates the subsequent layout based on this feedback. This can be described as $(\mathbf{s}_t, \delta_t) = f_{\text{critique}}(\text{render}(L_t), T; \theta_{\text{critique}})$ and $L_{t+1} = f_{\text{refine}}(L_t, \delta_t; \theta_{\text{refine}})$.
+
+% % \subsection{Phase 3: Aesthetic Rendering - The "Drawing" Execution}
+% % The final stage translates the structurally perfected symbolic blueprint $L^*$ into a high-fidelity, visually rich final schematic $I_{\text{final}}$. This is accomplished by a state-of-the-art multimodal generative model, e.g. GPT-Image, that accepts both structural and textual inputs. The final layout blueprint $L^*$ is provided as a strong structural prior (akin to a ControlNet input), dictating the precise placement and interconnection of all elements. Concurrently, the descriptive text (`desc`) associated with each placeholder in $L^*$ guides the content generation within each specific region. To ensure maximum clarity and overcome a common failure mode of purely diffusion-based models, the model first renders the non-textual visual elements. Subsequently, the textual labels (`label`) from the perfected blueprint $L^*$ are rendered as clean vector graphics and are precisely superimposed onto the generated image. This ensures that all text is sharp and perfectly legible.
+
+% %不是first renders the non-textual visual elements, 是直接把包括文字在内的所有内容渲染出来，再用ocr提取文字位置和内容信息（library.json），然后：1.用了一段代码检测library.json中重叠的文本位置信息并将重叠文本框改为相邻文本框（修正文字位置以便于后续贴文字）；2.再让llm根据svg代码修正library.json可能有错的文字内容（修正文字内容（主要出于两方面原因：1.渲染得到的文字本身可能有误；2.ocr检测到的文字也可能有误））。
+% %然后用clipdrop去除渲染后的图片（polished.png）中的文字，得到不含文字的图片（erased.png）
+% %最后让vlm根据上述修正后的library.json使用python-pptx生成代码。（输入给vlm的内容包括：polished.png和erased.png来参考文字字体、颜色等内容生成匹配图片风格的文字; library.json提供文字位置和内容信息）
+
+% \begin{table*}[!t]
+% \centering
+% \caption{A comprehensive user evaluation across four generation tasks, with updated methods and scoring. Win-Rate is calculated through blind pairwise comparisons against the reference, indicating the percentage of times a method is selected as producing more suitable illustrations for the descriptive text.}
+% \label{tab:main_evaluation}
+% \begin{adjustbox}{width=0.965\textwidth}
+% \begin{tabular}{@{}lrrrrrrrrr|r@{}}
+% \toprule
+% \toprule
+% & \multicolumn{3}{c}{Visual Design} & \multicolumn{2}{c}{Communication} & \multicolumn{3}{c}{Content Fidelity} & & \\
+% \cmidrule(lr){2-4} \cmidrule(lr){5-6} \cmidrule(lr){7-9}
+% \textbf{Method} & Aesthetic & Express. & Polish & Clarity & Flow & Accuracy & Complete. & Appropriate. & \textbf{Overall} & \textbf{Win-Rate} \\
+% \midrule
+
+% \multicolumn{1}{c}{\textbf{BLOG}} \\
+% \midrule
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% HTML-Code       & 5.61          & 4.50          & 5.79          & 7.42          & 7.53          & 7.26          & 6.34          & 6.76          & 6.40 & 30.0\% \\
+% SVG-Code        & 4.39          & 3.61          & 4.09          & 5.68          & 5.71          & 5.98          & 5.05          & 5.17          & 4.96 & 45.0\% \\
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% GPT-Image       & 3.80          & 3.00          & 3.60          & 5.83          & 5.70          & 4.62          & 3.92          & 4.67          & 4.39 & 10.0\% \\
+% Diagram Agent   & 1.95          & 1.47          & 1.61          & 2.16          & 2.05          & 2.34          & 1.76          & 2.00          & 1.92 & 0.0\% \\
+% \rowcolor[rgb]{ .902,  .834,  .767}
+% \textsc{AutoFigure}      & \textbf{7.53} & \textbf{7.25} & \textbf{7.44} & \textbf{8.04} & \textbf{8.38} & \textbf{7.32} & \textbf{6.65} & \textbf{8.23} & \textbf{7.60} & \textbf{75.0\%} \\
+% \midrule\midrule
+
+% \multicolumn{1}{c}{\textbf{SURVEY}} \\
+% \midrule
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% Gemini-HTML     & 4.77          & 3.59          & 4.88          & 6.99          & 6.52          & \textbf{8.04} & 7.04          & 5.55          & 5.92 & 37.5\% \\
+% Gemini-SVG      & 4.28          & 3.16          & 4.25          & 6.51          & 6.06          & 7.25          & 6.16          & 5.04          & 5.34 & 44.1\% \\
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% GPT-Image       & 3.65          & 2.85          & 3.71          & 6.28          & 5.79          & 5.87          & 4.59          & 4.26          & 4.63 & 17.5\% \\
+% Diagram Agent   & 2.11          & 1.55          & 1.77          & 2.69          & 2.67          & 2.86          & 2.06          & 2.07          & 2.22 & 0.0\% \\
+% \rowcolor[rgb]{ .902,  .834,  .767}
+% \textsc{AutoFigure}      & \textbf{6.91} & \textbf{6.31} & \textbf{6.65} & \textbf{7.50} & \textbf{7.44} & 7.54          & \textbf{6.75} & \textbf{6.83} & \textbf{6.99} & \textbf{78.1\%} \\
+% \midrule\midrule
+
+% \multicolumn{1}{c}{\textbf{TEXTBOOK}} \\
+% \midrule
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% Gemini-HTML     & 5.36          & 4.24          & 5.31          & 7.49          & 7.09          & 8.29          & 7.75          & 6.75          & 6.53 & 72.5\% \\
+% Gemini-SVG      & 4.90          & 3.99          & 4.81          & 6.91          & 6.74          & 8.03          & 7.33          & 6.28          & 6.12 & 76.9\% \\
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% GPT-Image       & 4.60          & 4.07          & 4.53          & 6.98          & 6.60          & 6.83          & 5.93          & 5.85          & 5.67 & 55.0\% \\
+% Diagram Agent   & 2.03          & 1.51          & 1.63          & 2.51          & 2.20          & 3.24          & 2.73          & 2.17          & 2.25 & 0.0\% \\
+% \rowcolor[rgb]{ .902,  .834,  .767}
+% \textsc{AutoFigure}      & \textbf{7.51} & \textbf{7.33} & \textbf{7.21} & \textbf{8.13} & \textbf{8.27} & \textbf{8.69} & \textbf{8.22} & \textbf{8.64} & \textbf{8.00} & \textbf{97.5\%} \\
+% \midrule\midrule
+
+% \multicolumn{1}{c}{\textbf{PAPER}} \\
+% \midrule
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% HTML-Code       & 5.90          & 5.04          & 5.84          & 7.17          & 7.38          & \textbf{6.99} & 6.37          & 6.15          & 6.35 & 11.0\% \\
+% SVG-Code        & 5.00          & 4.19          & 4.89          & 6.34          & 6.48          & 6.15          & 5.53          & 5.37          & 5.49 & 31.0\% \\
+% \rowcolor[rgb]{ .949,  .949,  .949} 
+% GPT-Image       & 4.24          & 3.47          & 4.00          & 5.63          & 5.63          & 4.77          & 4.08          & 4.25          & 3.47 & 7.0\% \\
+% Diagram Agent   & 2.25          & 1.73          & 2.04          & 2.67          & 2.49          & 2.11          & 1.72          & 1.94          & 2.12 & 0.0\% \\
+% \rowcolor[rgb]{ .902,  .834,  .767}
+% \textsc{AutoFigure}      & \textbf{7.28} & \textbf{6.99} & \textbf{6.92} & \textbf{7.34} & \textbf{7.87} & 6.96          & \textbf{6.51} & \textbf{6.40} & \textbf{7.03} & \textbf{53.0\%} \\
+
+
+% \toprule\toprule
+% \end{tabular}
+% \end{adjustbox}
+% \end{table*}
+
+
+
+
+
+
+% % \section{Experiments}
+
+
+
+% % \textcolor{darkblue}{To comprehensively evaluate \textsc{AutoFigure}, we conduct (i) automated evaluations on FigureBench~(\S~\ref{subsec:automated_evaluations}),
+% % (ii) a domain-expert study with paper-authors~(\S~\ref{subsec:human_evaluations}),
+% % and (iii) controlled ablations isolating key modules~(\S~\ref{subsec:ablation}).
+% % Figure~\ref{fig:example} provides representative qualitative results; beyond these in-text examples, the appendix contains substantially extended evidence,
+% % including: detailed qualitative case studies across diverse papers (Appendix~\S~\ref{sec:qualitative}); additional evaluations under open-source model deployments (Appendix~\ref{appendix:opensource_evaluation});
+% % an extended blind pairwise comparison with absolute quality judgments (Appendix~\ref{app:extended_pairwise}); module-level analyses of the text-refinement/post-processing component (Appendix~\ref{app:ablation_text});
+% % efficiency and cost analysis under different deployment settings (Appendix~\ref{app:efficiency}); a human-audited sanity check of automated dataset statistics (Appendix~\ref{app:sanity_check}); further results on style controllability and diversity (Appendix~\ref{app:style}); and further results on extended baselines(Appendix~\ref{app:extended_baselines}).}
+% % % are presented in showcasing the versatility of \textsc{AutoFigure} in generating complex scientific illustrations~(e.g., procedural flows, algorithmic pipelines) from a diverse range of academic texts.
+
+
+% % % \subsection{RQ1: Does \textsc{AutoFigure} Outperform Existing Methods in Comprehensive Automated Evaluations}
+% % \subsection{Automated Evaluations}
+% % \label{subsec:automated_evaluations}
+% % \textbf{Experimental Setup.} We assess \textsc{AutoFigure} against three distinct types of baseline methods: (1) End-to-end text-to-image methods \citep{sun2024autoregressive}, where we used the GPT-Image  model \citep{hurst2024gpt} to directly generate a scientific schematic from the paper's text based on instructions; (2) Text-to-code methods, where we use a LLM to generate corresponding HTML Code and SVG Code \citep{rodriguez2025starvector,malashenko2025leveraging,yang2024matplotagent}, which are then automatically rendered into images; and (3) Multi-agent frameworks, represented by Diagram Agent \citep{wei2025words}, which automates workflow design. For \textsc{AutoFigure} and other decoupled baselines, we use Gemini-2.5-Pro as the sketch model and GPT-Image as the rendering model. 
+
+% % %As detailed in Table \ref{tab:main_evaluation}, \textsc{AutoFigure} achieves the highest Overall scores across all document categories: Blog (7.60), Survey (6.99), Textbook (8.00), and Paper (7.03), with Win-Rates of 75.0\%, 78.1\%, 97.5\%, and 53.0\% respectively. The results show that \textbf{\textsc{AutoFigure} consistently surpasses all baselines in both automated evaluations and human preferences}, demonstrating superior visual quality, communicative effectiveness, and content fidelity. \textsc{AutoFigure} also excels in most sub-metrics under Visual Design Excellence and Communication Effectiveness, producing schematics that are both attractive and comprehensible. The results reveal fundamental limitations of existing paradigms: code-generation methods (Gemini-HTML/SVG) sacrifice visual aesthetics for structural control, achieving moderate Win-Rates (30-77\%), while GPT-Image suffers from poor content accuracy with consistently low Win-Rates (7-55\%). For instance, in the Paper category, text-to-code methods' Aesthetic scores (5.90 and 5.00) significantly lag behind \textsc{AutoFigure}'s (7.28), limiting their Win-Rates to 11.0\% and 31.0\%. GPT-Image scores lowest in content accuracy (4.77), yielding only 7.0\% Win-Rate. Diagram Agent performs poorly across all dimensions with 0\% Win-Rate in every category, underscoring the task's difficulty without a specialized approach.
+
+
+% As detailed in Table \ref{tab:main_evaluation}, \textsc{AutoFigure} achieves the highest Overall score across all four document categories: Blog (7.60), Survey (6.99), Textbook (8.00), and Paper (7.03). Notably, \textsc{AutoFigure} also dominates in Win-Rate evaluations through blind pairwise comparisons, achieving 75.0\% for Blog, 78.1\% for Survey, an exceptional 97.5\% for Textbook, and 53.0\% for Paper. The results demonstrate that \textbf{\textsc{AutoFigure} consistently surpasses all baseline methods in both automated evaluations and human preferences}, showcasing a superior balance of visual quality, communicative effectiveness, and content fidelity.
+% Moreover, \textsc{AutoFigure} achieves the best performance in most sub-metrics under Visual Design Excellence and Communication Effectiveness, indicating its ability to produce schematics that are both attractive and easy to understand. The Win-Rate results particularly highlight the inherent limitations of existing paradigms: code-generation methods (Gemini-HTML/SVG) achieve moderate Win-Rates (30-77\%) but sacrifice visual aesthetics for structural control, while the end-to-end model GPT-Image shows consistently low Win-Rates (7-55\%) due to poor content accuracy.
+% For instance, in the Paper category, the Aesthetic scores of text-to-code methods (5.90 and 5.00) are significantly lower than \textsc{AutoFigure}'s (7.28), limiting their Win-Rates to 11.0\% and 31.0\% respectively. Conversely, GPT-Image exhibits critical weakness in content accuracy, scoring the lowest among generative models in this metric for the Paper category (4.77), resulting in only 7.0\% Win-Rate. The multi-agent framework, Diagram Agent, consistently achieves 0\% Win-Rate across all categories while performing poorly in all dimensions, underscoring the profound difficulty of this task without a specialized, structured approach.
+
+% \begin{figure*}[t]
+%     \centering
+%     \includegraphics[width=0.9\linewidth]{figures/human_evaluate.pdf}
+%     \caption{Human evaluation results from 10 first-author experts assessing AI-generated figures for 21 of their own publications. The comprehensive study required experts to perform three tasks: (a) a forced-choice holistic ranking of six AI models against the original reference to determine a win rate, (b) a publication intent selection, and (c-e) multi-dimensional scoring on a 1-5 Likert scale for accuracy, clarity, and aesthetics.}
+%     \label{fig:human_evaluate}
+%     \vspace{-1em}
+% \end{figure*}
+
+% % \textbf{\textsc{AutoFigure} consistently surpasses all baseline methods in automated evaluations, demonstrating a superior balance of visual quality, communicative effectiveness, and content fidelity. }
+ 
+% % This consistent leadership highlights the robustness and generalizability of our proposed framework. 
+
+
+
+
+% %%% zmj hold 
+% \subsection{Human Evaluation with Domain Experts}
+% % \subsection{Does \textsc{AutoFigure} Meet the Publication Standard of Domain Experts?}
+% \label{subsec:human_evaluations}
+
+% \textbf{Experimental Setup.} To evaluate whether the figures generated by \textsc{AutoFigure} meet the publication-ready standards of the relevant domain experts, we recruited 10 human experts to assess AI-generated figures based on their own first-author publications. The evaluation involved three tasks across 21 high-quality papers: (1) Multi-dimensional scoring: Each figure was rated on a 1–5 Likert scale for Accuracy, Clarity, and Aesthetics. (2) Forced-choice ranking: Experts ranked all AI-generated figures against the original human-authored references. (3) Publication intent selection: Experts indicated which figures they would choose to include in a camera-ready paper.
+% % 为了检验 \textsc{AutoFigure}生成的图片质量是否meet the Publication-ready Standard of 对应的Domain Experts，we recruited 10 human experts to assess AI-generated figures for their own first-author publications. The evaluation consisted of three tasks on 21 high-quality papers: (1) multi-dimensional scoring of each figure on a 1-5 Likert scale for Accuracy, Clarity, and Aesthetics; (2) a forced-choice ranking of all AI-generated figures against the original human-authored reference; and (3) a publication intent selection, where experts chose which figures they would use in a camera-ready paper.
+
+
+% %%% zmj hold 
+% The results are shown in Figure \ref{fig:human_evaluate}, showing that \textbf{\textsc{AutoFigure}'s quality is judged far superior to other AI systems and closely approaches the human-created originals} by resolving the key trade-off between accuracy and aesthetics. The win-rate analysis in Figure \ref{fig:human_evaluate}(a) shows \textsc{AutoFigure} achieves an 83.3\% win rate against oth er models, second only to the original human-authored reference (96.8\%). Notably, as shown in Figure \ref{fig:human_evaluate}(b), 66.7\% of experts are  willing to adopt figures generated by \textsc{AutoFigure} for a camera-ready version of their own papers, indicating that it can produce figures that meet the standards of real-world academic publishing. In contrast, the performance of baseline methods is highly polarized. GPT-Image achieves better aesthetics at the cost of low accuracy, while SVG Code has slightly better accuracy but poor aesthetics.
+
+
+
+
+
+% \begin{figure}
+%     \centering
+%     \includegraphics[width=\linewidth]{figures/comprehensive_performance_2x2.pdf}
+    
+%     \caption{Ablation studies of the \textsc{AutoFigure} framework. Subplots compare different backbone models on (a) pre-rendering symbolic layouts versus (b) final rendered outputs. Also shown are (c) performance scaling with increased test-time refinement iterations and (d) the impact of different intermediate sketch formats.} 
+%     % The high scores in Figure 5(d) are attributed to a specialized evaluation prompt that focused on the technical strengths of vector formats}
+%     \label{fig:comprehensive}
+% \end{figure}
+
+% % —\textsc{AutoFigure} excels by delivering high and balanced performance across all critical dimensions: Accuracy (4.00/5), Clarity (4.14/5), and Aesthetics (4.24/5). This result empirically validates that our decoupled "thinking" and "drawing" paradigm successfully integrates logical integrity with visual sophistication.
+
+
+% % \textbf{Yes; human evaluation by original authors reveals that \textsc{AutoFigure} is the only AI method considered suitable for real-world academic publication.} The most telling result comes from the publication intent assessment, shown in Figure \ref{fig:human_evaluate}(b). A remarkable 66.7\% of experts were willing to adopt figures generated by \textsc{AutoFigure} for a camera-ready version of their own papers. In stark contrast, no other AI model surpassed a 5\% acceptance rate. 
+
+% % \textbf{In direct comparisons, \textsc{AutoFigure}'s quality is judged far superior to other AI systems and closely approaches the human-created originals by resolving the key trade-off between accuracy and aesthetics.} The win-rate analysis in Figure \ref{fig:human_evaluate}(a) shows \textsc{AutoFigure} achieves an 83.3\% win rate against other models, second only to the original human-authored reference (96.8\%). The multi-dimensional scoring in Figures \ref{fig:human_evaluate}(c-e) pinpoints the reason for this success. While baselines are polarized—GPT-Image achieves better aesthetics (2.33) at the cost of low accuracy (2.05), while SVG Code has slightly better accuracy (2.52) but poor aesthetics (1.81)—\textsc{AutoFigure} excels by delivering high and balanced performance across all critical dimensions: Accuracy (4.00/5), Clarity (4.14/5), and Aesthetics (4.24/5). This result empirically validates that our decoupled "thinking" and "drawing" paradigm successfully integrates logical integrity with visual sophistication.
+
+
+% % \subsection{RQ3: What Are the Key Factors Driving \textsc{AutoFigure}'s Success?}
+
+% %%% zmj hold 
+% \subsection{Ablation Studies}
+% \label{subsec:ablation}
+
+% % \textbf{Experimental Setup.} We conducted three controlled ablation studies to analyze the key factors in our framework. (1) Component Analysis: To compare reasoning models and intermediate formats, we varied one component at a time while holding all other conditions constant. (2) Rendering Stage Evaluation: To score the pre-rendering symbolic layouts, we converted the SVG to a PNG and provided it to our VLM judge with a textual description of its components. (3) Refinement Loop Impact: To isolate the effect of the refinement loop, we fixed the backbone models and varied the number of "thinking" iterations from 0 to 5.
+
+
+
+% % \textbf{The iterative "thinking" process is the core engine of quality improvement, with performance directly correlating to the number of refinement steps.}  we conducted a test-time scaling experiment. As shown in Figure \ref{fig:comprehensive}(c), the Overall performance score steadily rises from an initial 6.28 (zero iterations) to 7.14 after five iterations. This monotonic improvement demonstrates that the refinement loop is a genuinely effective optimization process. Each iteration systematically identifies and corrects logical and aesthetic flaws in the layout, validating the central hypothesis that more "thinking" yields a substantially better final product.
+
+
+% %%% zmj hold 
+
+% \begin{figure}[!ht]
+%     \centering
+%     \includegraphics[width=\linewidth]{figures/AutoFigure_case.pdf}
+%     %\vspace{-0.75cm}
+%     % \caption{A qualitative comparison for Generated InstructGPT \citep{ouyang2022training}' Figure. Baseline methods either misrepresent the workflow's structure (c), produce cluttered layouts (b, d), or lack explanatory richness (e). \textsc{AutoFigure}, however, showcases its capability to generate publication-ready illustrations by successfully decoupling logic from aesthetics. It accurately models the complex three-step process and then renders a visually compelling infographic with thematic elements and concrete examples, achieving both scientific fidelity and high pedagogical value.}
+    
+%     \caption{Qualitative comparison for generating a scientific illustration of the InstructGPT framework \citep{ouyang2022training}. We compare the original human design (a) with illustrations generated by various baseline methods (b-e) and our \textsc{AutoFigure} (f). Notably, \textsc{AutoFigure} achieves both high scientific fidelity and aesthetic appeal, yielding a publication-ready result.}
+%     % Baseline methods either misrepresent the workflow's structure (c), produce cluttered layouts (b, d), or lack explanatory richness (e). 
+%     % \textsc{AutoFigure}, however, showcases its capability to generate publication-ready illustrations by successfully decoupling logic from aesthetics. It accurately models the complex three-step process and then renders a visually compelling infographic with thematic elements and concrete examples, achieving both scientific fidelity and high pedagogical value.}
+%     \label{fig:case}
+% \end{figure}
+
+
+
+% \textbf{Analysis on pre-rendering symbolic layouts. }By comparing the pre-rendering scores in Figure \ref{fig:comprehensive}(a) with the post-rendering scores in Figure \ref{fig:comprehensive}(b), we observe a consistent and significant improvement in Visual Design and Overall scores for all backbone models. For instance, with GPT-5 as the reasoning core, the Overall score jumps from 6.38 to 7.480 after rendering. This proves the effectiveness of the final drawing phase. The decoupled rendering stage effectively enhances visual appeal without compromising the schematic's structural integrity and content fidelity.
+
+
+
+% \textbf{Analysis on refinement loop.} To investigate the impact of the critique-and-refine loop, we conduct a test-time scaling experiment that fixes the backbone models and varies the number of ``thinking'' iterations from 0 to 5.  As shown in Figure \ref{fig:comprehensive}(c), the overall performance score steadily rises from an initial 6.28 (zero iterations) to 7.14 after five iterations. This improvement demonstrates that the refinement loop is an effective optimization process. 
+
+
+% \textbf{Analysis on reasoning models and intermediate formats.} The figure quality is also heavily influenced by the choices of the reasoning model and the intermediate data format. Figures \ref{fig:comprehensive}(a) and \ref{fig:comprehensive}(b) show that stronger reasoning models like Claude-4.1-Opus produce superior layouts compared to others. Furthermore, Figure \ref{fig:comprehensive}(d) highlights the critical role of the intermediate representation, as expressive and structured formats like SVG (8.98) and HTML (8.85) can generate the entire figure in one coherent file, while PPT's (6.12) requirement for multiple incremental code insertions introduces inconsistencies that cause the final output to diverge from the original paper's content.
+
+% \textbf{Case study.}
+% This case highlights \textsc{AutoFigure}'s advantage in jointly preserving \emph{semantic structure} and \emph{visual readability} for multi-stage procedural diagrams. 
+% Compared with the original figure \ref{fig:case} (a), \textsc{Diagram Agent} in Figure \ref{fig:case} (b) collapses the process into an overly thin, low-information chain, losing the essential stage separation and the data artifacts (demonstrations, comparisons, reward scores) that define the RLHF workflow. 
+% The end-to-end generator \textsc{GPT-Image} in Figure \ref{fig:case} (c) captures only a coarse flow and exhibits inconsistent typography and crowded labeling, which undermines legibility and instructional value. 
+% Code-only baselines Figure \ref{fig:case} (d--e) better maintain a box-and-arrow skeleton, but the outputs remain visually sterile and fragmented (e.g., weak hierarchy, poor spacing, and limited affordances to emphasize key roles such as labelers and reward modeling). 
+% In contrast, \textsc{AutoFigure} in Figure \ref{fig:case} (f) explicitly decomposes the content into three aligned stages (SFT, RM, PPO), renders consistent typographic hierarchy and spacing, and uses semantically grounded icons and callouts to make roles and data transformations immediately interpretable, yielding a polished infographic without sacrificing the core scientific fidelity.
+
+
+% % \section{Conclusion}
+% % Generating high-quality scientific illustrations from long-form scientific texts poses new challenges for existing automated scientific visuals generation technologies. To advance this field, this paper introduced FigureBench, a comprehensive benchmark consisting of 3,300 high-quality long-form scientist text–figure pairs, covering diverse types of scientific texts. Building upon FigureBench, we further proposed \textsc{AutoFigure}, an agentic framework based on the Reasoned Rendering paradigm, which generates accurate and visually appealing illustrations in an iterative process. Through automatic evaluations grounded in the VLM-as-a-judge paradigm and human expert assessments, we demonstrated that \textsc{AutoFigure}’s ability to generate scientifically rigorous and aesthetically appealing illustrations that meet the standards of academic publishing. By automating a critical bottleneck in scientific communication, our work lays the groundwork for AI-driven scientific visual expression, enabling more efficient and accessible creation of publication-ready illustrations.
+
+% % \section*{Acknowledgement}
+% % This publication has been supported by the National Natural Science Foundation of China (NSFC) Key Project under Grant Number 62336006 and 625B2152, and the 2025 Dean's Special "PhD Student Project" of the School of Engineering, Westlake University.
+
+% % We sincerely thank Yiran Ding, Zhiyuan Ning, Fang Guo, Guangsheng Bao, Hongbo Zhang, and Shulin Huang for their contributions to this paper.
+
+% % % 我们由衷感谢Yiran Ding, Zhiyuan Ning, Fang Guo, Guangsheng Bao, Hongbo Zhang和Shulin Huang对于本文的付出。
+
+% % % By automating a key bottleneck in scientific communication, our work provides a foundational visual expression capability for the next generation of AI scientists.
+% % % Generating high-quality scientific illustration from long-form scientific texts 对现有的Automated Scientific Visuals Generation技术提出了新的挑战。为促进该领域的发展，本文 introduced FigureBench, a comprehensive benchmark covering diverse types of scientific texts. It consists of 3,300 high-quality long-form scientist text–figure pairs. Based on FigureBench, we further proposed \textsc{AutoFigure}, an agentic framework based on the Reasoned Rendering paradigm, which generates accurate and visually appealing illustrations in an iterative manner. Through autiomatic evalutions grounded in the VLM-as-a-judge paradigm and human expert evaluations, we demonstrated that \textsc{AutoFigure} is able to produce publication-ready scientific illustrations. By automating a key bottleneck in scientific communication, our work provided a foundational visual expression capability for the next generation of AI Scientists.
+% % % transforming long scientific texts into illustrations that
+% % % are both accurate and visually appealing.
+% % % critique-and-refine loop
+% % % styles from papers, blogs, and textbooks. On this benchmark, we presented \textsc{AutoFigure}, a framework that operationalized a novel "Reasoned Rendering" paradigm. By decoupling the process into an iterative phase for layout planning and refinement followed by a separate phase for aesthetic generation, \textsc{AutoFigure} successfully resolved the critical conflict between structural fidelity and visual quality that limited prior methods. This hybrid approach was the first to produce figures of a quality high enough to be deemed publication-ready by their original authors, which achieved a remarkable 66.7\% acceptance rate in our human evaluations. This work marked a significant milestone, moving the field from exploration to practical application. By automating a key bottleneck in scientific communication, our work provided a foundational visual expression capability for the next generation of AI Scientists.
+
+
+% % \section*{Ethics statement}
+
+% % We acknowledge the significant ethical considerations associated with powerful generative technologies like \textsc{AutoFigure}. The primary risk involves the potential for misuse, where the system could be used to generate scientifically plausible but factually incorrect or misleading schematics to support false claims. To mitigate this risk, we are committed to a policy of transparency and responsible deployment. Our mitigation strategy is twofold. First, we explicitly declare that \textsc{AutoFigure} is an assistive tool with limitations. This disclaimer, stating that the system is not a substitute for expert verification and may not produce perfectly reliable outputs, will be placed prominently within this paper and in the README file of the public code repository. Second, the open-source license governing \textsc{AutoFigure} will include a mandatory attribution clause. This clause requires any academic publication using a figure generated by our tool to (a) include a specific section that discusses the role AI played in the work, and (b) explicitly caption the figure as having been generated by \textsc{AutoFigure}. These requirements are designed to ensure transparency and accountability in the downstream use of our technology, fostering a research environment where AI tools are used to augment, not compromise, scientific integrity.
+
+
+% % \bibliography{iclr2026_conference}
+% % \bibliographystyle{iclr2026_conference}
+
+% % \appendix
+
+% % \section{Data Curation Details for FigureBench}
+% % \label{appendix:datadetails}
+
+
+
+% % The curation of the FigureBench dataset was guided by a rigorous, multi-stage pipeline designed to ensure high quality, relevance, and full adherence to open-source principles. Our process began with the Research-14K dataset, from which we exclusively selected papers governed by permissive licenses (e.g., Research-Dataset-License and CC BY 4.0, as detailed in Table \ref{tab:dataset_info}). This step ensured that all subsequent annotation and redistribution activities complied with the original authors' terms. From this licensed subset, an initial filtering pass using GPT-5 identified approximately 400 candidate text-figure pairs likely to contain high-quality schematic diagrams. To validate these candidates for our gold-standard set, we utilized an online annotation platform and two expert annotators with backgrounds in machine learning. Each annotator independently judged whether a figure accurately and effectively represented the core methodology of its paper. A stringent unanimous approval policy was enforced: a figure was accepted as a positive sample only if both annotators gave their approval. This process yielded 200 high-quality positive samples, which form the core of our test set, and 200 verified negative samples (those not unanimously approved) suitable for training discriminator models.
+
+
+
+% % \begin{table}[h]
+% % \centering
+% % \small
+% % \caption{Data source details for FigureBench}
+% % \label{tab:dataset_info}
+% % \begin{tabular}{llp{7cm}c}
+% % \toprule
+% % \textbf{Data Type} & \textbf{Source} & \textbf{License} & \textbf{Number} \\
+% % \midrule
+% % paper & Research-14k & Research-Dataset-License\&CC BY 4.0 & 3200 \\
+% % \rowcolor[gray]{0.95}
+% % survey & Arxiv & CC BY & 40 \\
+% % blog & \makecell[l]{CMU ML Blog + \\ The BAIR Blog + \\ ICLR Blogposts 2025} & CC BY 4.0 & 20 \\
+% % \rowcolor[gray]{0.95}
+% % \multirow{2}{*}{textbook} & \makecell[l]{OpenStax: \textit{Foundations} \\ \textit{of Computer Science}} & CC BY 4.0 & \multirow{2}{*}{40} \\
+% % \rowcolor[gray]{0.95}
+% % & \makecell[l]{OpenStax: \textit{Information} \\ \textit{Systems}} & CC BY-NC-SA 4.0 & \\
+% % \bottomrule
+% % \end{tabular}
+% % \end{table}
+% % \section{Human Evaluation Protocol}
+% % \label{appendix:humanevaluation}
+% % To rigorously assess the practical utility of \textsc{AutoFigure} and other baseline models, we designed a comprehensive human evaluation study hosted on a custom annotation website. We recruited 10 annotators who have all previously published as first authors on academic papers in the computer science field. To ground their evaluation in a familiar context, each expert was presented with figures generated for their own past publications. The evaluation was structured into three distinct tasks, compelling the experts to assess the quality of outputs from multiple perspectives: multi-dimensional scoring, holistic ranking, and a publication-readiness selection.
+
+% % \subsection{Task 1: Multi-Dimensional Quality Scoring}
+% % The initial task required experts to perform a detailed, multi-dimensional quality assessment of figures generated by six different AI models: \textsc{AutoFigure}, Diagram Agent, GPT-Image,HTML Code, PPTX Code, and SVG Code. For each of the six generated figures, evaluators were asked to provide a rating on a five-star scale across three key dimensions: Accuracy, Clarity, and Aesthetics. The \textbf{Accuracy} dimension measured how faithfully the figure represented the core concepts, relationships, and technical details described in the original paper. A one-star rating indicated a complete deviation from the paper's content, while a five-star rating signified a perfect representation.
+
+% % The \textbf{Clarity} dimension assessed the figure's legibility and effectiveness in communicating information, considering factors such as text readability, the completeness of legends, and the logic of the layout. A one-star rating was for figures that were confusing and difficult to interpret, whereas a five-star rating was for those that were immediately understandable. Finally, the \textbf{Aesthetics} dimension focused on the visual design quality, including the harmony of the color scheme, the refinement of graphical elements, and its overall professional appearance suitable for academic publication. The user interface facilitated this process with interactive star-rating components for each of the 18 required judgments (6 models × 3 dimensions), ensuring that evaluators provided a complete set of scores before proceeding.
+
+% % \subsection{Task 2: Holistic Comparative Ranking}
+% % Following the detailed scoring, the second task asked evaluators to perform a holistic ranking of all figures. This task was designed to move beyond dimensional analysis and capture an overall judgment of quality. Crucially, the set of items to be ranked included not only the six AI-generated figures but also the original, human-created figure from the publication, serving as a ground-truth reference. Evaluators were instructed to consider all aspects of quality, including the previously scored dimensions as well as less tangible factors like innovativeness and overall fitness for the paper's context.
+
+% % The ranking was implemented through a drag-and-drop interface where each figure was displayed on a movable card. These cards showed the model's name (or "Reference" for the original), a preview of the figure, and its current rank from 1 to 7. Experts could adjust the order by dragging the cards or using "move up" and "move down" buttons, with the interface providing smooth animations to reflect the real-time changes. The system enforced a strict ranking, with no ties allowed, compelling the evaluators to make definitive comparative judgments. This design allowed for a direct comparison of AI-generated outputs against the human-authored baseline, providing a clear measure of their competitive quality.
+
+% % \subsection{Task 3: Publication Intent Selection}
+% % The final task framed the evaluation in the most practical terms by simulating the author's decision-making process for publication. Evaluators were asked: "If you were the author of this paper, which of these figures, if any, would you be willing to use in a camera-ready version of your publication?" This task required them to synthesize their quality assessments with practical considerations, such as stylistic fit with their paper, alignment with conventional academic standards, and potential impact on peer reviewers.
+
+% % The interface presented each of the six AI-generated figures on a selectable card. Experts could choose one or more figures they deemed publication-ready. An explicit option, "I would not select any of the generated figures," was also provided to capture instances where none of the AI outputs met the required standard for publication. The interface provided clear visual feedback for selected items, such as a green checkmark or a highlighted border, and displayed a summary of the current selections at the bottom of the page. This binary-style decision provided a direct measure of each model's real-world applicability and acceptance rate from the perspective of the original author.
+
+
+
+
+
+
+% % \section{Discussion and Future Outlook}
+% % \label{sec:discussion}
+
+% % Our work establishes a strong and generalizable foundation for Automated Scientific Schematic Generation (ASSG). By focusing on the Computer Science domain—a field with a diverse and rapidly evolving visual language—we have demonstrated that the "Reasoned Rendering" paradigm can successfully produce high-quality, publication-ready figures. This achievement serves as a robust proof-of-concept and a blueprint for future advancements in AI-driven scientific communication.
+
+% % Building on this foundation, an exciting future direction is the extension of our framework to other scientific disciplines. The methodology established in FigureBench and \textsc{AutoFigure} can be adapted to create specialized tools that understand the unique visual conventions of fields like biology, chemistry, and economics. For instance, future work could incorporate domain-specific knowledge to accurately generate intricate biological signaling pathway diagrams or standardized molecular structures. This path forward leads from a powerful generalist tool to a suite of expert AI illustrators, each tailored to empower researchers in their respective communities.
+
+% % Furthermore, our framework masters the creation of high-fidelity static diagrams, which remain the cornerstone of formal scientific publishing. Having established this essential capability, the logical next frontier is to bring these static representations to life. The core principles of \textsc{AutoFigure}—decoupling structural planning from aesthetic rendering—are perfectly suited for the generation of dynamic and interactive schematics. We envision future systems that can produce animated figures to illustrate processes over time or interactive diagrams that allow for user-driven exploration of complex models. This represents a transformative opportunity, moving beyond simply documenting scientific findings to creating rich, immersive experiences that can accelerate understanding and discovery.
+
+% % \section{Use of Large Language Models}
+
+% % LLMs were utilized as assistive tools at various stages of this research and manuscript preparation to enhance productivity and quality. Our use of these tools was supervised, with the final responsibility for all content resting with the human authors. In the initial phase of our work, we employed LLM-based tools to assist with literature discovery. These tools helped in identifying and summarizing a broad range of relevant prior work, which facilitated a comprehensive understanding of the existing research landscape. During the implementation of the \textsc{AutoFigure} framework, we utilized Claude to assist in writing and refining code segments. This process accelerated development and helped in debugging and optimizing our software components. For the preparation of the manuscript, LLMs (e.g. Gemini-2.5-Pro) were used for text polishing, including improving grammatical correctness, clarity, and readability. The core scientific ideas, methodologies, and arguments presented in this paper were conceived and articulated by the authors. Finally, upon completion of the draft, we subjected the manuscript to a secondary review process using the DeepReviewer \citep{zhu2025deepreview} model. This tool helped to proactively identify potential weaknesses in our argumentation, experimental setup, and presentation. We carefully considered the feedback provided by DeepReviewer and made targeted revisions to address the concerns we deemed valid, thereby strengthening the final version of this paper.
+
+% % \begin{figure}[!ht]
+% %     \centering
+% %     \includegraphics[width=\linewidth]{figures/AutoFigure_case_blog.pdf}
+% %     \caption{Qualitative comparison, contrasting baseline failures with \textsc{AutoFigure}'s superior output.}
+% %     \label{fig:case_blog}
+% % \end{figure}
+
+% % \begin{figure}[!ht]
+% %     \centering
+% %     \includegraphics[width=\linewidth]{figures/AutoFigure_case_survey.pdf}
+% %     \caption{Analysis for the Survey category, showing \textsc{AutoFigure}'s ability to render complex relationships clearly and accurately.}
+% %     \label{fig:case_survey}
+% % \end{figure}
+
+% % \begin{figure}[!ht]
+% %     \centering
+% %     \includegraphics[width=\linewidth]{figures/AutoFigure_case_textbook.pdf}
+% %     \caption{Case study for the Textbook category, demonstrating \textsc{AutoFigure}'s effectiveness in creating clear pedagogical illustrations.}
+% %     \label{fig:case_textbook}
+% % \end{figure}
+
+% % \section{Qualitative Case Studies}
+% % \label{sec:qualitative}
+% % To provide a more granular, qualitative understanding of \textsc{AutoFigure}'s capabilities, this section presents a targeted analysis of its performance against baselines across three distinct document types: a technical blog, an academic survey, and a textbook. These examples, shown in Figures \ref{fig:case_blog}, \ref{fig:case_survey}, and \ref{fig:case_textbook}, visually substantiate the quantitative findings by highlighting the specific failure modes of baseline methods and demonstrating how \textsc{AutoFigure}'s "Reasoned Rendering" paradigm successfully overcomes them.
+
+% % The blog case in Figure \ref{fig:case_blog} illustrates the generation of a complex process diagram. The end-to-end model, GPT-Image, not only fails to render legible text but also hallucinates an entirely incorrect topic, producing a diagram for "Conditioned Language/Word Detection" instead of the intended "Virtual Persona Opinions." The code-based methods (SVG, HTML) manage to represent the basic flow but result in visually simplistic and unprofessional layouts that fail to capture the nuances of the original figure. In stark contrast, \textsc{AutoFigure} correctly abstracts the source text into a coherent, multi-step narrative ("Prior Approaches," "Our Approach," "Result") and renders it using a clean, aesthetically pleasing design with thematic icons, demonstrating a sophisticated understanding of both content and presentation.
+
+% % Figure \ref{fig:case_survey} presents a more complex challenge: visualizing a taxonomy of LLM safety concepts. Here, the baselines fail catastrophically on structural fidelity. Diagram Agent produces a gross oversimplification, while GPT-Image and the code-based methods fail to capture the critical categorical relationships between Attacks, Defenses, and Evaluation metrics. Their outputs are either logically incorrect or presented as a flat, confusing flowchart. \textsc{AutoFigure}, however, excels by reimagining the content as a clear infographic. It correctly organizes concepts into distinct, labeled groups (LLM Attacks, LLM Defenses, Evaluation) around a central "Conversational LLM" motif, using thematic icons (a bomb for attacks, scales for defenses) to enhance comprehension. This shows an ability not just to reproduce, but to logically restructure information for clarity.
+
+% % Finally, the textbook example in Figure \ref{fig:case_textbook} highlights the importance of pedagogical clarity. The original figure is a simple, canonical diagram of the Waterfall Model. GPT-Image captures the basic downward flow but suffers from severe text-rendering artifacts, making the labels illegible and thus educationally useless. The SVG and HTML methods produce a structurally correct but visually sterile diagram. \textsc{AutoFigure}'s output is transformative; it not only generates a clear and accurate waterfall process with engaging icons but also enriches it by synthesizing key information from the source text into supplementary panels like "Key Characteristics," "Historical Context," and "Key Takeaway." This moves beyond mere illustration to create a comprehensive, high-quality educational artifact, demonstrating a deep contextual understanding of the task's purpose.
+
+
+
+
+% % \section{Limitations and Failure Analysis}
+% % \label{sec:limitations}
+
+% % \textcolor{darkblue}{Despite the strong performance of \textsc{AutoFigure}, we identify several persistent limitations. Most notably, we explicitly list \emph{fine-grained text-rendering accuracy} as a primary bottleneck of the current system and, more broadly, of existing figure-generation pipelines on FigureBench. Even with our erase-and-correct post-processing, the system can still exhibit rare but consequential character-level errors under small font sizes, dense layouts, or visually complex backgrounds. A representative example is the spelling mistake ``ravity'' (missing ``g'' in ``gravity'') observed in one generated figure, which illustrates the gap between long-context semantic reasoning (where the pipeline largely succeeds) and pixel-/glyph-level fidelity (where even minor artifacts can occur). Importantly, we argue that the existence of such subtle errors \emph{inversely highlights} the discriminative power and research value of FigureBench: it exposes a hard, unresolved frontier for the community, rather than indicating a fundamental flaw in our approach. Beyond text accuracy, a second limitation is the tension between aesthetic presentation and scientific rigor: our ``concretization'' behavior can occasionally drift beyond the strictly literal content if the source text is underspecified, and theoretical or vaguely phrased passages may lead the model to produce a visually plausible but imperfect conceptual structure (e.g., compressing nuanced distinctions or inadvertently imposing hierarchical relations on parallel concepts).}
+
+% % \textcolor{darkblue}{To make these limitations transparent and actionable, the revised manuscript adds a dedicated \emph{Limitations and Failure Analysis} section with concrete failure cases and causal analysis, complementing our qualitative case studies (Appendix~\S~\ref{sec:qualitative}; Figures~\ref{fig:case_blog}--\ref{fig:case_textbook}). While those case studies demonstrate that \textsc{AutoFigure} substantially mitigates common baseline failure modes (e.g., illegible text, topic hallucination, and structural collapse), they also help delineate boundary conditions for our system: (i) when accurate rendering hinges on domain-specific conventions or external facts not explicitly stated in the input, the produced structure or labeling may be incomplete; (ii) when the input demands fine-grained ontological distinctions (e.g., multi-branch taxonomies), the model may favor a cleaner visual organization at the expense of faithfully preserving subtle relations; and (iii) when layouts are dense, small typographic errors can survive post-processing and harm educational utility. Looking forward, we note several promising directions to address these deeper reasoning and verification gaps, including incorporating external knowledge bases (retrieval-augmented grounding) and introducing domain verifiers (Domain Verifiers) that can enforce constraint checks over entities, relations, and terminology before final rendering. We expect such verification-oriented components---together with more robust constrained text rendering (e.g., vector-text overlays or tighter OCR-to-layout alignment)---to be key future steps toward closing the ``reasoning vs.\ rendering'' gap on FigureBench.}
+
+
+
+
+% % \section{\textcolor{darkblue}{Performance Evaluation on Open-Source Models}}
+
+% % \label{appendix:opensource_evaluation}
+
+% % \textcolor{darkblue}{To ensure the reproducibility of our research and facilitate broader adoption with minimal deployment costs, we extended our evaluation to include state-of-the-art (SOTA) open-source and open-weight models. Specifically, we evaluated \textsc{AutoFigure} using \textbf{Qwen3-VL-235B-A22B-Instruct}, \textbf{GLM-4.5V}, and \textbf{ERNIE-4.5-VL} as the reasoning backbones. This analysis aims to verify whether \textsc{AutoFigure} can maintain high-quality generation without relying on proprietary commercial APIs.}
+
+% % \textcolor{darkblue}{\textbf{Comparative Analysis with Commercial Models.}
+% % As presented in Table \ref{tab:opensource_overall}, the experimental results demonstrate that top-tier open-source models are highly capable of driving the \textsc{AutoFigure} framework. Notably, \textbf{Qwen3-VL-235B} achieved an Overall Score of \textbf{7.08}, which not only significantly outperforms other open-source baselines like GLM-4.5V (5.99) but also surpasses several leading commercial models, including Gemini-2.5-Pro (6.99), Claude-4.1-Opus (6.80), and Grok-4 (6.76). It ranks second only to GPT-5 (7.48) among all tested models. This finding strongly suggests that the open-source community has reached a maturity level sufficient for complex scientific illustration tasks.}
+
+% % \begin{table}[h]
+% % \centering
+% % \small
+% % \caption{\textcolor{darkblue}{Performance comparison between Commercial and Open-Source models}}
+% % \label{tab:opensource_overall}
+% % \textcolor{darkblue}{
+% % \begin{tabular}{llcccc}
+% % \toprule
+% % \textbf{Model Type} & \textbf{Model} & \textbf{\makecell[c]{Visual\\Design}} & \textbf{\makecell[c]{Comm.\\Effect.}} & \textbf{\makecell[c]{Content\\Fidelity}} & \textbf{Overall} \\
+% % \midrule
+% % % Commercial Block (4 rows)
+% %  & GPT-5 & 7.17 & 7.62 & 7.70 & 7.48 \\
+% % \rowcolor[gray]{0.95}
+% % \cellcolor{white} & Gemini-2.5-Pro & 6.59 & 7.59 & 6.54 & 6.99 \\
+% %  & Claude-4.1-Opus & 6.75 & 7.17 & 6.61 & 6.80 \\
+% % \rowcolor[gray]{0.95}
+% % \cellcolor{white}\multirow{-4}{*}{Commercial} & Grok-4 & 6.46 & 7.60 & 6.49 & 6.76 \\
+% % \midrule
+% % % Open-Source Block (3 rows)
+% %  & Qwen3-VL-235B & 7.57 & 7.01 & 7.18 & 7.08 \\
+% % \rowcolor[gray]{0.95}
+% % \cellcolor{white} & GLM-4.5V & 6.09 & 6.53 & 6.13 & 5.99 \\
+% % \multirow{-3}{*}{Open-Source} & ERNIE-4.5-VL & 3.04 & 2.89 & 2.68 & 2.64 \\
+% % \bottomrule
+% % \end{tabular}
+% % }
+% % \end{table}
+
+% % \textcolor{darkblue}{\textbf{Detailed Capabilities and Win-Rates}
+% % We further provide a granular breakdown of open-source model performance across specific sub-dimensions and their Overall Win-Rates in blind pairwise comparisons (Table \ref{tab:opensource_detailed}). The performance gap between models highlights a strong correlation between the system's output quality and the backbone model's capabilities in visual reasoning and instruction following. The success of Qwen3-VL confirms that by selecting a capable open-source backbone, \textsc{AutoFigure} can be deployed as a cost-effective solution.}
+
+% % \begin{table}[h]
+% % \centering
+% % \small
+% % \caption{\textcolor{darkblue}{Detailed dimensional breakdown and Overall Win-Rates for Open-Source models.}}
+% % \label{tab:opensource_detailed}
+% % \textcolor{darkblue}{
+% % \begin{tabular}{lcccccccc}
+% % \toprule
+% % \multirow{2}{*}{\textbf{Model}} & \multicolumn{3}{c}{\textbf{Visual Design}} & \multicolumn{2}{c}{\textbf{Comm.}} & \multicolumn{2}{c}{\textbf{Content}} & \multirow{2}{*}{\textbf{\makecell{Win-Rate\\(Overall)}}} \\
+% % \cmidrule(lr){2-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
+% %  & Aesth. & Expr. & Polish & Clarity & Flow & Soph. & Fidel. & \\
+% % \midrule
+% % Qwen3-VL-235B & 0.90 & 0.90 & 0.90 & 0.25 & 0.25 & 0.25 & 0.15 & 40.0\% \\
+% % \rowcolor[gray]{0.95}
+% % GLM-4.5V & 0.70 & 0.70 & 0.70 & 0.45 & 0.65 & 0.25 & 0.20 & 55.0\% \\
+% % ERNIE-4.5-VL & 0.20 & 0.15 & 0.20 & 0.00 & 0.10 & 0.05 & 0.05 & 10.0\% \\
+% % \bottomrule
+% % \end{tabular}
+% % }
+% % \end{table}
+
+% % \input{appendix/vs_both}
+% % \input{appendix/ablation_text}
+% % \input{appendix/efficiency_and_cost}
+% % \input{appendix/human_check}
+% % \input{appendix/style_controllability_and_diversity}
+% % \input{appendix/example}
+% % \input{appendix/extended_baseline}
+% % \input{appendix/case_study}
+% % \input{appendix/Human_LLM_Correlation}
+% % \input{appendix/cases}
+
+
+
+\end{document}

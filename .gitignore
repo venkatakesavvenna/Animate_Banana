@@ -1,0 +1,13 @@
+data/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# LaTeX build artifacts (from manual/stray TikZ compiles outside viewer/cache)
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.synctex.gz

@@ -1,0 +1,200 @@
+\documentclass{standalone}
+\usepackage{tikz}
+\usepackage{animate}
+\usepackage{graphicx}
+\usetikzlibrary{fit, positioning, arrows.meta, shapes, calc}
+
+\begin{document}
+
+\begin{animateinline}[controls, loop]{1}
+\multiframe{12}{iFrame=1+1}{
+\begin{tikzpicture}[
+    >=Stealth,
+    image_node/.style={
+        inner sep=0pt, align=center
+    },
+    red_box_style/.style={
+        draw=red!60!black!50, fill=red!10, thick, rounded corners=15pt
+    },
+    blue_box_style/.style={
+        draw=blue!60!black!50, fill=blue!10, thick, rounded corners=15pt
+    },
+    dashed_box/.style={
+        draw=black!60, thick, dashed, rounded corners=10pt, fill=white
+    },
+    thick_red_arrow/.style={
+        draw=red!60!black!70, line width=3mm, -{Triangle[length=4mm, width=6mm]}
+    },
+    blue_arrow/.style={
+        draw=blue!60!black, line width=1.5mm, -{Triangle[length=4mm, width=5mm]}
+    }
+]
+
+    % Enforce fixed canvas size
+    \path [use as bounding box] (-2, -4) rectangle (29, 5);
+
+    % Define Opacity Variables based on Animation Sequence
+    % Step 1: Input
+    \pgfmathsetmacro{\opInput}{\iFrame >= 1 ? 1 : 0}
+    % Step 2: Red Box Container
+    \pgfmathsetmacro{\opRedBox}{\iFrame >= 2 ? 1 : 0}
+    % Step 3: Edge Mask
+    \pgfmathsetmacro{\opMask}{\iFrame >= 3 ? 1 : 0}
+    % Step 4: Optimize Patch Centers (Dashed Box)
+    \pgfmathsetmacro{\opOptPatch}{\iFrame >= 4 ? 1 : 0}
+    % Step 5: Scatter Plot
+    \pgfmathsetmacro{\opScatter}{\iFrame >= 5 ? 1 : 0}
+    % Step 6: Patch P
+    \pgfmathsetmacro{\opPatchP}{\iFrame >= 6 ? 1 : 0}
+    % Step 7: Patch Z
+    \pgfmathsetmacro{\opPatchZ}{\iFrame >= 7 ? 1 : 0}
+    % Step 8: Latent Image
+    \pgfmathsetmacro{\opLatent}{\iFrame >= 8 ? 1 : 0}
+    % Step 9: Kernel 1
+    \pgfmathsetmacro{\opKernelA}{\iFrame >= 9 ? 1 : 0}
+    % Step 10: Blue Box Container
+    \pgfmathsetmacro{\opBlueBox}{\iFrame >= 10 ? 1 : 0}
+    % Step 11: Kernel 2
+    \pgfmathsetmacro{\opKernelB}{\iFrame >= 11 ? 1 : 0}
+    % Step 12: Output
+    \pgfmathsetmacro{\opOutput}{\iFrame >= 12 ? 1 : 0}
+
+    % --------------------------------------------------------
+    % SCOPE 1: Input
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opInput, transparency group]
+        \node[image_node] (img_input) at (0, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/input.png}};
+        \node[above=0.2cm of img_input, font=\sffamily] {input $\mathbf{y}$};
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 2: Red Box Container (Blur kernel estimation)
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opRedBox, transparency group]
+        % Draw the background box first so it sits behind children
+        \coordinate (red_top_left) at (2.5, 3.5);
+        \coordinate (red_bottom_right) at (19.0, -3.5);
+        % Use a node with explicit dimensions/coordinates instead of fit to avoid dependency on hidden nodes
+        \node[red_box_style, minimum width=16.5cm, minimum height=7cm, anchor=center] (red_box) at ($(red_top_left)!0.5!(red_bottom_right)$) {};
+        \node[above=0.3cm of red_box, font=\Large\sffamily] {Blur kernel estimation};
+        
+        % Arrow from Input to Red Box (Connects Step 1 and Step 2)
+        \draw[thick_red_arrow] (img_input.east) -- (red_box.west);
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 3: Edge Mask
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opMask, transparency group]
+        \node[image_node] (img_mask) at (4.5, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/edge_mask.png}};
+        \node[above=0.2cm of img_mask, font=\sffamily] {edge mask $M$};
+        % Small red highlight square on edge mask
+        \draw[red, very thick] ($(img_mask.center) + (0.6, 0.2)$) rectangle +(0.3, 0.3);
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 4: Optimize Patch Centers (Dashed Box)
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opOptPatch, transparency group]
+        \coordinate (opt_patch_tl) at (7.2, 2.5);
+        \coordinate (opt_patch_br) at (11.8, -2.8);
+        % Use explicit coordinates for the box
+        \node[dashed_box, minimum width=4.6cm, minimum height=5.3cm, anchor=center] (opt_patch_box) at ($(opt_patch_tl)!0.5!(opt_patch_br)$) {};
+        \node[fill=white, inner sep=2pt, font=\sffamily] at (opt_patch_box.north) {optimize patch centers};
+        
+        % Arrow from Edge Mask to Opt Patch Box
+        \draw[blue_arrow] (img_mask.east) -- (opt_patch_box.west);
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 5: Scatter Plot
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opScatter, transparency group]
+        \node[image_node] (scatter) at (9.5, 1.2) {\includegraphics[width=4cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/upper_patch.png}};
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 6: Patch P
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opPatchP, transparency group]
+        \node[image_node] (patch_p) at (8.2, -1.4) {\includegraphics[width=1.6cm, height=1.6cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/p1.png}};
+        \node[above=0.1cm of patch_p, font=\sffamily] {$\mathbf{P}_i \hat{\mathbf{x}}$};
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 7: Patch Z
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opPatchZ, transparency group]
+        \node[image_node] (patch_z) at (10.8, -1.4) {\includegraphics[width=1.6cm, height=1.6cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/p2.png}};
+        \node[above=0.1cm of patch_z, font=\sffamily] {$\mathbf{z}_i$};
+        
+        % Arrow from Patch P to Patch Z
+        \draw[blue_arrow] (patch_p) -- (patch_z);
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 8: Latent Image
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opLatent, transparency group]
+        \node[image_node] (latent) at (14.5, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/latent_image.png}};
+        \node[above=0.2cm of latent, align=center, font=\sffamily] {intermediate\\latent image $\hat{\mathbf{x}}$};
+        % Small red highlight square on latent image
+        \draw[red, very thick] ($(latent.center) + (0.6, 0.2)$) rectangle +(0.3, 0.3);
+        
+        % Arrow from Opt Patch Box to Latent
+        \draw[blue_arrow] (opt_patch_box.east) -- (latent.west);
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 9: Kernel 1
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opKernelA, transparency group]
+        \node[image_node] (kernel1) at (17.5, 0) {\includegraphics[width=1.8cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/kernel.png}};
+        \node[above=0.2cm of kernel1, align=center, font=\sffamily] {estimate\\blur kernel\\$\mathbf{k}$};
+        
+        % Arrow from Latent to Kernel 1
+        \draw[blue_arrow] (latent.east) -- (kernel1.west);
+        
+        % Blue Feedback Loop Arrow (Kernel 1 back to Opt Patch Box)
+        \draw[blue_arrow] (kernel1.south) -- (17.5, -3.1) -- (9.5, -3.1) -- (opt_patch_box.south);
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 10: Blue Box Container (Non-blind deconvolution)
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opBlueBox, transparency group]
+        \coordinate (blue_top_left) at (20.0, 3.5);
+        \coordinate (blue_bottom_right) at (27.0, -3.5);
+        % Use explicit coordinates for the box
+        \node[blue_box_style, minimum width=7cm, minimum height=7cm, anchor=center] (blue_box) at ($(blue_top_left)!0.5!(blue_bottom_right)$) {};
+        \node[above=0.3cm of blue_box, font=\Large\sffamily] {Non-blind deconvolution};
+        
+        % Arrow from Red Box to Blue Box
+        \draw[thick_red_arrow] (red_box.east) -- (blue_box.west);
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 11: Kernel 2
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opKernelB, transparency group]
+        \node[image_node] (kernel2) at (22.0, 0) {\includegraphics[width=1.8cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/final_kernel.png}};
+        \node[above=0.2cm of kernel2, align=center, font=\sffamily] {final\\blur kernel};
+    \end{scope}
+
+    % --------------------------------------------------------
+    % SCOPE 12: Output
+    % --------------------------------------------------------
+    \begin{scope}[opacity=\opOutput, transparency group]
+        \node[image_node] (output) at (25.0, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/output.png}};
+        \node[above=0.2cm of output, font=\sffamily] {output};
+        
+        % Arrow from Kernel 2 to Output
+        \draw[blue_arrow] (kernel2.east) -- (output.west);
+    \end{scope}
+
+    % placeholder
+\end{tikzpicture}
+}
+\end{animateinline}
+
+\end{document}

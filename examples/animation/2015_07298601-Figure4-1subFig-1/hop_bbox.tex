@@ -1,0 +1,195 @@
+\documentclass{standalone}
+\usepackage{tikz}
+\usepackage{animate}
+\usepackage{graphicx}
+\usetikzlibrary{fit, positioning, arrows.meta, shapes, calc}
+
+\begin{document}
+\begin{animateinline}[controls, loop]{1}
+\multiframe{12}{iFrame=1+1}
+{
+\begin{tikzpicture}[
+    >=Stealth,
+    image_node/.style={
+        inner sep=0pt, align=center
+    },
+    red_box_style/.style={
+        draw=red!60!black!50, fill=red!10, thick, rounded corners=15pt
+    },
+    blue_box_style/.style={
+        draw=blue!60!black!50, fill=blue!10, thick, rounded corners=15pt
+    },
+    dashed_box/.style={
+        draw=black!60, thick, dashed, rounded corners=10pt, fill=white
+    },
+    thick_red_arrow/.style={
+        draw=red!60!black!70, line width=3mm, -{Triangle[length=4mm, width=6mm]}
+    },
+    blue_arrow/.style={
+        draw=blue!60!black, line width=1.5mm, -{Triangle[length=4mm, width=5mm]}
+    }
+]
+
+    % Explicit Spacious Bounding Box
+    \path [use as bounding box] (-2, -4) rectangle (28, 5);
+
+    % ==========================================
+    % 1. PARENT BLOCKS (Drawn first to stay in background)
+    % ==========================================
+    
+    % Anchor coordinates for the Red Box (Blur kernel estimation)
+    \coordinate (red_top_left) at (2.5, 3.5);
+    \coordinate (red_bottom_right) at (19.0, -3.5);
+    \node[fit={(red_top_left) (red_bottom_right)}, red_box_style] (red_box) {};
+    \node[above=0.3cm of red_box, font=\Large\sffamily] {Blur kernel estimation};
+
+    % Anchor coordinates for the Blue Box (Non-blind deconvolution)
+    \coordinate (blue_top_left) at (20.0, 3.5);
+    \coordinate (blue_bottom_right) at (27.0, -3.5);
+    \node[fit={(blue_top_left) (blue_bottom_right)}, blue_box_style] (blue_box) {};
+    \node[above=0.3cm of blue_box, font=\Large\sffamily] {Non-blind deconvolution};
+
+
+    % ==========================================
+    % 2. EXTERNAL INPUT
+    % ==========================================
+    
+    \node[image_node] (img_input) at (0, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/input.png}};
+    \node[above=0.2cm of img_input, font=\sffamily] {input $\mathbf{y}$};
+
+
+    % ==========================================
+    % 3. RED BOX CONTENTS
+    % ==========================================
+    
+    % Edge Mask
+    \node[image_node] (img_mask) at (4.5, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/edge_mask.png}};
+    \node[above=0.2cm of img_mask, font=\sffamily] {edge mask $M$};
+    % Small red highlight square on edge mask
+    \draw[red, very thick] ($(img_mask.center) + (0.6, 0.2)$) rectangle +(0.3, 0.3);
+
+    % Optimize Patch Centers (Dashed Box)
+    \coordinate (opt_patch_tl) at (7.2, 2.5);
+    \coordinate (opt_patch_br) at (11.8, -2.8);
+    \node[fit={(opt_patch_tl) (opt_patch_br)}, dashed_box] (opt_patch_box) {};
+    \node[fill=white, inner sep=2pt, font=\sffamily] at (opt_patch_box.north) {optimize patch centers};
+
+    % Contents of Dashed Box
+    \node[image_node] (scatter) at (9.5, 1.2) {\includegraphics[width=4cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/upper_patch.png}};
+    
+    \node[image_node] (patch_p) at (8.2, -1.4) {\includegraphics[width=1.6cm, height=1.6cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/p1.png}};
+    \node[above=0.1cm of patch_p, font=\sffamily] {$\mathbf{P}_i \hat{\mathbf{x}}$};
+    
+    \node[image_node] (patch_z) at (10.8, -1.4) {\includegraphics[width=1.6cm, height=1.6cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/p2.png}};
+    \node[above=0.1cm of patch_z, font=\sffamily] {$\mathbf{z}_i$};
+    
+    \draw[blue_arrow] (patch_p) -- (patch_z);
+
+    % Intermediate Latent Image
+    \node[image_node] (latent) at (14.5, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/latent_image.png}};
+    \node[above=0.2cm of latent, align=center, font=\sffamily] {intermediate\\latent image $\hat{\mathbf{x}}$};
+    % Small red highlight square on latent image
+    \draw[red, very thick] ($(latent.center) + (0.6, 0.2)$) rectangle +(0.3, 0.3);
+
+    % Estimate Blur Kernel
+    \node[image_node] (kernel1) at (17.5, 0) {\includegraphics[width=1.8cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/kernel.png}};
+    \node[above=0.2cm of kernel1, align=center, font=\sffamily] {estimate\\blur kernel\\$\mathbf{k}$};
+
+
+    % ==========================================
+    % 4. BLUE BOX CONTENTS
+    % ==========================================
+    
+    % Final Blur Kernel
+    \node[image_node] (kernel2) at (22.0, 0) {\includegraphics[width=1.8cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/final_kernel.png}};
+    \node[above=0.2cm of kernel2, align=center, font=\sffamily] {final\\blur kernel};
+
+    % Output Image
+    \node[image_node] (output) at (25.0, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/output.png}};
+    \node[above=0.2cm of output, font=\sffamily] {output};
+
+
+    % ==========================================
+    % 5. CONNECTIONS / ARROWS
+    % ==========================================
+    
+    % Thick Red Block Arrows
+    \draw[thick_red_arrow] (img_input.east) -- (red_box.west);
+    \draw[thick_red_arrow] (red_box.east) -- (blue_box.west);
+
+    % Blue Main Pipeline Arrows
+    \draw[blue_arrow] (img_mask.east) -- (opt_patch_box.west);
+    \draw[blue_arrow] (opt_patch_box.east) -- (latent.west);
+    \draw[blue_arrow] (latent.east) -- (kernel1.west);
+    \draw[blue_arrow] (kernel2.east) -- (output.west);
+
+    % Blue Feedback Loop Arrow
+    \draw[blue_arrow] (kernel1.south) -- (17.5, -3.1) -- (9.5, -3.1) -- (opt_patch_box.south);
+
+    % ==========================================
+    % 6. CONDITIONAL HOPPING BOUNDING BOXES
+    % ==========================================
+    % placeholder for frame 1: input y
+    \ifnum\iFrame=1
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(img_input)] {};
+    \fi
+    
+    % placeholder for frame 2: red_box
+    \ifnum\iFrame=2
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(red_box)] {};
+    \fi
+    
+    % placeholder for frame 3: img_mask
+    \ifnum\iFrame=3
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(img_mask)] {};
+    \fi
+    
+    % placeholder for frame 4: opt_patch_box
+    \ifnum\iFrame=4
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(opt_patch_box)] {};
+    \fi
+    
+    % placeholder for frame 5: scatter
+    \ifnum\iFrame=5
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(scatter)] {};
+    \fi
+    
+    % placeholder for frame 6: patch_p
+    \ifnum\iFrame=6
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(patch_p)] {};
+    \fi
+    
+    % placeholder for frame 7: patch_z
+    \ifnum\iFrame=7
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(patch_z)] {};
+    \fi
+    
+    % placeholder for frame 8: latent
+    \ifnum\iFrame=8
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(latent)] {};
+    \fi
+    
+    % placeholder for frame 9: kernel1
+    \ifnum\iFrame=9
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(kernel1)] {};
+    \fi
+    
+    % placeholder for frame 10: blue_box
+    \ifnum\iFrame=10
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(blue_box)] {};
+    \fi
+    
+    % placeholder for frame 11: kernel2
+    \ifnum\iFrame=11
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(kernel2)] {};
+    \fi
+    
+    % placeholder for frame 12: output
+    \ifnum\iFrame=12
+        \node[draw=red, very thick, dashed, inner sep=5pt, fit=(output)] {};
+    \fi
+
+\end{tikzpicture}
+}
+\end{animateinline}
+\end{document}

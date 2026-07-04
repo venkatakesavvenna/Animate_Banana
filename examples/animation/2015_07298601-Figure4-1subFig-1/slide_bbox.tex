@@ -1,0 +1,221 @@
+\documentclass{standalone}
+\usepackage{tikz}
+\usepackage{animate}
+\usepackage{graphicx}
+\usetikzlibrary{fit, positioning, arrows.meta, shapes, calc}
+
+\begin{document}
+\begin{animateinline}[controls, loop]{3}
+\multiframe{31}{iFrame=0+1}
+{
+\begin{tikzpicture}[
+    >=Stealth,
+    image_node/.style={
+        inner sep=0pt, align=center
+    },
+    red_box_style/.style={
+        draw=red!60!black!50, fill=red!10, thick, rounded corners=15pt
+    },
+    blue_box_style/.style={
+        draw=blue!60!black!50, fill=blue!10, thick, rounded corners=15pt
+    },
+    dashed_box/.style={
+        draw=black!60, thick, dashed, rounded corners=10pt, fill=white
+    },
+    thick_red_arrow/.style={
+        draw=red!60!black!70, line width=3mm, -{Triangle[length=4mm, width=6mm]}
+    },
+    blue_arrow/.style={
+        draw=blue!60!black, line width=1.5mm, -{Triangle[length=4mm, width=5mm]}
+    }
+]
+
+    % Explicit Spacious Bounding Box
+    \path [use as bounding box] (-2, -4) rectangle (28, 5);
+
+    % ==========================================
+    % 1. PARENT BLOCKS (Drawn first to stay in background)
+    % ==========================================
+    
+    % Anchor coordinates for the Red Box (Blur kernel estimation)
+    \coordinate (red_top_left) at (2.5, 3.5);
+    \coordinate (red_bottom_right) at (19.0, -3.5);
+    \node[fit={(red_top_left) (red_bottom_right)}, red_box_style] (red_box) {};
+    \node[above=0.3cm of red_box, font=\Large\sffamily] {Blur kernel estimation};
+
+    % Anchor coordinates for the Blue Box (Non-blind deconvolution)
+    \coordinate (blue_top_left) at (20.0, 3.5);
+    \coordinate (blue_bottom_right) at (27.0, -3.5);
+    \node[fit={(blue_top_left) (blue_bottom_right)}, blue_box_style] (blue_box) {};
+    \node[above=0.3cm of blue_box, font=\Large\sffamily] {Non-blind deconvolution};
+
+
+    % ==========================================
+    % 2. EXTERNAL INPUT
+    % ==========================================
+    
+    \node[image_node] (img_input) at (0, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/input.png}};
+    \node[above=0.2cm of img_input, font=\sffamily] {input $\mathbf{y}$};
+
+
+    % ==========================================
+    % 3. RED BOX CONTENTS
+    % ==========================================
+    
+    % Edge Mask
+    \node[image_node] (img_mask) at (4.5, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/edge_mask.png}};
+    \node[above=0.2cm of img_mask, font=\sffamily] {edge mask $M$};
+    % Small red highlight square on edge mask
+    \draw[red, very thick] ($(img_mask.center) + (0.6, 0.2)$) rectangle +(0.3, 0.3);
+
+    % Optimize Patch Centers (Dashed Box)
+    \coordinate (opt_patch_tl) at (7.2, 2.5);
+    \coordinate (opt_patch_br) at (11.8, -2.8);
+    \node[fit={(opt_patch_tl) (opt_patch_br)}, dashed_box] (opt_patch_box) {};
+    \node[fill=white, inner sep=2pt, font=\sffamily] at (opt_patch_box.north) {optimize patch centers};
+
+    % Contents of Dashed Box
+    \node[image_node] (scatter) at (9.5, 1.2) {\includegraphics[width=4cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/upper_patch.png}};
+    
+    \node[image_node] (patch_p) at (8.2, -1.4) {\includegraphics[width=1.6cm, height=1.6cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/p1.png}};
+    \node[above=0.1cm of patch_p, font=\sffamily] {$\mathbf{P}_i \hat{\mathbf{x}}$};
+    
+    \node[image_node] (patch_z) at (10.8, -1.4) {\includegraphics[width=1.6cm, height=1.6cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/p2.png}};
+    \node[above=0.1cm of patch_z, font=\sffamily] {$\mathbf{z}_i$};
+    
+    \draw[blue_arrow] (patch_p) -- (patch_z);
+
+    % Intermediate Latent Image
+    \node[image_node] (latent) at (14.5, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/latent_image.png}};
+    \node[above=0.2cm of latent, align=center, font=\sffamily] {intermediate\\latent image $\hat{\mathbf{x}}$};
+    % Small red highlight square on latent image
+    \draw[red, very thick] ($(latent.center) + (0.6, 0.2)$) rectangle +(0.3, 0.3);
+
+    % Estimate Blur Kernel
+    \node[image_node] (kernel1) at (17.5, 0) {\includegraphics[width=1.8cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/kernel.png}};
+    \node[above=0.2cm of kernel1, align=center, font=\sffamily] {estimate\\blur kernel\\$\mathbf{k}$};
+
+
+    % ==========================================
+    % 4. BLUE BOX CONTENTS
+    % ==========================================
+    
+    % Final Blur Kernel
+    \node[image_node] (kernel2) at (22.0, 0) {\includegraphics[width=1.8cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/final_kernel.png}};
+    \node[above=0.2cm of kernel2, align=center, font=\sffamily] {final\\blur kernel};
+
+    % Output Image
+    \node[image_node] (output) at (25.0, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/output.png}};
+    \node[above=0.2cm of output, font=\sffamily] {output};
+
+
+    % ==========================================
+    % 5. CONNECTIONS / ARROWS
+    % ==========================================
+    
+    % Thick Red Block Arrows
+    \draw[thick_red_arrow] (img_input.east) -- (red_box.west);
+    \draw[thick_red_arrow] (red_box.east) -- (blue_box.west);
+
+    % Blue Main Pipeline Arrows
+    \draw[blue_arrow] (img_mask.east) -- (opt_patch_box.west);
+    \draw[blue_arrow] (opt_patch_box.east) -- (latent.west);
+    \draw[blue_arrow] (latent.east) -- (kernel1.west);
+    \draw[blue_arrow] (kernel2.east) -- (output.west);
+
+    % Blue Feedback Loop Arrow
+    \draw[blue_arrow] (kernel1.south) -- (17.5, -3.1) -- (9.5, -3.1) -- (opt_patch_box.south);
+
+    % ==========================================
+    % 6. SMOOTH SLIDING BOUNDING BOX
+    % ==========================================
+    
+    % Extract Keyframes from the original \ifnum blocks
+    % Frame 1: img_input
+    \path (img_input.north west) coordinate (kf0_tl) (img_input.south east) coordinate (kf0_br);
+    % Frame 2: red_box
+    \path (red_box.north west) coordinate (kf1_tl) (red_box.south east) coordinate (kf1_br);
+    % Frame 3: img_mask
+    \path (img_mask.north west) coordinate (kf2_tl) (img_mask.south east) coordinate (kf2_br);
+    % Frame 4: opt_patch_box
+    \path (opt_patch_box.north west) coordinate (kf3_tl) (opt_patch_box.south east) coordinate (kf3_br);
+    % Frame 5: scatter
+    \path (scatter.north west) coordinate (kf4_tl) (scatter.south east) coordinate (kf4_br);
+    % Frame 6: patch_p
+    \path (patch_p.north west) coordinate (kf5_tl) (patch_p.south east) coordinate (kf5_br);
+    % Frame 7: patch_z
+    \path (patch_z.north west) coordinate (kf6_tl) (patch_z.south east) coordinate (kf6_br);
+    % Frame 8: latent
+    \path (latent.north west) coordinate (kf7_tl) (latent.south east) coordinate (kf7_br);
+    % Frame 9: kernel1
+    \path (kernel1.north west) coordinate (kf8_tl) (kernel1.south east) coordinate (kf8_br);
+    % Frame 10: blue_box
+    \path (blue_box.north west) coordinate (kf9_tl) (blue_box.south east) coordinate (kf9_br);
+    % Frame 11: kernel2
+    \path (kernel2.north west) coordinate (kf10_tl) (kernel2.south east) coordinate (kf10_br);
+    % Frame 12: output
+    \path (output.north west) coordinate (kf11_tl) (output.south east) coordinate (kf11_br);
+
+    % Determine transition parameters
+    \pgfmathsetmacro{\framesPerTrans}{4} % Exactly 4 frames between each step
+    \pgfmathtruncatemacro{\currentTrans}{min(11, \iFrame / \framesPerTrans)} % CRITICAL: Must be truncatemacro to yield an integer!
+    \pgfmathsetmacro{\localProg}{mod(\iFrame, \framesPerTrans) / \framesPerTrans}
+
+    % Interpolate between keyframes
+    \ifcase\currentTrans
+        % Transition 0: kf0 -> kf1
+        \coordinate (curr_tl) at ($(kf0_tl)!\localProg!(kf1_tl)$);
+        \coordinate (curr_br) at ($(kf0_br)!\localProg!(kf1_br)$);
+    \or
+        % Transition 1: kf1 -> kf2
+        \coordinate (curr_tl) at ($(kf1_tl)!\localProg!(kf2_tl)$);
+        \coordinate (curr_br) at ($(kf1_br)!\localProg!(kf2_br)$);
+    \or
+        % Transition 2: kf2 -> kf3
+        \coordinate (curr_tl) at ($(kf2_tl)!\localProg!(kf3_tl)$);
+        \coordinate (curr_br) at ($(kf2_br)!\localProg!(kf3_br)$);
+    \or
+        % Transition 3: kf3 -> kf4
+        \coordinate (curr_tl) at ($(kf3_tl)!\localProg!(kf4_tl)$);
+        \coordinate (curr_br) at ($(kf3_br)!\localProg!(kf4_br)$);
+    \or
+        % Transition 4: kf4 -> kf5
+        \coordinate (curr_tl) at ($(kf4_tl)!\localProg!(kf5_tl)$);
+        \coordinate (curr_br) at ($(kf4_br)!\localProg!(kf5_br)$);
+    \or
+        % Transition 5: kf5 -> kf6
+        \coordinate (curr_tl) at ($(kf5_tl)!\localProg!(kf6_tl)$);
+        \coordinate (curr_br) at ($(kf5_br)!\localProg!(kf6_br)$);
+    \or
+        % Transition 6: kf6 -> kf7
+        \coordinate (curr_tl) at ($(kf6_tl)!\localProg!(kf7_tl)$);
+        \coordinate (curr_br) at ($(kf6_br)!\localProg!(kf7_br)$);
+    \or
+        % Transition 7: kf7 -> kf8
+        \coordinate (curr_tl) at ($(kf7_tl)!\localProg!(kf8_tl)$);
+        \coordinate (curr_br) at ($(kf7_br)!\localProg!(kf8_br)$);
+    \or
+        % Transition 8: kf8 -> kf9
+        \coordinate (curr_tl) at ($(kf8_tl)!\localProg!(kf9_tl)$);
+        \coordinate (curr_br) at ($(kf8_br)!\localProg!(kf9_br)$);
+    \or
+        % Transition 9: kf9 -> kf10
+        \coordinate (curr_tl) at ($(kf9_tl)!\localProg!(kf10_tl)$);
+        \coordinate (curr_br) at ($(kf9_br)!\localProg!(kf10_br)$);
+    \or
+        % Transition 10: kf10 -> kf11
+        \coordinate (curr_tl) at ($(kf10_tl)!\localProg!(kf11_tl)$);
+        \coordinate (curr_br) at ($(kf10_br)!\localProg!(kf11_br)$);
+    \else
+        % Catch-all to park the box on the final frame (kf11)
+        \coordinate (curr_tl) at (kf11_tl);
+        \coordinate (curr_br) at (kf11_br);
+    \fi
+
+    % Draw the sliding box
+    \node[draw=red, very thick, dashed, inner sep=5pt, fit=(curr_tl) (curr_br)] {};
+
+\end{tikzpicture}
+}
+\end{animateinline}
+\end{document}

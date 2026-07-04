@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "img-2-svg-pretraining"
+version = "0.1.0"
+description = "Architecture diagram -> TikZ (Stage 1) viewer and evaluation framework"
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.0",
+]
+
+[tool.setuptools]
+packages = []

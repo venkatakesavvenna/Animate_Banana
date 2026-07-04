@@ -1,0 +1,133 @@
+\documentclass{standalone}
+\usepackage{tikz}
+\usepackage{graphicx}
+\usepackage{animate}
+\usetikzlibrary{fit, positioning, arrows.meta, shapes, calc}
+
+\begin{document}
+
+% Define repeated structural styles outside the animation loop
+\tikzset{
+    >=Stealth,
+    image_node/.style={
+        inner sep=0pt, align=center
+    },
+    red_box_style/.style={
+        draw=red!60!black!50, fill=red!10, thick, rounded corners=15pt
+    },
+    blue_box_style/.style={
+        draw=blue!60!black!50, fill=blue!10, thick, rounded corners=15pt
+    },
+    dashed_box/.style={
+        draw=black!60, thick, dashed, rounded corners=10pt, fill=white
+    },
+    thick_red_arrow/.style={
+        draw=red!60!black!70, line width=3mm, -{Triangle[length=4mm, width=6mm]}
+    },
+    blue_arrow/.style={
+        draw=blue!60!black, line width=1.5mm, -{Triangle[length=4mm, width=5mm]}
+    }
+}
+
+\begin{animateinline}[controls, loop]{1}
+\multiframe{10}{iFrame=1+1}{
+    \begin{tikzpicture}
+        \path [use as bounding box] (-2, -4) rectangle (30, 5);
+
+        % Opacity Math
+        \pgfmathsetmacro{\maxFrame}{10}
+        \pgfmathsetmacro{\opOne}{\iFrame==1 || \iFrame==\maxFrame ? 1 : 0.15}
+        \pgfmathsetmacro{\opTwo}{\iFrame==2 || \iFrame==\maxFrame ? 1 : 0.15}
+        \pgfmathsetmacro{\opThree}{\iFrame==3 || \iFrame==\maxFrame ? 1 : 0.15}
+        \pgfmathsetmacro{\opFour}{\iFrame==4 || \iFrame==\maxFrame ? 1 : 0.15}
+        \pgfmathsetmacro{\opFive}{\iFrame==5 || \iFrame==\maxFrame ? 1 : 0.15}
+        \pgfmathsetmacro{\opSix}{\iFrame==6 || \iFrame==\maxFrame ? 1 : 0.15}
+        \pgfmathsetmacro{\opSeven}{\iFrame==7 || \iFrame==\maxFrame ? 1 : 0.15}
+        \pgfmathsetmacro{\opEight}{\iFrame==8 || \iFrame==\maxFrame ? 1 : 0.15}
+        \pgfmathsetmacro{\opNine}{\iFrame==9 || \iFrame==\maxFrame ? 1 : 0.15}
+
+        % 1. Input
+        \begin{scope}[opacity=\opOne, transparency group]
+            \node[image_node] (img_input) at (0, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/input.png}};
+            \node[above=0.2cm of img_input, font=\sffamily] {input $\mathbf{y}$};
+        \end{scope}
+
+        % 2. Blur kernel estimation box & Edge mask
+        \begin{scope}[opacity=\opTwo, transparency group]
+            \coordinate (red_top_left) at (2.5, 3.5);
+            \coordinate (red_bottom_right) at (19.0, -3.5);
+            \node[fit={(red_top_left) (red_bottom_right)}, red_box_style] (red_box) {};
+            \node[above=0.3cm of red_box, font=\Large\sffamily] {Blur kernel estimation};
+            
+            \node[image_node] (img_mask) at (4.5, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/edge_mask.png}};
+            \node[above=0.2cm of img_mask, font=\sffamily] {edge mask $M$};
+            \draw[red, very thick] ($(img_mask.center) + (0.6, 0.2)$) rectangle +(0.3, 0.3);
+            
+            \draw[thick_red_arrow] (img_input.east) -- (red_box.west);
+        \end{scope}
+
+        % 3. Optimize patch centers
+        \begin{scope}[opacity=\opThree, transparency group]
+            \coordinate (opt_patch_tl) at (7.2, 2.5);
+            \coordinate (opt_patch_br) at (11.8, -2.8);
+            \node[fit={(opt_patch_tl) (opt_patch_br)}, dashed_box] (opt_patch_box) {};
+            \node[fill=white, inner sep=2pt, font=\sffamily] at (opt_patch_box.north) {optimize patch centers};
+            
+            \node[image_node] (scatter) at (9.5, 1.2) {\includegraphics[width=4cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/upper_patch.png}};
+            \draw[blue_arrow] (img_mask.east) -- (opt_patch_box.west);
+        \end{scope}
+
+        % 4. Patch P
+        \begin{scope}[opacity=\opFour, transparency group]
+            \node[image_node] (patch_p) at (8.2, -1.4) {\includegraphics[width=1.6cm, height=1.6cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/p1.png}};
+            \node[above=0.1cm of patch_p, font=\sffamily] {$\mathbf{P}_i \hat{\mathbf{x}}$};
+        \end{scope}
+
+        % 5. Patch Z
+        \begin{scope}[opacity=\opFive, transparency group]
+            \node[image_node] (patch_z) at (10.8, -1.4) {\includegraphics[width=1.6cm, height=1.6cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/p2.png}};
+            \node[above=0.1cm of patch_z, font=\sffamily] {$\mathbf{z}_i$};
+            \draw[blue_arrow] (patch_p) -- (patch_z);
+        \end{scope}
+
+        % 6. Latent Image
+        \begin{scope}[opacity=\opSix, transparency group]
+            \node[image_node] (latent) at (14.5, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/latent_image.png}};
+            \node[above=0.2cm of latent, align=center, font=\sffamily] {intermediate\\latent image $\hat{\mathbf{x}}$};
+            \draw[red, very thick] ($(latent.center) + (0.6, 0.2)$) rectangle +(0.3, 0.3);
+            \draw[blue_arrow] (opt_patch_box.east) -- (latent.west);
+        \end{scope}
+
+        % 7. Estimate Blur Kernel
+        \begin{scope}[opacity=\opSeven, transparency group]
+            \node[image_node] (kernel1) at (17.5, 0) {\includegraphics[width=1.8cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/kernel.png}};
+            \node[above=0.2cm of kernel1, align=center, font=\sffamily] {estimate\\blur kernel\\$\mathbf{k}$};
+            \draw[blue_arrow] (latent.east) -- (kernel1.west);
+        \end{scope}
+
+        % 8. Non-blind deconvolution
+        \begin{scope}[opacity=\opEight, transparency group]
+            \coordinate (blue_top_left) at (20.0, 3.5);
+            \coordinate (blue_bottom_right) at (27.0, -3.5);
+            \node[fit={(blue_top_left) (blue_bottom_right)}, blue_box_style] (blue_box) {};
+            \node[above=0.3cm of blue_box, font=\Large\sffamily] {Non-blind deconvolution};
+            
+            \node[image_node] (kernel2) at (22.0, 0) {\includegraphics[width=1.8cm, height=1.8cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/final_kernel.png}};
+            \node[above=0.2cm of kernel2, align=center, font=\sffamily] {final\\blur kernel};
+            
+            \draw[thick_red_arrow] (red_box.east) -- (blue_box.west);
+            \draw[blue_arrow] (kernel1.south) -- (17.5, -3.1) -- (9.5, -3.1) -- (opt_patch_box.south);
+        \end{scope}
+
+        % 9. Output
+        \begin{scope}[opacity=\opNine, transparency group]
+            \node[image_node] (output) at (25.0, 0) {\includegraphics[width=2.5cm, height=2.5cm, keepaspectratio]{crops/2015_07298601-Figure4-1subFig-1/output.png}};
+            \node[above=0.2cm of output, font=\sffamily] {output};
+            \draw[blue_arrow] (kernel2.east) -- (output.west);
+        \end{scope}
+
+    \end{tikzpicture}
+}
+\end{animateinline}
+
+\end{document}

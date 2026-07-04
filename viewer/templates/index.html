@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TikZ Sample Viewer</title>
+<style>
+  :root {
+    --bg: #1e1e1e; --panel: #252526; --border: #3c3c3c; --text: #d4d4d4;
+    --accent: #4ec9b0; --danger: #f14c4c; --mono: 'SF Mono', Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, sans-serif; height: 100vh; overflow: hidden; }
+  #app { display: flex; height: 100vh; }
+  #sidebar { width: 280px; background: var(--panel); border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; }
+  #sidebar h2 { font-size: 13px; text-transform: uppercase; color: #888; padding: 12px; margin: 0; border-bottom: 1px solid var(--border); }
+  #search { width: calc(100% - 16px); margin: 8px; padding: 6px; background: #333; border: 1px solid var(--border); color: var(--text); border-radius: 4px; }
+  #sample-list { list-style: none; margin: 0; padding: 0; }
+  #sample-list li { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #2d2d2d; word-break: break-all; }
+  #sample-list li:hover { background: #2a2d2e; }
+  #sample-list li.active { background: #094771; }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #toolbar { padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  #toolbar button { background: #0e639c; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #toolbar button:hover { background: #1177bb; }
+  #toolbar button:disabled { background: #444; cursor: not-allowed; }
+  #toolbar .status { font-size: 12px; color: #888; margin-left: auto; }
+  #toolbar .status.ok { color: var(--accent); }
+  #toolbar .status.err { color: var(--danger); }
+  #panes { flex: 1; display: flex; min-height: 0; }
+  .pane { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); min-width: 0; }
+  .pane:last-child { border-right: none; }
+  .pane h3 { margin: 0; padding: 8px 12px; font-size: 12px; text-transform: uppercase; color: #888; background: var(--panel); border-bottom: 1px solid var(--border); }
+  .pane-body { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: #181818; position: relative; }
+  .pane-body img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .pane-body.empty::after { content: 'no image'; color: #555; font-size: 13px; }
+  #tex-editor { width: 100%; height: 100%; background: #1e1e1e; color: #d4d4d4; border: none; resize: none; font-family: var(--mono); font-size: 12.5px; padding: 12px; line-height: 1.5; outline: none; }
+  #log { position: absolute; bottom: 0; left: 0; right: 0; max-height: 40%; overflow-y: auto; background: #2b1414; color: #f14c4c; font-family: var(--mono); font-size: 11px; padding: 8px; white-space: pre-wrap; display: none; }
+  #log.visible { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <h2>Samples</h2>
+    <input id="search" placeholder="Filter samples...">
+    <ul id="sample-list"></ul>
+  </div>
+  <div id="main">
+    <div id="toolbar">
+      <button id="btn-compile">Compile &amp; Render</button>
+      <button id="btn-save">Save</button>
+      <button id="btn-revert">Revert</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div id="panes">
+      <div class="pane">
+        <h3>Ground Truth</h3>
+        <div class="pane-body" id="gt-body"></div>
+      </div>
+      <div class="pane">
+        <h3>TikZ Source</h3>
+        <div class="pane-body" style="align-items: stretch; justify-content: stretch;">
+          <textarea id="tex-editor" spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div class="pane">
+        <h3>Rendered Output</h3>
+        <div class="pane-body" id="render-body">
+          <div id="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let samples = [];
+let current = null;
+let originalTex = "";
+
+async function loadSamples() {
+  const res = await fetch('/api/samples');
+  samples = await res.json();
+  renderList(samples);
+  if (samples.length) selectSample(samples[0].id);
+}
+
+function renderList(list) {
+  const ul = document.getElementById('sample-list');
+  ul.innerHTML = '';
+  for (const s of list) {
+    const li = document.createElement('li');
+    li.textContent = s.id;
+    li.dataset.id = s.id;
+    li.onclick = () => selectSample(s.id);
+    ul.appendChild(li);
+  }
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status' + (cls ? ' ' + cls : '');
+}
+
+async function selectSample(id) {
+  current = samples.find(s => s.id === id);
+  if (!current) return;
+
+  document.querySelectorAll('#sample-list li').forEach(li => {
+    li.classList.toggle('active', li.dataset.id === id);
+  });
+
+  const gtBody = document.getElementById('gt-body');
+  gtBody.innerHTML = '';
+  gtBody.className = 'pane-body';
+  if (current.image_path) {
+    const img = document.createElement('img');
+    img.src = `/api/samples/${encodeURIComponent(id)}/image`;
+    gtBody.appendChild(img);
+  } else {
+    gtBody.className = 'pane-body empty';
+  }
+
+  const texRes = await fetch(`/api/samples/${encodeURIComponent(id)}/tex`);
+  const texData = await texRes.json();
+  originalTex = texData.tex || '';
+  document.getElementById('tex-editor').value = originalTex;
+
+  document.getElementById('render-body').innerHTML = '<div id="log"></div>';
+  setStatus('');
+}
+
+async function compileCurrent() {
+  const tex = document.getElementById('tex-editor').value;
+  setStatus('Compiling...', '');
+  document.getElementById('btn-compile').disabled = true;
+  try {
+    const res = await fetch('/api/compile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tex })
+    });
+    const data = await res.json();
+    const renderBody = document.getElementById('render-body');
+    if (data.ok) {
+      renderBody.innerHTML = `<img src="${data.png_url}">`;
+      setStatus('Compiled OK', 'ok');
+    } else {
+      renderBody.innerHTML = `<div id="log" class="visible">${escapeHtml(data.log || 'Compilation failed')}</div>`;
+      setStatus('Compile failed', 'err');
+    }
+  } finally {
+    document.getElementById('btn-compile').disabled = false;
+  }
+}
+
+async function saveCurrent() {
+  if (!current) return;
+  const tex = document.getElementById('tex-editor').value;
+  await fetch(`/api/samples/${encodeURIComponent(current.id)}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tex })
+  });
+  originalTex = tex;
+  setStatus('Saved', 'ok');
+}
+
+function revertCurrent() {
+  document.getElementById('tex-editor').value = originalTex;
+  setStatus('Reverted', '');
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+document.getElementById('btn-compile').onclick = compileCurrent;
+document.getElementById('btn-save').onclick = saveCurrent;
+document.getElementById('btn-revert').onclick = revertCurrent;
+document.getElementById('search').oninput = (e) => {
+  const q = e.target.value.toLowerCase();
+  renderList(samples.filter(s => s.id.toLowerCase().includes(q)));
+};
+
+loadSamples();
+</script>
+</body>
+</html>
