@@ -30,14 +30,16 @@ This tool exists for three reasons:
 
 ## Layout
 
-Left to right: **Ground Truth** (original diagram image) and **Rendered
-Output** (compiled TikZ) are placed side by side so they're directly
-comparable at a glance; the **TikZ Source** editor is on the far right,
-since it's the thing you edit only after spotting a mismatch between the
-first two panes. The sample list sidebar is deliberately narrow — it only
-needs to show sample IDs (truncated with an ellipsis, full ID on hover) and
-a done/pending indicator, not take up space that the image/render panes
-need more.
+**Ground Truth** (original diagram image) and **Rendered Output** (compiled
+TikZ) are stacked top/bottom in the same left-hand column so they're
+directly comparable at a glance — most of these architecture diagrams are
+wide/landscape, so stacking makes better use of the available width than
+placing them side by side. The **TikZ Source** editor is a separate column
+on the far right, since it's the thing you edit only after spotting a
+mismatch between the two image panes. The sample list sidebar is
+deliberately narrow — it only needs to show sample IDs (truncated with an
+ellipsis, full ID on hover) and a done/pending indicator, not take up space
+that the image/render panes need more.
 
 ## Annotation workflow
 
@@ -67,22 +69,51 @@ need more.
 
 ## Run (inside the project docker container)
 
+First check whether it's already running (someone else may have started it):
+
 ```bash
-cd /code/viewer
-pip install -r requirements.txt
-python app.py --data-root /code/examples --port 7860
+docker exec img-2-svg-pretraining-singlenode-venkat.kesav bash -c "ps aux | grep '[a]pp.py'"
 ```
 
-Then open `http://<host>:7860`.
+If nothing is running, start it. **Foreground** (from inside the container,
+useful for seeing errors/logs live):
 
-Point `--data-root` at `/code/data/<extracted-set>` once the real Stage-1
-dataset is unpacked; the scanner does not assume any particular naming
-convention beyond "a `.tex` file plus a nearby image".
+```bash
+docker exec -it img-2-svg-pretraining-singlenode-venkat.kesav bash
+cd /code/viewer
+pip install -r requirements.txt   # only needed once per environment
+python app.py --data-root /code/data/test_extracted/test --port 7860
+```
+
+**Background** (single command from bare metal, doesn't tie up a terminal):
+
+```bash
+docker exec -d img-2-svg-pretraining-singlenode-venkat.kesav bash -c \
+  "source /environments/img_2_svg_pretraining/bin/activate; cd /code/viewer && python3 app.py --data-root /code/data/test_extracted/test --port 7860 > /tmp/viewer.log 2>&1"
+```
+
+Check it came up with `docker exec img-2-svg-pretraining-singlenode-venkat.kesav bash -c "cat /tmp/viewer.log"`.
+
+Then open `http://<host>:7860` (see "Accessing from your local machine"
+below if you're not physically on that host).
+
+Point `--data-root` at whichever extracted dataset directory you want to
+annotate (e.g. `/code/data/<extracted-set>`); the scanner does not assume
+any particular naming convention beyond "a `.tex` file plus a nearby image".
 
 Port `7860` is published from the container to its host via `-p 7860:7860`
 in `docker/init.sh`, so once the viewer is running in the container, it's
 already reachable at `http://<host>:7860` from anywhere that can reach the
 host directly.
+
+**To restart** (e.g. after a code change), stop the existing process first:
+
+```bash
+docker exec img-2-svg-pretraining-singlenode-venkat.kesav bash -c "pkill -f 'app.py --data-root'"
+```
+
+then relaunch with the background command above. Restarting does **not**
+lose annotations — those live in `viewer/annotations.db`, not in memory.
 
 ## Accessing from your local machine
 
