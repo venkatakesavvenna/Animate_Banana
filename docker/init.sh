@@ -11,6 +11,7 @@ DATA_MOUNT3="/fsxvision"
 HF_CACHE="/fsxvision_new/venkat.kesav/backup/hf_cache"
 ENVIRONMENT_MOUNT="/fsxvision_new/${USER_NAME}/environments"
 ENV_NAME="img_2_svg_pretraining"
+VIEWER_PORT=7860
 
 DOCKERFILE_NAME="Dockerfile"
 
@@ -48,6 +49,7 @@ else
         -v /opt/dlami/nvme:/opt/dlami/nvme \
         -v $HF_CACHE:/root/.cache/huggingface \
         -v $ENVIRONMENT_MOUNT:/environments \
+        -p $VIEWER_PORT:$VIEWER_PORT \
         --name $CONTAINER_NAME \
         -w /code \
         -it \
@@ -91,3 +93,4 @@ echo "✓ Environment will auto-activate on container entry."
 echo "=== Initialization Complete ==="
 echo "To access the container, run: docker exec -it $CONTAINER_NAME bash"
 echo "Python environment '${ENV_NAME}' will be automatically activated."
+echo "Container port $VIEWER_PORT is published to the host — run the viewer with --port $VIEWER_PORT and open http://<host>:$VIEWER_PORT"

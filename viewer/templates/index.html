@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>TikZ Sample Viewer</title>
+<title>TikZ Annotator</title>
 <style>
   :root {
     --bg: #1e1e1e; --panel: #252526; --border: #3c3c3c; --text: #d4d4d4;
@@ -10,19 +10,51 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, sans-serif; height: 100vh; overflow: hidden; }
-  #app { display: flex; height: 100vh; }
-  #sidebar { width: 280px; background: var(--panel); border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; }
-  #sidebar h2 { font-size: 13px; text-transform: uppercase; color: #888; padding: 12px; margin: 0; border-bottom: 1px solid var(--border); }
-  #search { width: calc(100% - 16px); margin: 8px; padding: 6px; background: #333; border: 1px solid var(--border); color: var(--text); border-radius: 4px; }
-  #sample-list { list-style: none; margin: 0; padding: 0; }
-  #sample-list li { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #2d2d2d; word-break: break-all; }
+  #login { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  #login .box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 28px 32px; text-align: center; min-width: 260px; }
+  #login .box h1 { font-size: 15px; margin: 0 0 16px; color: #ccc; }
+  #login select { width: 100%; padding: 8px; background: #333; border: 1px solid var(--border); color: var(--text); border-radius: 4px; font-size: 13px; margin-bottom: 12px; }
+  #login button { width: 100%; background: #0e639c; color: white; border: none; padding: 8px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #login button:hover { background: #1177bb; }
+  #app { display: none; height: 100vh; }
+  #app.ready { display: flex; }
+  #current-user { font-size: 12px; color: #999; padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  #current-user b { color: var(--accent); }
+  #current-user a { color: #6ab0f3; cursor: pointer; text-decoration: none; font-size: 11px; }
+  #progress-bar-wrap { padding: 0 12px 8px; }
+  #progress-bar { height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
+  #progress-bar-fill { height: 100%; background: var(--accent); width: 0%; }
+  #progress-label { font-size: 10.5px; color: #777; margin-top: 3px; }
+  #sidebar { width: 190px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  #sidebar h2 { font-size: 13px; text-transform: uppercase; color: #888; padding: 12px 12px 4px; margin: 0; }
+  #sidebar .count { font-size: 11px; color: #666; padding: 0 12px 8px; }
+  #search { width: calc(100% - 16px); margin: 0 8px 8px; padding: 6px; background: #333; border: 1px solid var(--border); color: var(--text); border-radius: 4px; }
+  #filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px 8px; border-bottom: 1px solid var(--border); }
+  #filters select, #filters label { font-size: 11px; color: #ccc; }
+  #filters select { background: #333; border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 3px; }
+  #filters .failed-toggle { display: flex; align-items: center; gap: 4px; }
+  #sample-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+  #sample-list li { padding: 5px 8px; cursor: pointer; font-size: 11.5px; border-bottom: 1px solid #2d2d2d; display: flex; align-items: center; gap: 5px; }
   #sample-list li:hover { background: #2a2d2e; }
   #sample-list li.active { background: #094771; }
+  #sample-list li .badge { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: #3a3; }
+  #sample-list li .badge.failed { background: var(--danger); }
+  #sample-list li .badge.no-render { background: #888; }
+  #sample-list li label.id-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sample-list li .done-check { flex-shrink: 0; font-size: 11px; }
+  #sample-list li .done-check.done { color: var(--accent); }
+  #sample-list li .done-check.pending { color: #444; }
+  #toolbar button.done-btn { background: #2d7d46; }
+  #toolbar button.done-btn:hover { background: #35914f; }
+  #toolbar button.done-btn.is-done { background: #444; }
+  #toolbar button.done-btn.is-done:hover { background: #555; }
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #toolbar { padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
   #toolbar button { background: #0e639c; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
   #toolbar button:hover { background: #1177bb; }
   #toolbar button:disabled { background: #444; cursor: not-allowed; }
+  #toolbar .meta { font-size: 12px; color: #999; }
+  #toolbar .meta b { color: #ccc; }
   #toolbar .status { font-size: 12px; color: #888; margin-left: auto; }
   #toolbar .status.ok { color: var(--accent); }
   #toolbar .status.err { color: var(--danger); }
@@ -39,23 +71,54 @@
 </style>
 </head>
 <body>
+<div id="login">
+  <div class="box">
+    <h1>Select annotator</h1>
+    <select id="login-user"></select>
+    <button id="login-btn">Start annotating</button>
+  </div>
+</div>
 <div id="app">
   <div id="sidebar">
+    <div id="current-user"><span>Annotator: <b id="current-user-name"></b></span><a id="switch-user">switch</a></div>
+    <div id="progress-bar-wrap">
+      <div id="progress-bar"><div id="progress-bar-fill"></div></div>
+      <div id="progress-label"></div>
+    </div>
     <h2>Samples</h2>
-    <input id="search" placeholder="Filter samples...">
+    <div class="count" id="sample-count"></div>
+    <input id="search" placeholder="Filter by id...">
+    <div id="filters">
+      <select id="filter-venue"><option value="">All venues</option></select>
+      <select id="filter-kind"><option value="">All kinds</option></select>
+      <select id="filter-status">
+        <option value="">All statuses</option>
+        <option value="pending">Pending only</option>
+        <option value="done">Done only</option>
+      </select>
+      <label class="failed-toggle"><input type="checkbox" id="filter-failed"> failed only</label>
+    </div>
     <ul id="sample-list"></ul>
   </div>
   <div id="main">
     <div id="toolbar">
       <button id="btn-compile">Compile &amp; Render</button>
-      <button id="btn-save">Save</button>
-      <button id="btn-revert">Revert</button>
+      <button id="btn-save">Save Draft</button>
+      <button id="btn-revert">Revert to Original</button>
+      <button id="btn-done" class="done-btn">Mark as Done</button>
+      <span class="meta" id="sample-meta"></span>
       <span class="status" id="status"></span>
     </div>
     <div id="panes">
       <div class="pane">
-        <h3>Ground Truth</h3>
+        <h3>Ground Truth (Original Diagram)</h3>
         <div class="pane-body" id="gt-body"></div>
+      </div>
+      <div class="pane">
+        <h3 id="render-title">Rendered Output</h3>
+        <div class="pane-body" id="render-body">
+          <div id="log"></div>
+        </div>
       </div>
       <div class="pane">
         <h3>TikZ Source</h3>
@@ -63,25 +126,106 @@
           <textarea id="tex-editor" spellcheck="false"></textarea>
         </div>
       </div>
-      <div class="pane">
-        <h3>Rendered Output</h3>
-        <div class="pane-body" id="render-body">
-          <div id="log"></div>
-        </div>
-      </div>
     </div>
   </div>
 </div>
 <script>
 let samples = [];
+let filtered = [];
 let current = null;
 let originalTex = "";
+let currentUser = null;
+
+function authHeaders() {
+  return { 'Content-Type': 'application/json', 'X-Annotator-User': currentUser };
+}
+
+async function initLogin() {
+  const res = await fetch('/api/users');
+  const users = await res.json();
+  const sel = document.getElementById('login-user');
+  sel.innerHTML = '';
+  for (const u of users) {
+    const opt = document.createElement('option');
+    opt.value = u; opt.textContent = u;
+    sel.appendChild(opt);
+  }
+  const saved = localStorage.getItem('annotator_user');
+  if (saved && users.includes(saved)) {
+    startSession(saved);
+    return;
+  }
+  document.getElementById('login').style.display = 'flex';
+  document.getElementById('login-btn').onclick = () => startSession(sel.value);
+}
+
+function startSession(user) {
+  currentUser = user;
+  localStorage.setItem('annotator_user', user);
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('app').classList.add('ready');
+  document.getElementById('current-user-name').textContent = user;
+  loadSamples();
+  loadProgress();
+}
+
+document.getElementById('switch-user').onclick = () => {
+  localStorage.removeItem('annotator_user');
+  location.reload();
+};
+
+async function loadProgress() {
+  const res = await fetch('/api/progress');
+  const p = await res.json();
+  const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+  document.getElementById('progress-bar-fill').style.width = pct + '%';
+  const byUser = Object.entries(p.by_user || {}).map(([u, c]) => `${u}: ${c}`).join(', ');
+  document.getElementById('progress-label').textContent =
+    `${p.done} / ${p.total} done (${pct}%)` + (byUser ? ` — ${byUser}` : '');
+}
 
 async function loadSamples() {
   const res = await fetch('/api/samples');
   samples = await res.json();
-  renderList(samples);
-  if (samples.length) selectSample(samples[0].id);
+  populateFilterOptions();
+  applyFilters();
+  if (filtered.length) selectSample(filtered[0].id);
+}
+
+function populateFilterOptions() {
+  const venues = [...new Set(samples.map(s => s.venue).filter(Boolean))].sort();
+  const kinds = [...new Set(samples.map(s => s.kind).filter(Boolean))].sort();
+  const venueSel = document.getElementById('filter-venue');
+  const kindSel = document.getElementById('filter-kind');
+  for (const v of venues) {
+    const opt = document.createElement('option');
+    opt.value = v; opt.textContent = v;
+    venueSel.appendChild(opt);
+  }
+  for (const k of kinds) {
+    const opt = document.createElement('option');
+    opt.value = k; opt.textContent = k;
+    kindSel.appendChild(opt);
+  }
+}
+
+function applyFilters() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const venue = document.getElementById('filter-venue').value;
+  const kind = document.getElementById('filter-kind').value;
+  const status = document.getElementById('filter-status').value;
+  const failedOnly = document.getElementById('filter-failed').checked;
+
+  filtered = samples.filter(s => {
+    if (q && !s.id.toLowerCase().includes(q)) return false;
+    if (venue && s.venue !== venue) return false;
+    if (kind && s.kind !== kind) return false;
+    if (status && s.annotation_status !== status) return false;
+    if (failedOnly && !s.failed_compile) return false;
+    return true;
+  });
+  renderList(filtered);
+  document.getElementById('sample-count').textContent = `${filtered.length} / ${samples.length} samples`;
 }
 
 function renderList(list) {
@@ -89,7 +233,21 @@ function renderList(list) {
   ul.innerHTML = '';
   for (const s of list) {
     const li = document.createElement('li');
-    li.textContent = s.id;
+    const badge = document.createElement('span');
+    badge.className = 'badge' + (s.failed_compile ? ' failed' : (!s.has_rendered ? ' no-render' : ''));
+    badge.title = s.failed_compile ? 'failed to compile' : (s.has_rendered ? 'compiled ok' : 'no precomputed render');
+    const label = document.createElement('label');
+    label.className = 'id-text';
+    label.textContent = s.id;
+    label.title = s.id;
+    const done = document.createElement('span');
+    const isDone = s.annotation_status === 'done';
+    done.className = 'done-check ' + (isDone ? 'done' : 'pending');
+    done.textContent = isDone ? '✓' : '○';
+    done.title = isDone ? `done by ${s.annotated_by}` : 'pending';
+    li.appendChild(badge);
+    li.appendChild(label);
+    li.appendChild(done);
     li.dataset.id = s.id;
     li.onclick = () => selectSample(s.id);
     ul.appendChild(li);
@@ -110,6 +268,11 @@ async function selectSample(id) {
     li.classList.toggle('active', li.dataset.id === id);
   });
 
+  const metaBits = [current.venue, current.year, current.kind].filter(Boolean);
+  document.getElementById('sample-meta').innerHTML = metaBits.length
+    ? `<b>${current.id}</b> &middot; ${metaBits.join(' / ')}`
+    : `<b>${current.id}</b>`;
+
   const gtBody = document.getElementById('gt-body');
   gtBody.innerHTML = '';
   gtBody.className = 'pane-body';
@@ -123,10 +286,25 @@ async function selectSample(id) {
 
   const texRes = await fetch(`/api/samples/${encodeURIComponent(id)}/tex`);
   const texData = await texRes.json();
-  originalTex = texData.tex || '';
-  document.getElementById('tex-editor').value = originalTex;
+  current.annotation_status = texData.status;
+  current.annotated_by = texData.annotated_by;
+  originalTex = texData.original_tex || '';
+  document.getElementById('tex-editor').value = texData.tex || '';
+  updateDoneButton();
 
-  document.getElementById('render-body').innerHTML = '<div id="log"></div>';
+  const renderBody = document.getElementById('render-body');
+  const renderTitle = document.getElementById('render-title');
+  if (current.has_rendered) {
+    renderTitle.textContent = 'Rendered Output (precomputed)';
+    renderBody.innerHTML = `<img src="/api/samples/${encodeURIComponent(id)}/rendered">`;
+  } else {
+    renderTitle.textContent = 'Rendered Output';
+    renderBody.innerHTML = '<div id="log"></div>';
+    if (current.failed_compile) {
+      renderBody.querySelector('#log').className = 'visible';
+      renderBody.querySelector('#log').textContent = 'This sample failed to compile in the dataset. Click "Compile & Render" to see the current error.';
+    }
+  }
   setStatus('');
 }
 
@@ -142,6 +320,7 @@ async function compileCurrent() {
     });
     const data = await res.json();
     const renderBody = document.getElementById('render-body');
+    document.getElementById('render-title').textContent = 'Rendered Output (live compile)';
     if (data.ok) {
       renderBody.innerHTML = `<img src="${data.png_url}">`;
       setStatus('Compiled OK', 'ok');
@@ -157,18 +336,59 @@ async function compileCurrent() {
 async function saveCurrent() {
   if (!current) return;
   const tex = document.getElementById('tex-editor').value;
-  await fetch(`/api/samples/${encodeURIComponent(current.id)}/save`, {
+  const res = await fetch(`/api/samples/${encodeURIComponent(current.id)}/save`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({ tex })
   });
-  originalTex = tex;
-  setStatus('Saved', 'ok');
+  const data = await res.json();
+  current.annotation_status = data.status;
+  current.annotated_by = data.annotated_by;
+  updateSampleInList();
+  updateDoneButton();
+  setStatus('Draft saved', 'ok');
+}
+
+function updateDoneButton() {
+  const btn = document.getElementById('btn-done');
+  const isDone = current && current.annotation_status === 'done';
+  btn.textContent = isDone ? 'Reopen (undo Done)' : 'Mark as Done';
+  btn.classList.toggle('is-done', !!isDone);
+}
+
+async function toggleDone() {
+  if (!current) return;
+  const tex = document.getElementById('tex-editor').value;
+  const nextStatus = current.annotation_status === 'done' ? 'pending' : 'done';
+  const res = await fetch(`/api/samples/${encodeURIComponent(current.id)}/status`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ tex, status: nextStatus })
+  });
+  const data = await res.json();
+  current.annotation_status = data.status;
+  current.annotated_by = data.annotated_by;
+  updateSampleInList();
+  updateDoneButton();
+  loadProgress();
+  setStatus(nextStatus === 'done' ? 'Marked as done' : 'Reopened', 'ok');
+}
+
+function updateSampleInList() {
+  const s = samples.find(s => s.id === current.id);
+  if (s) {
+    s.annotation_status = current.annotation_status;
+    s.annotated_by = current.annotated_by;
+  }
+  applyFilters();
+  document.querySelectorAll('#sample-list li').forEach(li => {
+    li.classList.toggle('active', li.dataset.id === current.id);
+  });
 }
 
 function revertCurrent() {
   document.getElementById('tex-editor').value = originalTex;
-  setStatus('Reverted', '');
+  setStatus('Reverted to original', '');
 }
 
 function escapeHtml(s) {
@@ -180,12 +400,14 @@ function escapeHtml(s) {
 document.getElementById('btn-compile').onclick = compileCurrent;
 document.getElementById('btn-save').onclick = saveCurrent;
 document.getElementById('btn-revert').onclick = revertCurrent;
-document.getElementById('search').oninput = (e) => {
-  const q = e.target.value.toLowerCase();
-  renderList(samples.filter(s => s.id.toLowerCase().includes(q)));
-};
+document.getElementById('btn-done').onclick = toggleDone;
+document.getElementById('search').oninput = applyFilters;
+document.getElementById('filter-venue').onchange = applyFilters;
+document.getElementById('filter-kind').onchange = applyFilters;
+document.getElementById('filter-status').onchange = applyFilters;
+document.getElementById('filter-failed').onchange = applyFilters;
 
-loadSamples();
+initLogin();
 </script>
 </body>
 </html>

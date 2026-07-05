@@ -11,3 +11,8 @@ __pycache__/
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+
+backup/
+
+# Annotation DB (runtime state, not source)
+viewer/annotations.db
