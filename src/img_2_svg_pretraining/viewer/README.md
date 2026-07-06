@@ -69,10 +69,14 @@ that the image/render panes need more.
 
 ## Run (inside the project docker container)
 
+The viewer is an installed package module (`img_2_svg_pretraining.viewer.app`,
+under `src/`) — after any pull, re-run `pip install -e /code` inside the
+container if `src/` layout or dependencies changed.
+
 First check whether it's already running (someone else may have started it):
 
 ```bash
-docker exec img-2-svg-pretraining-singlenode-venkat.kesav bash -c "ps aux | grep '[a]pp.py'"
+docker exec img-2-svg-pretraining-singlenode-venkat.kesav bash -c "ps aux | grep '[i]mg_2_svg_pretraining.viewer.app'"
 ```
 
 If nothing is running, start it. **Foreground** (from inside the container,
@@ -80,16 +84,14 @@ useful for seeing errors/logs live):
 
 ```bash
 docker exec -it img-2-svg-pretraining-singlenode-venkat.kesav bash
-cd /code/viewer
-pip install -r requirements.txt   # only needed once per environment
-python app.py --data-root /code/data/test_extracted/test --port 7860
+python -m img_2_svg_pretraining.viewer.app --data-root /code/data/test_extracted/test --port 7860
 ```
 
 **Background** (single command from bare metal, doesn't tie up a terminal):
 
 ```bash
 docker exec -d img-2-svg-pretraining-singlenode-venkat.kesav bash -c \
-  "source /environments/img_2_svg_pretraining/bin/activate; cd /code/viewer && python3 app.py --data-root /code/data/test_extracted/test --port 7860 > /tmp/viewer.log 2>&1"
+  "source /environments/img_2_svg_pretraining/bin/activate; python -m img_2_svg_pretraining.viewer.app --data-root /code/data/test_extracted/test --port 7860 > /tmp/viewer.log 2>&1"
 ```
 
 Check it came up with `docker exec img-2-svg-pretraining-singlenode-venkat.kesav bash -c "cat /tmp/viewer.log"`.
@@ -109,7 +111,7 @@ host directly.
 **To restart** (e.g. after a code change), stop the existing process first:
 
 ```bash
-docker exec img-2-svg-pretraining-singlenode-venkat.kesav bash -c "pkill -f 'app.py --data-root'"
+docker exec img-2-svg-pretraining-singlenode-venkat.kesav bash -c "pkill -f 'img_2_svg_pretraining.viewer.app'"
 ```
 
 then relaunch with the background command above. Restarting does **not**

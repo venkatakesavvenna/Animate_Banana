@@ -16,3 +16,9 @@ backup/
 
 # Annotation DB (runtime state, not source)
 viewer/annotations.db
+
+test/
+
+src/img_2_svg_pretraining/benchmark/render_cache
+
+src/img_2_svg_pretraining/benchmark/results/

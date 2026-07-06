@@ -2,7 +2,7 @@
 diagram images (Stage 1: image -> TikZ), so it matches the ground truth image.
 
 Run inside the project docker container:
-    python viewer/app.py --data-root /code/data/Set-2 --port 7860
+    python -m img_2_svg_pretraining.viewer.app --data-root /code/data/Set-2 --port 7860
 
 Then open http://<host>:7860 in a browser, pick a user (user_1/2/3), and
 annotate. Edits are saved to a SQLite DB (viewer/annotations.db by default),
@@ -20,9 +20,9 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_file
 
-from samples import discover_samples
-from compile import compile_tikz
-from db import AnnotationDB, USERS
+from img_2_svg_pretraining.viewer.samples import discover_samples
+from img_2_svg_pretraining.viewer.compile import compile_tikz
+from img_2_svg_pretraining.viewer.db import AnnotationDB, USERS
 
 app = Flask(__name__)
 
