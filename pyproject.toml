@@ -16,7 +16,17 @@ dependencies = [
     "flash-attn",
     "numpy<2",
     "cairosvg>=2.7",
+    "streamlit>=1.38",
+    "streamlit-image-coordinates>=0.4.0",
+    "streamlit-shortcuts>=1.2",
+    "streamlit-drawable-canvas>=0.9.3",
+    "opencv-python>=4.9",
+    "pycocotools>=2.0",
+    "filelock>=3.12",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

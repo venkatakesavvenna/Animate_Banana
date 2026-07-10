@@ -12,6 +12,7 @@ HF_CACHE="/fsxvision_new/venkat.kesav/backup/hf_cache"
 ENVIRONMENT_MOUNT="/fsxvision_new/${USER_NAME}/environments"
 ENV_NAME="img_2_svg_pretraining"
 VIEWER_PORT=7860
+ANNOTATOR_PORT=8600
 
 DOCKERFILE_NAME="Dockerfile"
 
@@ -50,6 +51,7 @@ else
         -v $HF_CACHE:/root/.cache/huggingface \
         -v $ENVIRONMENT_MOUNT:/environments \
         -p $VIEWER_PORT:$VIEWER_PORT \
+        -p $ANNOTATOR_PORT:$ANNOTATOR_PORT \
         --name $CONTAINER_NAME \
         -w /code \
         -it \
@@ -94,3 +96,4 @@ echo "=== Initialization Complete ==="
 echo "To access the container, run: docker exec -it $CONTAINER_NAME bash"
 echo "Python environment '${ENV_NAME}' will be automatically activated."
 echo "Container port $VIEWER_PORT is published to the host — run the viewer with --port $VIEWER_PORT and open http://<host>:$VIEWER_PORT"
+echo "Container port $ANNOTATOR_PORT is published to the host — run the node annotation tool with --server.port $ANNOTATOR_PORT and open http://<host>:$ANNOTATOR_PORT"

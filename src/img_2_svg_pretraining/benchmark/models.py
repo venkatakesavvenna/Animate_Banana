@@ -47,6 +47,11 @@ MODELS: dict[str, ModelSpec] = {
         hf_repo="google/gemma-4-E4B-it",
         attn_implementation="sdpa",
     ),
+    "gemma-4-31b": ModelSpec(
+        name="gemma-4-31b",
+        hf_repo="google/gemma-4-31B-it",
+        attn_implementation="sdpa",
+    ),
     "kimi-vl": ModelSpec(
         name="kimi-vl",
         hf_repo="moonshotai/Kimi-VL-A3B-Instruct",

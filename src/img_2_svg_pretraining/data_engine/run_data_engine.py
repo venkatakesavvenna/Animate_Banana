@@ -52,6 +52,12 @@ def _parse_args():
 
     def common(p):
         p.add_argument("--data-root", type=str, default="/code/data/partial_test_set")
+        p.add_argument("--image-subdir", type=str, default="images",
+                        help="image subdir under --data-root (e.g. 'images' for partial_test_set, "
+                             "'original_images' for data/train)")
+        p.add_argument("--dataset", type=str, default=None,
+                        help="cache namespace under cache/<dataset>/ so datasets don't collide on "
+                             "same-id samples; defaults to the basename of --data-root (e.g. 'train')")
         p.add_argument("--limit", type=int, default=8, help="0 = all samples")
         p.add_argument("--gpu", type=str, default="1", help="single physical GPU id to run on")
 
@@ -61,6 +67,12 @@ def _parse_args():
                           help="registry key from models.py: molmo-point-8b or molmo2-8b")
     p_point.add_argument("--node-query", type=str, default=None)
     p_point.add_argument("--raster-query", type=str, default=None)
+
+    p_box = sub.add_parser("box", help="Gemma4 point-hint -> bounding-box grounding (rasters only for now)")
+    common(p_box)
+    p_box.add_argument("--pointing-model", default="molmo2-8b",
+                        help="which cache/points/<id>.json to read (must match a prior `point` run)")
+    p_box.add_argument("--box-model", default="gemma-4-31b", help="benchmark.models registry key")
 
     p_segment = sub.add_parser("segment", help="SAM3 segmentation of cached points")
     common(p_segment)
@@ -99,12 +111,24 @@ def _parse_args():
 # shared helpers
 # ---------------------------------------------------------------------------
 
+# Dataset namespace for the cache -- set once in main() from --dataset (or
+# derived from --data-root) so different datasets (train, test,
+# partial_test_set, ...) never collide on same-id samples in the shared
+# cache/ tree. Every path helper routes through _cache_dir(), so setting
+# this here namespaces all stages at once.
+_DATASET = "default"
+
+
 def _cache_dir() -> Path:
-    return Path(__file__).parent / "cache"
+    return Path(__file__).parent / "cache" / _DATASET
 
 
 def _points_path(sample_id: str, pointing_model: str) -> Path:
     return _cache_dir() / "points" / pointing_model / f"{sample_id}.json"
+
+
+def _boxes_path(sample_id: str, pointing_model: str, box_model: str) -> Path:
+    return _cache_dir() / "boxes" / f"{pointing_model}__{box_model}" / f"{sample_id}.json"
 
 
 def _masks_manifest_path(sample_id: str, pointing_model: str, segmentation_model: str) -> Path:
@@ -185,8 +209,8 @@ def _overlay_masks(image, mask_items):
 # ---------------------------------------------------------------------------
 
 def _run_point(args, samples):
-    from img_2_svg_pretraining.data_engine.models import get_pointing_model
     from img_2_svg_pretraining.data_engine.pointing import NODE_QUERY, RASTER_QUERY, make_point_runner
+    from img_2_svg_pretraining.data_engine.pointing.models import get_pointing_model
     from PIL import Image
 
     node_query = args.node_query or NODE_QUERY
@@ -221,11 +245,64 @@ def _run_point(args, samples):
 
 
 # ---------------------------------------------------------------------------
+# stage: box
+# ---------------------------------------------------------------------------
+
+def _overlay_boxes(image, box_results):
+    from PIL import ImageDraw, ImageFont
+
+    marked = image.convert("RGB").copy()
+    draw = ImageDraw.Draw(marked)
+    try:
+        font = ImageFont.load_default(size=16)
+    except TypeError:
+        font = ImageFont.load_default()
+
+    for b in box_results:
+        draw.rectangle(b.box, outline="deepskyblue", width=2)
+        draw.text((b.box[0] + 2, b.box[1] + 2), f"r{b.object_id}", fill="deepskyblue", font=font)
+    return marked
+
+
+def _run_box(args, samples):
+    from img_2_svg_pretraining.benchmark.models import get_model
+    from img_2_svg_pretraining.data_engine.boxing.gemma4 import Gemma4BoxRunner
+    from PIL import Image
+
+    print(f"Loading box-grounding model ({args.box_model})...")
+    box_runner = Gemma4BoxRunner(get_model(args.box_model))
+    print("Model loaded.")
+
+    for i, sample in enumerate(samples, 1):
+        t0 = time.time()
+        try:
+            node_points, raster_points = _load_points(sample.id, args.pointing_model)
+
+            raster_boxes = box_runner.box_rasters(sample.image_path, raster_points)
+
+            out_path = _boxes_path(sample.id, args.pointing_model, args.box_model)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps({
+                "rasters": [{"object_id": b.object_id, "box": list(b.box)} for b in raster_boxes],
+            }, indent=2))
+
+            image = Image.open(sample.image_path)
+            _overlay_boxes(image, raster_boxes).save(out_path.with_suffix(".png"))
+
+            print(f"[{i}/{len(samples)}] {sample.id}: {len(raster_points)} raster hints -> "
+                  f"{len(raster_boxes)} boxes ({time.time()-t0:.1f}s)")
+        except Exception as e:  # noqa: BLE001
+            print(f"[{i}/{len(samples)}] {sample.id}: ERROR {e}")
+
+    print(f"Done. Output at {_boxes_path('<id>', args.pointing_model, args.box_model).parent}")
+
+
+# ---------------------------------------------------------------------------
 # stage: segment
 # ---------------------------------------------------------------------------
 
 def _load_points(sample_id: str, pointing_model: str):
-    from img_2_svg_pretraining.data_engine.pointing import PointResult
+    from img_2_svg_pretraining.data_engine.pointing.common import PointResult
 
     path = _points_path(sample_id, pointing_model)
     if not path.exists():
@@ -241,8 +318,8 @@ def _load_points(sample_id: str, pointing_model: str):
 
 
 def _run_segment(args, samples):
-    from img_2_svg_pretraining.data_engine.models import get_segmentation_model
     from img_2_svg_pretraining.data_engine.segmentation import Sam3Runner, save_mask
+    from img_2_svg_pretraining.data_engine.segmentation.models import get_segmentation_model
     from PIL import Image
 
     print(f"Loading segmentation model ({args.segmentation_model})...")
@@ -500,6 +577,7 @@ def _run_judge(args, samples):
 
 STAGE_RUNNERS = {
     "point": _run_point,
+    "box": _run_box,
     "segment": _run_segment,
     "assemble": _run_assemble,
     "edges": _run_edges,
@@ -517,12 +595,16 @@ def main():
     # Deferred: torch locks in device visibility at first CUDA-touching
     # import, so CUDA_VISIBLE_DEVICES must be set (above) before any
     # torch/transformers-importing module is loaded.
-    from img_2_svg_pretraining.data_engine.samples import discover_partial_test_set
+    from img_2_svg_pretraining.data_engine.samples import discover_images
 
-    samples = discover_partial_test_set(Path(args.data_root))
+    global _DATASET
+    _DATASET = args.dataset or Path(args.data_root).name
+
+    samples = discover_images(Path(args.data_root), image_subdir=args.image_subdir)
     if args.limit:
         samples = samples[:args.limit]
-    print(f"Loaded {len(samples)} samples from {args.data_root}")
+    print(f"Loaded {len(samples)} samples from {args.data_root}/{args.image_subdir} "
+          f"(cache namespace: {_DATASET})")
 
     STAGE_RUNNERS[args.stage](args, samples)
 

@@ -1,16 +1,8 @@
-"""Model registry for the data engine's pointing and segmentation stages.
-
-Separate from `img_2_svg_pretraining.benchmark.models.ModelSpec` because
-those models are chat-style image-text-to-text VLMs (image + text prompt ->
-text), while pointing/segmentation models have different input/output shapes
-(image (+point prompts) -> points/masks) and are loaded via different
-`transformers`/model-specific APIs. The edge-discovery and codegen stages
-reuse `benchmark.models.MODELS` directly instead of duplicating a registry
-here -- see edges.py/codegen.py.
+"""Model registry for the pointing stage.
 
 Two pointing models are registered, both selectable via `--pointing-model`
-in run_pointing.py/run_data_engine.py (see pointing.py, which dispatches
-between their two different output-parsing APIs):
+in run_data_engine.py (see molmo2.py, which dispatches between their two
+different output-parsing APIs):
 - `molmo-point-8b` (`allenai/MolmoPoint-8B`): pointing-specialist checkpoint;
   points are decoded from special tokens via `model.extract_image_points(...)`
   with per-request metadata from the processor.
@@ -41,14 +33,6 @@ class Molmo2Spec:
     dtype: str = "bfloat16"
 
 
-@dataclass
-class Sam3Spec:
-    name: str
-    hf_repo: str
-    trust_remote_code: bool = False
-    dtype: str = "bfloat16"
-
-
 POINTING_MODELS: dict[str, Molmo2Spec] = {
     "molmo-point-8b": Molmo2Spec(
         name="molmo-point-8b",
@@ -60,21 +44,8 @@ POINTING_MODELS: dict[str, Molmo2Spec] = {
     ),
 }
 
-SEGMENTATION_MODELS: dict[str, Sam3Spec] = {
-    "sam3": Sam3Spec(
-        name="sam3",
-        hf_repo="facebook/sam3",
-    ),
-}
-
 
 def get_pointing_model(name: str) -> Molmo2Spec:
     if name not in POINTING_MODELS:
         raise KeyError(f"Unknown pointing model '{name}'. Known: {sorted(POINTING_MODELS)}")
     return POINTING_MODELS[name]
-
-
-def get_segmentation_model(name: str) -> Sam3Spec:
-    if name not in SEGMENTATION_MODELS:
-        raise KeyError(f"Unknown segmentation model '{name}'. Known: {sorted(SEGMENTATION_MODELS)}")
-    return SEGMENTATION_MODELS[name]

@@ -13,13 +13,23 @@ kind of data.
 
 ## Pipeline stages
 
-1. **Node/region discovery** ([pointing.py](pointing.py)) -- `MolmoPointRunner`
-   (`allenai/MolmoPoint-8B`) points at every distinct labeled node/box (one
-   query) and every embedded raster/photo region (a separate query), since
-   the model returns one flat point list per generation.
-2. **Segmentation** ([segmentation.py](segmentation.py)) -- `Sam3Runner`
-   (`facebook/sam3`, via the point-promptable `Sam3TrackerModel`/
-   `Sam3TrackerProcessor`) turns each point into a mask + derived bbox.
+Several stages have more than one method under active exploration -- those
+stages are folders (one module per method) rather than a single file. See
+each folder's own README for the full method comparison.
+
+1. **Node/region discovery** ([pointing/](pointing/)) -- point-prompted VLMs
+   point at every distinct labeled node/box (one query) and every embedded
+   raster/photo region (a separate query). Two methods: `pointing/molmo_point.py`
+   (`allenai/MolmoPoint-8B`, pointing specialist) and `pointing/molmo2.py`
+   (`allenai/Molmo2-8B`, general-purpose, currently the default). See
+   [pointing/README.md](pointing/README.md).
+2. **Segmentation** ([segmentation/](segmentation/)) -- point/image -> per-node
+   masks. Three methods explored: `segmentation/sam3_tracker.py` (point-promptable
+   SAM3, used by the main pipeline today), `segmentation/sam2_amg.py` (SAM2
+   automatic mask generation, image-only, found the most robust across
+   diagram styles), `segmentation/classical_cv.py` (flood-fill, no ML/GPU,
+   fast but brittle on low-contrast borders). See
+   [segmentation/README.md](segmentation/README.md).
 3. **Assembly** ([assemble.py](assemble.py)) -- pure geometry, no model
    calls: classifies each detected node as a top-level `Node` or a `Block`
    (any node whose bbox strictly contains other detected nodes), and nests
@@ -93,11 +103,12 @@ python -m img_2_svg_pretraining.data_engine.run_data_engine judge    --limit 8 -
   target; both share every stage except `codegen.py`'s prompt instructions
   and `render.py`'s render call.
 - `--pointing-model` / `--segmentation-model` are keys into
-  [models.py](models.py) (currently one entry each: `molmo-point-8b`,
-  `sam3`). `--edge-model` / `--codegen-model` / `--judge-model` are keys
-  into `benchmark.models.MODELS` (reused as-is). `segment`/`assemble`/`edges`
-  need the same `--pointing-model`/`--segmentation-model` value used in the
-  earlier stage that produced the cache they read.
+  [pointing/models.py](pointing/models.py) / [segmentation/models.py](segmentation/models.py)
+  (currently `molmo-point-8b`/`molmo2-8b` and `sam3`). `--edge-model` /
+  `--codegen-model` / `--judge-model` are keys into `benchmark.models.MODELS`
+  (reused as-is). `segment`/`assemble`/`edges` need the same
+  `--pointing-model`/`--segmentation-model` value used in the earlier stage
+  that produced the cache they read.
 - `--gpu` pins a single physical GPU. Because each stage is a separate
   process, only that stage's model(s) are ever resident at once -- no
   multi-GPU data-parallel sharding yet, unlike `run_benchmark.py`.
