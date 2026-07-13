@@ -2,10 +2,11 @@
 
 Self-hosted `Sam3TrackerModel`/`Sam3TrackerProcessor` (transformers,
 `facebook/sam3`) -- the point/box-promptable SAM2-compatible interactive
-mode. NEVER the text/concept-prompted `Sam3Model`: "node" is a structural
-role with no consistent visual signature, so concept prompting doesn't work
-for this task (decision recorded in the design doc, backend choice confirmed
-with the user 2026-07-10; no data leaves the machine).
+mode. NEVER the text/concept-prompted `Sam3Model`: raster regions (embedded
+photos/icons/plots/screenshots) have no consistent open-vocabulary
+description across diagrams, so concept prompting doesn't work for this task
+(decision recorded in the design doc, backend choice confirmed with the
+user 2026-07-10; no data leaves the machine).
 
 The embed/predict split (spec section 9): `ensure_embedded()` runs the
 expensive vision encoder once per image and caches the result; every

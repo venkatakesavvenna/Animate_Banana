@@ -1,4 +1,4 @@
-"""Node annotation review app (Streamlit).
+"""Raster-region annotation review app (Streamlit).
 
 One canvas, two layers (points + masks) always drawn together. One instance
 at a time: fully resolve the current instance (point confirmed, mask
@@ -51,7 +51,7 @@ ACTOR = os.environ.get("ANNOTATOR", os.environ.get("USER", "human"))
 UNDO_CAP = 20
 UNRESOLVED = ("proposed", "needs_point_review", "needs_mask_review")
 
-st.set_page_config(page_title="Node Annotator", layout="wide")
+st.set_page_config(page_title="Raster Region Annotator", layout="wide")
 
 
 # ---------------------------------------------------------------------------
@@ -380,8 +380,8 @@ with left_col:
 
     if box_mode:
         st.caption("**Box mode (fallback):** click two opposite corners of the "
-                   "node; SAM3 re-predicts from the box. Use only when a "
-                   "correctly-placed point still gives a bad mask.")
+                   "raster region; SAM3 re-predicts from the box. Use only "
+                   "when a correctly-placed point still gives a bad mask.")
     else:
         st.caption(
             "Confirmed point (green) · flagged point (red, dashed) · negative "

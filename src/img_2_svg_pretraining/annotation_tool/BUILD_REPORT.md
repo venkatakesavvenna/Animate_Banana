@@ -1,14 +1,24 @@
-# Node annotation tool — build & verification report (2026-07-10)
+# Raster-region annotation tool — build & verification report (2026-07-10)
+
+> **Scope correction (2026-07-12):** this tool is scoped to **raster
+> regions** only (embedded photos/icons/plots/screenshots), not structural
+> diagram nodes. `ingest.py` now calls `point_rasters()` (`RASTER_QUERY`),
+> not `point_nodes()`. The 20 images ingested on 2026-07-10 used the wrong
+> query and were re-ingested with `--force`. Everything below describes the
+> 2026-07-10 build; read "node" throughout as "raster region" for the
+> current tool — the underlying loop, state machine, and SAM3 backend are
+> unchanged.
 
 Implementation report for the annotation framework design doc: a Streamlit +
-SAM3 human-in-the-loop tool producing, per diagram node, a human-confirmed
+SAM3 human-in-the-loop tool producing, per raster region, a human-confirmed
 point + human-confirmed pixel mask. This supervision feeds joint fine-tuning
-of Molmo (node pointing) and SAM3 (node masking), since neither works out of
-the box for "node" — a structural role, not a visual category.
+of Molmo (raster-region pointing) and SAM3 (raster-region masking), since
+neither works out of the box for this — a raster region has no consistent
+open-vocabulary description across diagrams.
 
 **Status: built, verified, live at `http://<host>:8600`**, with the first
-20 images of `data/train/original_images` ingested (164 Molmo-proposed
-instances awaiting review in `data/annotations/`).
+20 images of `data/train/original_images` ingested (raster-region proposals
+awaiting review in `data/annotations/`).
 
 ---
 

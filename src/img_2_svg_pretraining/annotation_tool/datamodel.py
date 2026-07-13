@@ -1,8 +1,8 @@
-"""Data model for the node annotation tool.
+"""Data model for the raster-region annotation tool.
 
 Plain dataclasses serialized with ``dataclasses.asdict()`` + ``json.dump()``,
 one JSON file per image (see store.py). No OCR fields anywhere -- the
-duplicate-node-text check from an earlier draft is removed, so there is no
+duplicate-text check from an earlier draft is removed, so there is no
 ``ocr_text`` and no ``flags`` field. Don't pre-add extensibility fields.
 
 All state changes go through ``transition_instance()`` -- never assign

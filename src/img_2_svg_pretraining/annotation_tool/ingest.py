@@ -4,6 +4,12 @@ Runs Molmo pointing over a batch of images and writes one annotation JSON
 per image with every point as a `proposed` instance (source="molmo", no mask
 -- masks are computed live in the review app, where a human confirms them).
 
+This tool is scoped to RASTER regions only (embedded photos/icons/plots/
+screenshots), not structural diagram nodes -- uses `point_rasters()`
+(`RASTER_QUERY`), never `point_nodes()`. Node annotation is a separate,
+not-yet-built concern; see data_engine/pointing/common.py's docstring for
+the query text.
+
 This is deliberately NOT part of the review app: re-running Molmo with a new
 checkpoint means re-running this script against affected images, never a UI
 button. By default images that already have an annotation JSON are skipped
@@ -37,11 +43,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def ingest_image(runner, image_path: Path) -> int:
-    """Molmo points -> one proposed instance per point -> {image_id}.json.
-    Returns the number of proposed instances written."""
+    """Molmo raster points -> one proposed instance per point ->
+    {image_id}.json. Returns the number of proposed instances written."""
     image_id = image_path.stem
     img = Image.open(image_path)
-    points = runner.point_nodes(image_path)
+    points = runner.point_rasters(image_path)
 
     instances = {}
     for p in points:
