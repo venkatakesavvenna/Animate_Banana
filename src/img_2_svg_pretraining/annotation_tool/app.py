@@ -14,6 +14,10 @@ Env config:
     IMAGES_DIR       image directory (default: data/train/original_images)
     ANNOTATIONS_DIR  annotation JSON directory (default: data/annotations)
     ANNOTATOR        actor name recorded in edit logs (default: $USER)
+    SAM3_REPO        SAM3 checkpoint to load -- HF repo id or local directory
+                     (default: the sam_finetuning/ fine-tuned checkpoint,
+                     falling back to facebook/sam3 if that checkpoint isn't
+                     present yet)
 
 Molmo proposals come from ingest.py (offline, separate venv) -- there is
 deliberately no "run Molmo" button in this app.
@@ -51,6 +55,18 @@ ACTOR = os.environ.get("ANNOTATOR", os.environ.get("USER", "human"))
 UNDO_CAP = 20
 UNRESOLVED = ("proposed", "needs_point_review", "needs_mask_review")
 
+# Fine-tuned checkpoint from sam_finetuning/ (see its README) -- falls back
+# to the base facebook/sam3 repo if the checkpoint hasn't been trained/copied
+# into place yet, so this doesn't break environments without it.
+_FINETUNED_SAM3_CHECKPOINT = (
+    _REPO_ROOT / "src" / "img_2_svg_pretraining" / "data_engine" / "sam_finetuning"
+    / "checkpoints" / "full_run_v1" / "best"
+)
+SAM3_REPO = os.environ.get(
+    "SAM3_REPO",
+    str(_FINETUNED_SAM3_CHECKPOINT) if _FINETUNED_SAM3_CHECKPOINT.exists() else "facebook/sam3",
+)
+
 st.set_page_config(page_title="Raster Region Annotator", layout="wide")
 
 
@@ -63,7 +79,7 @@ def load_sam3() -> Sam3InteractiveBackend:
     # Self-hosted transformers Sam3Tracker backend (point/box interactive
     # mode ONLY -- never the text/concept mode; see sam3_backend docstring).
     # Logs SAM3_LOAD exactly once per server process (acceptance criterion 1).
-    return Sam3InteractiveBackend()
+    return Sam3InteractiveBackend(hf_repo=SAM3_REPO)
 
 
 @st.cache_data(show_spinner=False)
