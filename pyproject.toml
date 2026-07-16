@@ -23,6 +23,7 @@ dependencies = [
     "opencv-python>=4.9",
     "pycocotools>=2.0",
     "filelock>=3.12",
+    "wandb>=0.26",
 ]
 
 [project.optional-dependencies]

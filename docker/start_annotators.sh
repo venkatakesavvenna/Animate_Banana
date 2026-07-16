@@ -6,9 +6,14 @@
 # exiting.
 #
 # Usage:
-#   docker/start_annotators.sh              # start (or reuse) all 3
-#   docker/start_annotators.sh --restart    # kill + fully restart all 3
-#   docker/start_annotators.sh --stop       # stop everything, no restart
+#   docker/start_annotators.sh                    # start (or reuse) all 3
+#   docker/start_annotators.sh --restart          # kill + fully restart all 3
+#   docker/start_annotators.sh --restart-port 8600  # restart ONLY this one
+#                                                    # reviewer (annotator +
+#                                                    # tunnel), leaving the
+#                                                    # other two untouched
+#   docker/start_annotators.sh --stop             # stop everything, no restart
+#   docker/start_annotators.sh --stop-port 8600   # stop ONLY this one
 #
 # Run from bare metal (this script itself shells into the container via
 # `docker exec`) -- see CLAUDE.md / annotation_tool/README.md for why
@@ -33,13 +38,27 @@ _ensure_cloudflared() {
     chmod +x /usr/local/bin/cloudflared)"
 }
 
+_stop_port() {
+  local port="$1"
+  echo "[port ${port}] stopping annotator + tunnel..."
+  _dexec "tmux kill-session -t annotator_${port} 2>/dev/null || true"
+  _dexec "tmux kill-session -t tunnel_${port} 2>/dev/null || true"
+}
+
 _stop_all() {
   echo "Stopping all annotator + tunnel tmux sessions..."
   for port in "${PORTS[@]}"; do
-    _dexec "tmux kill-session -t annotator_${port} 2>/dev/null || true"
-    _dexec "tmux kill-session -t tunnel_${port} 2>/dev/null || true"
+    _stop_port "$port"
   done
   echo "Stopped."
+}
+
+_port_index() {
+  local target="$1"
+  for i in "${!PORTS[@]}"; do
+    [[ "${PORTS[$i]}" == "$target" ]] && { echo "$i"; return 0; }
+  done
+  return 1
 }
 
 if [[ "${1:-}" == "--stop" ]]; then
@@ -47,9 +66,27 @@ if [[ "${1:-}" == "--stop" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "--stop-port" ]]; then
+  port="${2:?usage: docker/start_annotators.sh --stop-port <port>}"
+  idx=$(_port_index "$port") || { echo "ERROR: ${port} is not a managed port (${PORTS[*]})." >&2; exit 1; }
+  _stop_port "$port"
+  exit 0
+fi
+
 if [[ "${1:-}" == "--restart" ]]; then
   _stop_all
   sleep 2
+fi
+
+if [[ "${1:-}" == "--restart-port" ]]; then
+  port="${2:?usage: docker/start_annotators.sh --restart-port <port>}"
+  idx=$(_port_index "$port") || { echo "ERROR: ${port} is not a managed port (${PORTS[*]})." >&2; exit 1; }
+  _stop_port "$port"
+  sleep 2
+  # Narrow PORTS/GPUS to just this one port so every loop below (start,
+  # wait, report) naturally only ever touches this reviewer.
+  PORTS=("${PORTS[$idx]}")
+  GPUS=("${GPUS[$idx]}")
 fi
 
 echo "=== Starting node annotator reviewer instances ==="
