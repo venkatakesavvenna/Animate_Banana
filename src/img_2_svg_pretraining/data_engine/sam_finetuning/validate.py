@@ -119,6 +119,7 @@ def run_validation(
     rows = [r for r in load_manifest(manifest_path) if r["image_id"] in val_ids]
 
     results = []
+    pred_masks_by_row: list[np.ndarray] = []
     for row in rows:
         image_path = _REPO_ROOT / row["file_path"]
         image = Image.open(image_path).convert("RGB")
@@ -127,6 +128,7 @@ def run_validation(
         )) > 0
         point = (row["points"][0]["x"], row["points"][0]["y"])
         pred_mask, score = predict_mask(model, processor, image, point, device)
+        pred_masks_by_row.append(pred_mask)
         results.append({
             "instance_id": row["instance_id"],
             "image_id": row["image_id"],
@@ -158,13 +160,8 @@ def run_validation(
         gt_mask = np.array(Image.open(
             Path(__file__).resolve().parent / "masks_processed" / row["mask_path"]
         )) > 0
-        point = (row["points"][0]["x"], row["points"][0]["y"])
-        image = Image.open(image_path).convert("RGB")
-        pred_mask, score = predict_mask(
-            Sam3TrackerModel.from_pretrained(str(checkpoint)).to(device).eval()
-            if False else model, processor, image, point, device,
-        )
-        label = f"{row['image_id']} / {row['instance_id']}  IoU={r['iou']:.2f}  score={score:.2f}"
+        pred_mask = pred_masks_by_row[i]
+        label = f"{row['image_id']} / {row['instance_id']}  IoU={r['iou']:.2f}  score={r['model_score']:.2f}"
         row_imgs.append(_row(image_path, gt_mask, pred_mask, label))
 
     row_h = row_imgs[0].height

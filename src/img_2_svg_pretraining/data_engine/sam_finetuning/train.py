@@ -210,6 +210,7 @@ def main() -> None:
             if val_loss < best_val:
                 best_val = val_loss
                 model.save_pretrained(out_dir / "best")
+                processor.save_pretrained(out_dir / "best")
 
     model.save_pretrained(out_dir / "final")
     processor.save_pretrained(out_dir / "final")
