@@ -1,0 +1,79 @@
+vlm_family: gemmavlm
+base_model: google/gemma-3-27b-it
+model_family_name: gemma3
+attn_implementation: eager
+sam_version: none
+out_dim: 256
+run_name: mn_gemma3_27b_vesiglip2_raw_pt_smoke
+split_ratio: 0.995
+seed: 42
+wandb_project: img-2-svg-pretraining-smoke
+logging_dir: /code/src/img_2_svg_pretraining/training/outputs/mn_gemma3_27b_vesiglip2_raw_pt_smoke/logs
+output_dir: /code/src/img_2_svg_pretraining/training/outputs/mn_gemma3_27b_vesiglip2_raw_pt_smoke/checkpoints
+checkpoint:
+  resume: false
+  path: null
+  mode: weights_only
+vision_encoder: siglip2
+vision_encoder_checkpoint: /fsxvision_new/anirudh.srinivasan/hf_cache/hub/models--google--siglip2-so400m-patch14-384/snapshots/e8e487298228002f3d8a82e0cd5c8ea9c567f57f
+trainer:
+  deepspeed: /code/src/img_2_svg_pretraining/training/configs/deepspeed/zero3_gemma.json
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 2
+  eval_strategy: steps
+  eval_steps: 50
+  save_strategy: 'no'
+  save_steps: 1000
+  save_total_limit: 3
+  learning_rate: 2.0e-05
+  lr_scheduler_type: cosine_with_min_lr
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.1
+  warmup_steps: 200
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  optim: adamw_torch
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  adam_epsilon: 1.0e-06
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  dataloader_num_workers: 4
+  report_to: wandb
+  run_name: ${run_name}
+  max_steps: 200
+loss:
+  ce_loss_weight: 1.0
+pretrain_init:
+  ve_init_mode: none
+  reset_connector: true
+  lm_init_mode: raw_llm
+  lm_checkpoint: google/gemma-3-27b-it
+param_groups:
+- pattern: backbone\.gemma\.vision_tower\.encoder\.
+  lr: 6.0e-06
+  weight_decay: 0.0
+- pattern: backbone\.gemma\.vision_tower\.
+  lr: 0.0002
+  weight_decay: 0.0
+- pattern: backbone\.gemma\.
+  lr: 2.0e-05
+  weight_decay: 0.0
+datasets:
+  train:
+  - name: pixmo_cap_local
+    dataset_kwargs:
+      data_path: /fsxvision_new/pratyush.jena/Datasets/pixmo-cap-images/extracted_dataset
+      mode: captions
+  val:
+  - name: pixmo_cap_local
+    dataset_kwargs:
+      data_path: /fsxvision_new/pratyush.jena/Datasets/pixmo-cap-images/extracted_dataset
+      mode: captions
+captioning_eval:
+  eval_steps: 100
+  num_samples: 16
+  max_new_tokens: 64
+  do_sample: false

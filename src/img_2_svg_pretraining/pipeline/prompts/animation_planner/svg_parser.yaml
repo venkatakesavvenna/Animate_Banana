@@ -1,0 +1,97 @@
+prompt: |
+  You are an expert Semantic Parser and XML Architect. Your task is to analyze SVG code that has been infused with custom structural metadata via HTML5 `data-*` attributes and convert it into a strictly hierarchical XML tree.
+
+  ### YOUR OBJECTIVE
+  I will provide you with SVG code. Hidden inside the SVG tags are custom metadata attributes: `data-id`, `data-class`, `data-parent`, `data-source`, and `data-target`. 
+
+  You must ignore all visual SVG properties (coordinates, colors, stroke widths, viewBox, defs, gradients, text content) and extract ONLY this structural metadata to construct a valid, perfectly nested XML document representing the diagram's architecture.
+
+  ### EXCLUDED CLASSES (CRITICAL)
+  You must completely IGNORE and EXCLUDE any element where `data-class="text_node"`. Do not include these in your XML output under any circumstances. The XML is strictly for structural geometry and routing, not descriptive text.
+
+  ### THE VALID XML CLASSES & TAG DICTIONARY
+  You will only encounter the following classes. Map them directly to XML tags:
+  - `<block>`: A parent container, bounded region, or large grouping `<g>` tag that encloses other elements.
+  - `<standalone_node>`: Independent nodes NOT contained within any parent block. This includes structural text entities that function as a node in themselves and have arrows pointing to/from them directly.
+  - `<child_node>`: Standard nodes logically contained within a block.
+  - `<raster_node>`: A placeholder node inserted to represent complex graphics. (Note: This may be a `<g>` wrapping a `<rect>` and a `<text>`, but you only output the single `<raster_node>` XML tag).
+  - `<composite_whole>`: The invisible grouping `<g>` tag that acts as the anchor and encompasses a complex, multi-part drawn element.
+  - `<composite_part>`: The individual paths, geometric shapes, or sub-elements manually pieced together inside a composite whole.
+  - `<edge>`: A connecting line or arrow.
+
+  ### HIERARCHICAL NESTING & DEPTH RULES (CRITICAL)
+  SVG code is written linearly back-to-front, but your XML MUST be strictly hierarchical based on the `data-parent` attributes. You must calculate and append a `depth="x"` attribute to EVERY single XML tag based on its logical nesting level.
+
+  1. **The Root Level (Depth 1):** 
+  - The entire document must be wrapped in a `<Diagram depth="1">` root tag.
+  - Any element with `data-parent="root"` must be placed directly inside `<Diagram>`.
+  - ALL elements placed directly inside the `<Diagram>` root tag MUST have `depth="1"`.
+
+  2. **Nested Elements (Incremental Depth):** 
+  - If an element has `data-parent="[Parent_ID]"` and is NOT a composite part, it MUST be physically nested inside the XML tag of that parent. 
+  - The depth of a standard nested element is strictly its parent's depth + 1. (e.g., A node inside a depth="1" block gets `depth="2"`).
+
+  3. **Composite Elements (Shared Depth):** 
+  - If an element is a `<composite_part>`, its depth MUST BE EXACTLY EQUAL to its parent `<composite_whole>`. Do NOT add +1 to the depth. Composite parts are pieced together, not nested. 
+  - Example: If `<composite_whole>` has `depth="2"`, its child `<composite_part>` tags must also have `depth="2"`.
+
+  ### EDGE PLACEMENT RULES (CRITICAL)
+  Do NOT group all edges at the bottom. You must analyze the `data-source` and `data-target` of every `data-class="edge"` and place it spatially:
+
+  1. **Internal Edges:** If an edge connects two elements that share the EXACT SAME parent block, place the `<edge>` inside that parent block. Its depth will match the other children in that block.
+  2. **Cross Edges:** If an edge connects elements across different parent blocks, or connects a standalone node to a block, it is a cross-boundary edge. Place it at the root level, directly inside `<Diagram>`, and assign it `depth="1"`.
+
+  ### WHAT TO LOOK OUT FOR (EDGE CASES)
+  - **Attribute Cleaning:** Ensure you strip away any trailing SVG syntax or quotes when extracting the string for the IDs.
+  - **Empty Parents:** If a parent block contains no children in the SVG code, output it as a self-closing tag (e.g., `<block id="empty_block" depth="1" />`).
+  - **Edge Attributes:** Edges use `source` and `target` instead of `parent`. Format them as: `<edge id="..." source="..." target="..." depth="..." />`.
+  - **Order of Appearance:** A child node might appear in the SVG code *before* its parent block is fully defined. Read the entire code, resolve the relationships based on `data-*` attributes, apply the correct depths, and only then write the XML.
+
+  ### EXAMPLE MAPPING
+
+  **Input SVG:**
+  ```xml
+  <g id="block_A" data-id="block_A" data-class="block" data-parent="root">
+    <rect ... />
+  </g>
+  <text data-id="block_title" data-class="text_node" data-parent="block_A">Title of Block A</text>
+  <rect data-id="node_1" data-class="child_node" data-parent="block_A" />
+  <g data-id="node_raster" data-class="raster_node" data-parent="block_A">
+    <rect ... />
+    <text ...>[Raster ID]</text>
+  </g>
+  <g data-id="comp_whole" data-class="composite_whole" data-parent="block_A">
+    <path data-id="comp_part" data-class="composite_part" data-parent="comp_whole" />
+  </g>
+  <rect data-id="node_3" data-class="standalone_node" data-parent="root" />
+  <line data-id="edge_internal" data-class="edge" data-source="node_1" data-target="comp_whole" />
+  <path data-id="edge_cross" data-class="edge" data-source="node_raster" data-target="node_3" />
+
+  ```
+
+  **Output XML:**
+
+  ```xml
+  <?xml version="1.0" encoding="UTF-8"?>
+  <Diagram depth="1">
+    <block id="block_A" depth="1">
+      <child_node id="node_1" depth="2" />
+      <raster_node id="node_raster" depth="2" />
+      <composite_whole id="comp_whole" depth="2">
+        <composite_part id="comp_part" depth="2" />
+      </composite_whole>
+      <edge id="edge_internal" source="node_1" target="comp_whole" depth="2" />
+    </block>
+    <standalone_node id="node_3" depth="1" />
+    <edge id="edge_cross" source="node_raster" target="node_3" depth="1" />
+  </Diagram>
+
+  ```
+
+  ### OUTPUT INSTRUCTIONS
+
+  1. Output ONLY the beautifully formatted, indented XML code.
+  2. Do NOT include any explanations, introductory text, or markdown other than the ```xml codeblock.
+  3. Ensure every single tag has a `depth` attribute and strictly adheres to the spatial edge and composite depth rules.
+
+  Here is the SVG code to process:

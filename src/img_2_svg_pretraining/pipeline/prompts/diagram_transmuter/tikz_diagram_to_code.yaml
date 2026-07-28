@@ -1,0 +1,82 @@
+prompt: |
+  Get the height and width of the diagram
+  Convert this diagram into absolutely faithful TikZ code.
+
+  FOLLOW THE INSTRUCTIONS GIVEN BELOW STRICTLY:
+
+  #1. STRICT PIXEL COORDINATE MAPPING
+  You must STRICTLY place everything using pixel coordinates to ensure a one-to-one mapping to the original image. Use the convention of considering the origin at the top-left corner, then use the following TikZ mapping to establish the origin with respect to TikZ and map the pixel coordinates back to cm.
+  For example:
+       \begin{tikzpicture}[
+            x=1pt, y=-1pt,
+            >=Stealth,
+            % Define custom keys for formal tree parsing
+            xml id/.code={}, xml parent/.code={}, xml class/.code={}, xml source/.code={}, xml target/.code={},
+            % Node and Block Styles...
+
+  #2. SEMANTIC HIERARCHY & FORMAL REPRESENTATION (CRITICAL)
+  You must infuse every element with structural metadata using the custom keys defined above so the diagram can be parsed as a formal relational tree.
+
+  A. **`xml id`**: EVERY drawn element, node, block, and arrow must have a unique, descriptive `xml id` (e.g., `xml id=block_stage_n`, `xml id=node_m1`, `xml id=edge_1`).
+     - **CRITICAL**: For any element that uses a standard TikZ reference name in parentheses (e.g., `\node (...)`), the `xml id` string MUST be strictly identical to that TikZ reference string.
+     - *Correct:* `\node[xml id=block_A, xml class=block, ...] (block_A) {};`
+     - *Incorrect:* `\node[xml id=stage_1, xml class=block, ...] (block_A) {};`
+
+  B. xml class: You are STRICTLY RESTRICTED to using ONLY the following predefined classes. Do NOT invent new classes:
+     - block: Use for parent containers, bounded regions, or large grouping boxes that enclose other elements.
+     - text_node: Use ONLY for pure text-based annotations, block titles, or block/node labels that have no structural arrows pointing to or from them directly. (CRITICAL: Base this strictly on visual connections, NOT semantic meaning. Even if a label says "MLP" or "Network", if no arrows point directly to the text itself, it MUST be a text_node).
+     - standalone_node: Use for independent nodes that are NOT contained within any parent block. This includes structural text entities ONLY IF arrows point directly to/from the text itself (e.g., "Loss Functions" or "Embeddings" acting as standalone targets).
+     - child_node: Use for standard nodes visually contained within a block. This includes structural text entities ONLY IF arrows point directly to/from the text itself (e.g., a "Loss" text node that receives an arrow).
+     - raster_node: Use for the placeholders inserted to represent complex graphics (icons, logos, natural images).
+     - composite_whole: Use for the invisible bounding box (created via fit) that anchors and encompasses a complex, multi-part drawn element.
+     - composite_part: Use for the individual paths, geometric shapes, or sub-elements that are manually pieced together to form a composite graphic.
+     - edge: Use for ALL arrows and lines that connect elements.
+
+  C. **`xml parent`**: You must explicitly define the hierarchical parent for EVERY element (except edges) using the following strict logic:
+     - If class is `standalone_node` or a top-level `block`, you MUST set `xml parent=root`.
+     - If class is `child_node`, `text_node`, or a nested `block`, you MUST set `xml parent=[id of the enclosing block]`.
+     - If class is `composite_part`, you MUST set `xml parent=[id of the composite_whole element]`.
+     - If class is `raster_node`, set its parent to `root` or `[id of the enclosing block]` depending on its location.
+
+  D. **`xml source` & `xml target`**: For EVERY element with `xml class=edge`, you MUST specify the `xml id` of the node it originates from (`xml source`) and the node it points to (`xml target`).
+
+  #3. CONTAINERS & COMPOSITE ELEMENTS
+  You must use the `fit` library to draw parent blocks and composite wholes. You are strictly FORBIDDEN from using 'local bounding box' or the backgrounds library.
+  - **For objects within blocks**: Include them directly within the fit module and tag them logically.
+    Example: \node[fit=(obj1) (obj2), xml id=block_A, xml class=block, xml parent=root] (block_A) {};
+  - **For composite visual elements**: You must first define an invisible container node to act as the group's anchor (`composite_whole`). Then, draw the individual parts (`composite_part`) inside that region.
+    Example:
+      \coordinate (chart_tl) at (0, 25);
+      \coordinate (chart_br) at (6, 2);
+      % Define the whole
+      \node[fit=(chart_tl) (chart_br), xml id=chart_1_whole, xml class=composite_whole, xml parent=block_A] (chart_1_whole) {};
+      % Draw the parts
+      \draw[xml id=chart_1_line1, xml class=composite_part, xml parent=chart_1_whole] (1, 20) -- (5, 5);
+  - Ensure all arrows pointing to these composite elements anchor ONLY to the group id of the `composite_whole` fit node, not the internal parts.
+
+  #4. ARROWS & RELATIONSHIPS
+  Ensure that all arrows are drawn as \draw (obj1) -- (obj2) and their directions are faithfully preserved.
+  - Example: \draw[->, xml id=edge_1, xml class=edge, xml source=node_A, xml target=node_B] (node_A) -- (node_B);
+  - NEVER draw arrows using raw coordinates if they are logically connecting two named nodes. Always use the node names so the structural graph remains intact.
+
+  #5. PLACEHOLDERS FOR COMPLEX GRAPHICS
+  If there are 3D elements, icons, logos, faces, figurines, in-diagram plots, charts, scatter-plots, general pictorial graphics, and natural images in the diagram, insert placeholders in their positions and name them meaningfully:
+  - Example: \node[raster_node, minimum width=x cm, minimum height=y cm, xml id=icon_1, xml class=raster_node, xml parent=block_A] (icon_1) at (coordinates) {ex_name};
+  - DO NOT use placeholders for neural networks, stacks of convolutional blocks, feature stacks, or standard 3D blocks/cubes. Draw those out using TikZ and do not label them as `raster_node`.
+  - If the raster element has an accompanying text label in the original diagram, draw that text faithfully in its original position using a separate text_node. The text label should not be merged with the placeholder identifier.
+
+  #6. SETUP & STYLES
+  Define all styles at the beginning of the code. Ensure the XML keys are declared so the compiler ignores them visually but retains them in the parsing structure.
+  For example:
+      \documentclass[tikz, border=10pt]{standalone}
+      \usetikzlibrary{fit, positioning, arrows.meta, shapes, calc}
+      \begin{document}
+      \begin{tikzpicture}[
+          >=Stealth,
+          xml id/.code={}, xml parent/.code={}, xml class/.code={}, xml source/.code={}, xml target/.code={},
+          raster_node/.style={...}
+      ]
+
+  #7. COMPILATION & FORMATTING
+  - Strongly ensure that the code compiles without errors.
+  - Strictly use standard ASCII spaces for all indentation. Do NOT output non-breaking spaces or tabs anywhere in the code.

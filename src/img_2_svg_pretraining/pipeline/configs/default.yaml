@@ -1,0 +1,99 @@
+# Default pipeline configuration.
+#
+# Every agent names a backend independently, so a run can mix a commercial
+# API for one agent with a locally served vLLM model for another. Copy this
+# file and edit rather than editing it in place.
+
+dataset:
+  root: /code/data/test_benchmark
+  limit: 0                      # 0 = all samples
+
+animation_style: progressive_reveal   # progressive_reveal | sliding_bbox | highlight_dim | zoom_pan
+target: tikz                          # tikz | svg
+
+backends:
+  gemini_pro:
+    type: gemini
+    model: gemini-2.5-pro
+    api_key_env: GOOGLE_API_KEY
+    max_concurrency: 4
+
+  gemini_flash:
+    type: gemini
+    model: gemini-2.5-flash
+    api_key_env: GOOGLE_API_KEY
+    max_concurrency: 8
+
+  # A locally served vLLM endpoint. Start it with e.g.
+  #   vllm serve Qwen/Qwen3-VL-8B-Instruct --port 8000
+  # vLLM ignores the API key unless launched with --api-key.
+  local_vllm:
+    type: openai_compat
+    base_url: http://localhost:8000/v1
+    model: Qwen/Qwen3-VL-8B-Instruct
+    api_key_env: VLLM_API_KEY
+    max_concurrency: 16
+
+transmuter:
+  code_converter:
+    backend: gemini_pro
+    prompt: diagram_transmuter/tikz_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  raster_integrator:
+    enabled: false              # requires the molmo_point venv; see the README
+    point_backend: molmo2-8b
+    segment_backend: sam3
+
+planner:
+  strategizer:
+    backend: gemini_pro
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full          # image_only | caption | abstract | full
+    params:
+      temperature: 0.3
+
+  parser:
+    backend: gemini_pro
+    prompt: animation_planner/tikz_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  sequencer:
+    backend: gemini_pro
+    prompt: animation_planner/sequencer.yaml#prompt
+    params:
+      temperature: 0.3
+      max_tokens: 8192
+
+  critic:
+    backend: gemini_pro
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    use_set_of_mark: true
+    params:
+      temperature: 0.2
+
+animator:
+  designer:
+    backend: gemini_pro
+    prompt: animation_designer/designer.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  critic:
+    backend: gemini_pro
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+
+  exporter:
+    outputs: [pdf, mp4, gif, pptx]
+    fps: 2
+    dpi: 300

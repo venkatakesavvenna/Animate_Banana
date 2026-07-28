@@ -1,0 +1,107 @@
+# configs/run_qwen.yaml
+
+# Model & run settings
+vlm_family: qwenvlm
+base_model: Qwen/Qwen2.5-VL-7B-Instruct
+model_family_name: qwen2.5vl
+attn_implementation: null
+sam_version: sam1
+sam_checkpoint: /fsxvision_new/srihari.bandarupalli/DocGrounding/checkpoints/sam_vit_h_4b8939.pth
+out_dim: 256
+run_name: finetune_full_dataset_90k_pretrained_checkpoint
+split_ratio: 0.99
+seed: 42
+wandb_project: img-2-svg-pretraining
+# wandb_entity: your-team
+logging_dir: /code/src/img_2_svg_pretraining/training/outputs/${run_name}/validation_steps/v1 # --> for validation images
+output_dir: /code/src/img_2_svg_pretraining/training/outputs/${run_name}/checkpoints/v1 # --> for model checkpoints
+
+# ----------------- CHECKPOINT -----------------
+#   mode: weights_only -> load_state_dict only (fresh optimizer, fresh LR schedule)
+#   mode: full         -> resume_from_checkpoint (restores optimizer + LR schedule + step count)
+checkpoint:
+  resume: true # false if you want to train from scratch (base Qwen + base SAM weights) # true if you want to resume training from a checkpoint
+  path: /fsxvision_new/srihari.bandarupalli/DocGrounding/outputs/pretraining_checkpoint/checkpoint-90000
+  # path: /opt/dlami/nvme/srihari.bandarupalli/DocGrounding/outputs/finetune_full_dataset_90k_pretrained_checkpoint/checkpoints/v1/checkpoint-20000
+  mode: weights_only
+
+# ----------------- TRAINING -----------------
+trainer:
+  deepspeed: /code/src/img_2_svg_pretraining/training/configs/deepspeed/zero3.json
+  num_train_epochs: 40
+  per_device_train_batch_size: 6
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 1
+  eval_strategy: "steps"
+  eval_steps: 5000
+  save_strategy: "steps"
+  save_steps: 10000
+  save_total_limit: 2
+  learning_rate: 2e-6
+  weight_decay: 0.0
+  warmup_ratio: 0.03
+  max_grad_norm: 1.0
+  lr_scheduler_type: "cosine"
+  logging_steps: 1
+  bf16: true
+  gradient_checkpointing: false
+  dataloader_num_workers: 1
+  report_to: "wandb"
+  run_name: ${run_name}
+
+loss:
+  ce_loss_weight: 1.0
+  bce_loss_weight: 1.0 # 2.0
+  dice_loss_weight: 0.5 # 1.0
+
+# ----------------- PROMPTS(not needed) -----------------
+prompts:
+  system_message: "You are a helpful assistant" 
+  chat_template: "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
+  prefix: "Give the Layout for this document."
+
+# val_checkpoint: /fsxvision/venkat.kesav/backup/DocGrounding/outputs/pretrain_dataset_pramana_layout_qwen_2.5VL_7b_including_labels_v2_single_node/checkpoints/checkpoint-90000
+# val_checkpoint: /fsxvision_new/srihari.bandarupalli/DocGrounding/outputs/pretraining_checkpoint/checkpoint-90000
+# val_output_dir: /fsxvision_new/srihari.bandarupalli/DocGrounding/outputs/pretraining_checkpoint/without_teacher_forcing/v1
+
+val_checkpoint: /fsxvision_new/srihari.bandarupalli/DocGrounding/outputs/90k_checkpoint_promptable_finetune/checkpoints/v1/checkpoint-60000
+val_output_dir: /fsxvision_new/srihari.bandarupalli/DocGrounding/outputs/90k_checkpoint_promptable_finetune/without_teacher_forcing/v2
+datasets:
+  train:
+    - name: promptable_v1
+    # - name: doclaynet
+    # - name: indicdlp
+    # - name: m6doc
+    # - name: d4la
+    # - name: hierlay_v2
+    # - name: docsyn
+
+  val:
+    - name: promptable_v1
+    # - name: hierlay_v2 # done
+    # - name: omnidocs
+    # - name: comp_hr
+    # - name: prima
+    # - name: docbank
+  # val:
+    # - name: annopage
+## DONEEE
+    # - name: indicdlp
+    # - name: comp_hr
+    # - name: prima # has xml structure deal with it later # DONEEE
+    # - name: d4la 
+    # # - name: Publaynet # - already run
+    # - name: doclaynet
+    # - name: m6doc
+    # - name: omnidocs # - hf download
+    # - name: docbank # - hf download 
+    # # - name: Cord-v2 # its an OCR dataset, not sure how to use it for layout analysis, deal with it later
+    # # - name: HJDataset - 7 days request for access
+    # # - name: TableBank # extension of docbank
+    
+  eval:
+    - name: doclaynet
+    - name: indicdlp
+    - name: docsyn
+    - name: m6doc
+    - name: d4la

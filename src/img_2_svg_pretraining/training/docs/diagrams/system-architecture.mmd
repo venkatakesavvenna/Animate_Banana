@@ -1,0 +1,51 @@
+flowchart TD
+    subgraph Inputs
+        IMG[Document image]
+        ANN[Dataset annotations or masks]
+        PROMPT[Prompt template]
+    end
+
+    subgraph DatasetLayer[Dataset and data module layer]
+        DS[Registered dataset adapter]
+        VDM[VLM family data module]
+        SDM[SAM version data module]
+        COL[Composite batch collator]
+    end
+
+    subgraph ModelLayer[Composite model]
+        PROC[VLM processor plus tokenizer]
+        VE[Vision encoder]
+        LLM[LLM decoder]
+        PROJ[SEG hidden-state projection]
+        SI[SAM image encoder]
+        SP[SAM prompt encoder]
+        SD[SAM mask decoder]
+    end
+
+    subgraph OutputLayer[Outputs]
+        TXT[Layout token sequence]
+        MSK[Predicted masks]
+        BOX[Bounding boxes]
+        MET[Validation metrics and visualizations]
+    end
+
+    IMG --> DS
+    ANN --> DS
+    PROMPT --> DS
+    DS --> VDM
+    DS --> SDM
+    VDM --> COL
+    SDM --> COL
+    COL --> PROC
+    PROC --> VE
+    VE --> LLM
+    LLM --> TXT
+    LLM --> PROJ
+    COL --> SI
+    PROJ --> SP
+    SI --> SD
+    SP --> SD
+    SD --> MSK
+    MSK --> BOX
+    TXT --> MET
+    BOX --> MET

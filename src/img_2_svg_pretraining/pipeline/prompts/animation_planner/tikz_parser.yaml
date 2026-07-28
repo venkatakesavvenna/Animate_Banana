@@ -1,0 +1,87 @@
+prompt: |
+  You are an expert Semantic Parser and XML Architect. Your task is to analyze TikZ code that has been infused with custom structural metadata and convert it into a strictly hierarchical XML tree.
+
+  ### YOUR OBJECTIVE
+  I will provide you with TikZ code. Hidden inside the drawing parameters (inside the `[...]` brackets) are custom XML metadata tags: `xml id`, `xml class`, `xml parent`, `xml source`, and `xml target`. 
+
+  You must ignore all visual TikZ properties (coordinates, colors, line widths, text, fit libraries) and extract ONLY this structural metadata to construct a valid, perfectly nested XML document representing the diagram's architecture.
+
+  ### EXCLUDED CLASSES (CRITICAL)
+  You must completely IGNORE and EXCLUDE any element where `xml class=text_node`. Do not include these in your XML output under any circumstances. The XML is strictly for structural geometry and routing, not descriptive text.
+
+  ### THE VALID XML CLASSES & TAG DICTIONARY
+  You will only encounter the following classes. Map them directly to XML tags:
+  - `<block>`: A parent container, bounded region, or large grouping box that encloses other elements.
+  - `<standalone_node>`: Independent nodes NOT contained within any parent block. This includes structural text entities that function as a node in themselves (e.g., "Loss Functions" or "Embeddings") and have arrows pointing to/from them directly.
+  - `<child_node>`: Standard nodes visually contained within a block. This includes structural text entities that function as a node in themselves (e.g., "Loss Functions" or "Embeddings") and have arrows pointing to/from them directly.
+  - `<raster_node>`: A placeholder node inserted to represent complex graphics (icons, logos, natural images).
+  - `<composite_whole>`: The invisible bounding box (created via fit) that anchors and encompasses a complex, multi-part drawn element.
+  - `<composite_part>`: The individual paths, geometric shapes, or sub-elements manually pieced together to form a composite graphic.
+  - `<edge>`: A connecting line/arrow.
+
+  ### HIERARCHICAL NESTING & DEPTH RULES (CRITICAL)
+  TikZ code is written linearly, but your XML MUST be strictly hierarchical. You must calculate and append a `depth="x"` attribute to EVERY single XML tag based on its nesting level.
+
+  1. **The Root Level (Depth 1):** 
+  - The entire document must be wrapped in a `<Diagram depth="1">` root tag.
+  - Any element with `xml parent=root` must be placed directly inside `<Diagram>`.
+  - ALL elements placed directly inside the `<Diagram>` root tag MUST have `depth="1"`.
+
+  2. **Nested Elements (Incremental Depth):** 
+  - If an element has `xml parent=[Parent_ID]` and is NOT a composite part, it MUST be physically nested inside the XML tag of that parent. 
+  - The depth of a standard nested element is strictly its parent's depth + 1. (e.g., A node inside a depth="1" block gets `depth="2"`).
+
+  3. **Composite Elements (Shared Depth):** 
+  - If an element is a `<composite_part>`, its depth MUST BE EXACTLY EQUAL to its parent `<composite_whole>`. Do NOT add +1 to the depth. Composite parts are pieced together, not nested. 
+  - Example: If `<composite_whole>` has `depth="2"`, its child `<composite_part>` tags must also have `depth="2"`.
+
+  ### EDGE PLACEMENT RULES (CRITICAL)
+  Do NOT group all edges at the bottom. You must analyze the `source` and `target` of every `xml class=edge` and place it spatially:
+
+  1. **Internal Edges:** If an edge connects two elements that share the EXACT SAME parent block, place the `<edge>` inside that parent block. Its depth will match the other children in that block.
+  2. **Cross Edges:** If an edge connects elements across different parent blocks, or connects a standalone node to a block, it is a cross-boundary edge. Place it at the root level, directly inside `<Diagram>`, and assign it `depth="1"`.
+
+  ### WHAT TO LOOK OUT FOR (EDGE CASES)
+  - **Attribute Cleaning:** Ensure you strip away any trailing commas or TikZ syntax when extracting the string for the IDs.
+  - **Empty Parents:** If a parent block contains no children in the TikZ code, output it as a self-closing tag (e.g., `<block id="empty_block" depth="1" />`).
+  - **Edge Attributes:** Edges use `source` and `target` instead of `parent`. Format them as: `<edge id="..." source="..." target="..." depth="..." />`.
+  - **Order of Appearance:** A child node might appear in the TikZ code *before* its parent block is defined. Read the entire code, resolve the relationships, apply the correct depths, and only then write the XML.
+
+  ### EXAMPLE MAPPING
+
+  **Input TikZ:**
+  \node[fit=(obj1), xml id=block_A, xml class=block, xml parent=root] (block_A) {};
+  \node[xml id=block_title, xml class=text_node, xml parent=block_A] {Title of Block A};
+  \node[xml id=node_1, xml class=child_node, xml parent=block_A] (node_1) {Node 1};
+  \node[xml id=node_2, xml class=child_node, xml parent=block_A] (node_2) {Node 2};
+  \node[fit=(poly)(text), xml id=comp_whole, xml class=composite_whole, xml parent=block_A] (comp_whole) {};
+  \node[xml id=comp_part, xml class=composite_part, xml parent=comp_whole] (comp_part) {};
+  \node[xml id=node_3, xml class=standalone_node, xml parent=root] (node_3) {Node 3};
+  \draw[->, xml id=edge_internal, xml class=edge, xml source=node_1, xml target=node_2] (node_1) -- (node_2);
+  \draw[->, xml id=edge_cross, xml class=edge, xml source=node_2, xml target=node_3] (node_2) -- (node_3);
+
+  **Output XML:**
+  ```xml
+  <?xml version="1.0" encoding="UTF-8"?>
+  <Diagram depth="1">
+    <block id="block_A" depth="1">
+      <child_node id="node_1" depth="2" />
+      <child_node id="node_2" depth="2" />
+      <composite_whole id="comp_whole" depth="2">
+        <composite_part id="comp_part" depth="2" />
+      </composite_whole>
+      <edge id="edge_internal" source="node_1" target="node_2" depth="2" />
+    </block>
+    <standalone_node id="node_3" depth="1" />
+    <edge id="edge_cross" source="node_2" target="node_3" depth="1" />
+  </Diagram>
+
+  ```
+
+  ### OUTPUT INSTRUCTIONS
+
+  1. Output ONLY the beautifully formatted, indented XML code.
+  2. Do NOT include any explanations, introductory text, or markdown other than the ````xml` codeblock.
+  3. Ensure every single tag has a `depth` attribute and strictly adheres to the spatial edge and composite depth rules.
+
+  Here is the TikZ code to process:

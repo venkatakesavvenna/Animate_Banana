@@ -1,5 +1,7 @@
 data/
 
+*cache/*
+
 # Python
 __pycache__/
 *.pyc
@@ -17,11 +19,14 @@ backup/
 # Annotation DB (runtime state, not source)
 viewer/annotations.db
 
+.scratch/
+
 test/
 
 src/img_2_svg_pretraining/benchmark/render_cache
 
 src/img_2_svg_pretraining/benchmark/results/
+src/img_2_svg_pretraining/pipeline/cache
 src/img_2_svg_pretraining/data_engine/debug
 src/img_2_svg_pretraining/data_engine/cache
 src/img_2_svg_pretraining/data_engine/sam_finetuning/masks_processed
@@ -30,3 +35,5 @@ src/img_2_svg_pretraining/data_engine/sam_finetuning/qa
 src/img_2_svg_pretraining/data_engine/sam_finetuning/splits.json
 
 *.env
+
+*.csv

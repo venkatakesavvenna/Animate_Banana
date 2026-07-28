@@ -1,0 +1,32 @@
+flowchart TD
+    A[run_pramana.yaml] --> B[train.py]
+    B --> C[Resolve datasets.train entries]
+    C --> D[DatasetRegistry.get_dataset]
+    D --> E[Dataset adapter formats VLM conversation and SAM supervision]
+    E --> F[DataModuleRegistry.get_module vlm_family]
+    E --> G[SAMDataModuleRegistry.get_sam_data_module sam_version]
+    F --> H[LazySupervisedDataset plus VLM collator]
+    G --> I[SAM collator and preprocessing]
+    H --> J[torchrun and HF Trainer batch]
+    I --> J
+    J --> K[VLMSam.forward]
+
+    subgraph Losses
+        L1[VLM CE loss]
+        L2[SAM BCE loss]
+        L3[SAM Dice loss]
+    end
+
+    K --> L1
+    K --> L2
+    K --> L3
+    L1 --> M[Weighted total loss]
+    L2 --> M
+    L3 --> M
+
+    M --> N[Backprop and optimizer step]
+    N --> O[Periodic validation]
+    O --> P[CustomTrainer prediction_step]
+    P --> Q[Mask to bbox conversion plus mAP]
+    Q --> R[Validation images and metrics]
+    N --> S[Checkpoint save]

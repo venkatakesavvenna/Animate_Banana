@@ -1,0 +1,11 @@
+flowchart TD
+    Slurm[Slurm allocation] --> Head[Head node]
+    Slurm --> Workers[Worker nodes]
+    Head --> Build[Build or load Docker image]
+    Build --> Tar[Save image tarball]
+    Tar --> Dist[Distribute image to all nodes]
+    Dist --> Containers[One training container per node]
+    Containers --> Env[Shared env mounts plus data mounts]
+    Env --> Torchrun[torchrun with nnodes and node_rank]
+    Torchrun --> NCCL[NCCL or EFA distributed backend]
+    NCCL --> Train[img_2_svg_pretraining.training.training_core.train.train]

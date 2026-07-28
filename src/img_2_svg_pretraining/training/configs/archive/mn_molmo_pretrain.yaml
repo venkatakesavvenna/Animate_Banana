@@ -1,0 +1,125 @@
+# Molmo-7B-O Fine-Tuning on PixMo-Cap — Multi-Node
+#
+# Initializes from the full Molmo-7B-O-0924 checkpoint (vision + connector + LLM
+# already trained). Fine-tunes end-to-end on PixMo-Cap captioning.
+#
+# For pre-training replication from scratch (CLIP + random connector + OLMo base)
+# see mn_molmo_pt_replication.yaml.
+#
+# Batch math:
+#   48 GPUs × per_device=2 × grad_accum=1 = global_batch 96
+
+# ── Multi-node settings ───────────────────────────────────────────────────────
+# Update nodes to match NODES in mn_molmo_pretrain.sh (and #SBATCH --nodes).
+# Node numbers resolve to IPs via the NODE_IPS registry in that script.
+# Informational only — actual node allocation is controlled by SLURM.
+multinode:
+  nodes: "3,11"        # node numbers: vision-node-001 … vision-node-006
+  gpus_per_node: 8
+  # Resolved IPs (for reference):
+  # 10.20.202.110, 10.20.204.252, 10.20.205.50
+  # 10.20.208.160, 10.20.211.172, 10.20.213.4
+
+vlm_family: molmovlm
+base_model: /fsxvision_new/anirudh.srinivasan/hf_cache/hub/models--allenai--Molmo-7B-O-0924/snapshots/7a8c4bf80c839c243a6908c6ebbb0f1ee576d7ca
+model_family_name: molmo
+attn_implementation: null
+
+# Caps crops-per-image (default 12, ~144 tokens/crop). All images in a micro-batch
+# get padded to the largest crop count present, so one high-res image can otherwise
+# dominate that GPU's memory. Lower this if OOMs persist.
+molmo_max_crops: 6
+
+# No SAM head — pure captioning / CE loss only
+sam_version: none
+out_dim: 256
+
+run_name: "molmo-ft-pixmo"
+split_ratio: 0.995
+seed: 42
+
+wandb_project: img-2-svg-pretraining
+logging_dir: /code/src/img_2_svg_pretraining/training/outputs/molmo_pt_mn/logs
+output_dir: /code/src/img_2_svg_pretraining/training/outputs/molmo_pt_mn/checkpoints_2
+
+# ── Checkpoint ───────────────────────────────────────────────────────────────
+checkpoint:
+  resume: false
+  path: null
+  mode: weights_only
+
+# ── Trainer ──────────────────────────────────────────────────────────────────
+trainer:
+  deepspeed: /code/src/img_2_svg_pretraining/training/configs/deepspeed/zero3.json
+
+  num_train_epochs: 1
+
+  # 48 GPUs × 2 × 1 = global_batch 96
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 1
+
+  eval_strategy: "steps"
+  eval_steps: 500
+  save_strategy: "steps"
+  save_steps: 1000
+  save_total_limit: 3
+
+  learning_rate: 2.0e-5
+  lr_scheduler_type: "cosine_with_min_lr"
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.1
+  warmup_steps: 200
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+
+  optim: "adamw_torch"
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  adam_epsilon: 1.0e-6
+
+  bf16: true
+  gradient_checkpointing: true
+
+  logging_steps: 10
+  dataloader_num_workers: 4
+  report_to: "wandb"
+  run_name: ${run_name}
+
+loss:
+  ce_loss_weight: 1.0
+
+# ── Per-Component Learning Rates ─────────────────────────────────────────────
+param_groups:
+  - pattern: "backbone\\.molmo\\.model\\.vision_backbone\\.image_vit\\."
+    lr: 5.0e-6
+    weight_decay: 0.0
+  - pattern: "backbone\\.molmo\\.model\\.vision_backbone\\."
+    lr: 2.0e-5
+    weight_decay: 0.0
+  - pattern: "backbone\\.molmo\\.model\\."
+    lr: 2.0e-5
+    weight_decay: 0.0
+
+
+# ── Dataset ──────────────────────────────────────────────────────────────────
+datasets:
+  train:
+    - name: pixmo_cap_local
+      dataset_kwargs:
+        data_path: /fsxvision_new/pratyush.jena/Datasets/pixmo-cap-images/extracted_dataset
+        mode: captions
+  # Remove 'val' dataset to avoid validation loop
+  val:
+    - name: pixmo_cap_local
+      dataset_kwargs:
+        data_path: /fsxvision_new/pratyush.jena/Datasets/pixmo-cap-images/extracted_dataset
+        mode: captions
+
+# ── Captioning Eval Callback ──────────────────────────────────────────────────
+# Remove captioning_eval block to skip callback-based eval
+captioning_eval:
+  eval_steps: 500
+  num_samples: 64
+  max_new_tokens: 256
+  do_sample: false

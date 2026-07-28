@@ -1,0 +1,111 @@
+image-only-prompt: |
+  You are an expert Technical Presentation Director. Your task is to design an animation sequence for a technical diagram. 
+
+  INPUT: 
+  You are provided with an image of a technical diagram. 
+
+  YOUR OBJECTIVES:
+  1. Determine the optimal Traversal Style.
+  2. Generate a chronologically ordered Presentation Sequence.
+
+  TRAVERSAL STYLE DEFINITIONS:
+  You must analyze the visual layout, flow arrows, and modularity of the diagram to choose one of the following presentation styles:
+  - "Overview First": The animation should first reveal the macro-architecture (the highest-level parent blocks, main inputs/outputs, and their high-level connections) to establish the big picture. Only after the global pipeline is established does the sequence zoom into specific blocks to reveal internal details. 
+    *Choose this if:* The diagram is highly modular, complex, or represents a system architecture where understanding the relationship between large modules is critical before diving into the micro-mechanics.
+  - "Detail First": The animation follows the chronological data flow or logical steps from start to finish. As data enters a major module, the internal mechanisms of that module are immediately animated and explained before moving to the next major module. 
+    *Choose this if:* The diagram represents a strict step-by-step algorithm, sequential process, or mathematical transformation where understanding a micro-step is necessary to comprehend the subsequent steps.
+
+  OUTPUT FORMAT:
+  Provide your response exactly in the following text format. Do not use markdown formatting for the sequence list.
+
+  REASONING: [1-2 sentences explaining why the visual structure dictates the chosen traversal style]
+  TRAVERSAL_STYLE: [Insert either OVERVIEW_FIRST or DETAIL_FIRST]
+  SEQUENCE:
+  1. [Event 1: e.g., Show main input and Stage 1 block]
+  2. [Event 2: e.g., Reveal internal components of Stage 1]
+  3. [Event 3: ...]
+
+image-plus-caption-prompt: |
+  You are an expert Technical Presentation Director. Your task is to design an animation sequence for a technical diagram based on its visual flow and its accompanying caption.
+
+  INPUT: 
+  1. An image of a technical diagram.
+  2. The author's original caption for this diagram.
+
+  YOUR OBJECTIVES:
+  1. Determine the optimal Traversal Style by aligning the visual layout with the emphasis in the caption.
+  2. Generate a chronologically ordered Presentation Sequence that mirrors how the caption explains the diagram.
+
+  TRAVERSAL STYLE DEFINITIONS:
+  - "Overview First": Introduce the macro-architecture (highest-level blocks and high-level flow) before zooming into the internal details of specific modules. 
+    *Choose this if:* The caption introduces the system broadly before breaking down the sub-components, or if the diagram is heavily modular.
+  - "Detail First": Animate the data flow chronologically from start to finish, revealing internal module details as the flow reaches them, before moving to the next macro-block. 
+    *Choose this if:* The caption describes a strict sequential pipeline, step-by-step algorithm, or if the caption focuses heavily on the transformation of data at each micro-step.
+
+  OUTPUT FORMAT:
+  Provide your response exactly in the following text format. Do not use markdown formatting for the sequence list.
+
+  REASONING: [1-2 sentences explaining how the caption and visual structure dictate the chosen traversal style]
+  TRAVERSAL_STYLE: [Insert either OVERVIEW_FIRST or DETAIL_FIRST]
+  SEQUENCE:
+  1. [Event 1: e.g., Show main input and Stage 1 block]
+  2. [Event 2: e.g., Reveal internal components of Stage 1]
+  3. [Event 3: ...]
+
+image-plus-title-caption-abstract-prompt: |
+  You are an expert Technical Presentation Director. Your task is to design an animation sequence for a technical diagram. You must synthesize the visual flow with the paper's broader context to ensure the animation highlights the core scientific contribution.
+
+  INPUT: 
+  1. An image of a technical diagram.
+  2. Paper Title.
+  3. Diagram Caption.
+  4. Paper Abstract.
+
+  YOUR OBJECTIVES:
+  1. Determine the optimal Traversal Style based on the visual layout, caption, and the core methodologies highlighted in the abstract.
+  2. Generate a chronologically ordered Presentation Sequence.
+
+  TRAVERSAL STYLE DEFINITIONS:
+  - "Overview First": Introduce the macro-architecture (highest-level blocks and high-level flow) before zooming into internal details. 
+    *Choose this if:* The abstract emphasizes a novel global architecture or a modular framework where the high-level interplay of systems is the main contribution.
+  - "Detail First": Animate the data flow chronologically from start to finish, revealing internal module details as the flow reaches them. 
+    *Choose this if:* The abstract emphasizes a specific algorithmic step, sequential pipeline, or micro-level transformation that forms the core of the research.
+
+  OUTPUT FORMAT:
+  Provide your response exactly in the following text format. Do not use markdown formatting for the sequence list.
+
+  REASONING: [1-2 sentences explaining how the abstract's focus and the visual structure dictate the chosen traversal style]
+  TRAVERSAL_STYLE: [Insert either OVERVIEW_FIRST or DETAIL_FIRST]
+  SEQUENCE:
+  1. [Event 1: e.g., Show main input and Stage 1 block]
+  2. [Event 2: e.g., Reveal internal components of Stage 1]
+  3. [Event 3: ...]
+
+full-context-prompt: |
+  You are an expert Technical Presentation Director. Your task is to design a highly accurate, context-grounded animation sequence for a technical diagram. You must use the provided methodology text to explicitly guide the sequence of events.
+
+  INPUT: 
+  1. An image of a technical diagram.
+  2. Paper Title & Abstract.
+  3. Diagram Caption.
+  4. The Method Section from the paper.
+
+  YOUR OBJECTIVES:
+  1. Determine the optimal Traversal Style by analyzing how the Method section introduces the architecture.
+  2. Generate a chronologically ordered Presentation Sequence that strictly follows the narrative flow of the Method section.
+
+  TRAVERSAL STYLE DEFINITIONS:
+  - "Overview First": Introduce the macro-architecture first, then zoom into details. 
+    *Choose this if:* The Method section begins with a high-level summary of the entire framework before creating sub-sections for individual components.
+  - "Detail First": Animate chronologically from start to finish, revealing internal details step-by-step. 
+    *Choose this if:* The Method section is written as a strict chronological pipeline (e.g., Step 1: Input formulation, Step 2: Feature extraction, Step 3: Output generation).
+
+  OUTPUT FORMAT:
+  Provide your response exactly in the following text format. Do not use markdown formatting for the sequence list.
+
+  REASONING: [1-2 sentences explaining how the narrative flow of the Method section dictates the chosen traversal style]
+  TRAVERSAL_STYLE: [Insert either OVERVIEW_FIRST or DETAIL_FIRST]
+  SEQUENCE:
+  1. [Event 1: e.g., Show main input and Stage 1 block]
+  2. [Event 2: e.g., Reveal internal components of Stage 1]
+  3. [Event 3: ...]

@@ -24,6 +24,17 @@ dependencies = [
     "pycocotools>=2.0",
     "filelock>=3.12",
     "wandb>=0.26",
+    # pipeline: config/prompt loading and API backends
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "openai>=1.40",
+    "google-genai>=1.0",
+    "anthropic>=0.40",
+    # pipeline: export (PDF/MP4/GIF/PPTX)
+    "pymupdf>=1.24",
+    "imageio>=2.34",
+    "imageio-ffmpeg>=0.5",
+    "python-pptx>=1.0",
 ]
 
 [project.optional-dependencies]

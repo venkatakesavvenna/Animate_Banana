@@ -1,0 +1,106 @@
+prompt: |
+  You are an expert Technical Presentation Director. You are given a scientific diagram, its
+  structural hierarchy, a chosen traversal strategy, and a required animation style. Your task
+  is to produce a concrete, machine-executable animation sequence.
+
+  ### INPUTS
+
+  1. The diagram image.
+  2. STRUCTURE XML — the diagram's element hierarchy. Every element carries an `id`. These ids
+     are the ONLY valid values you may place in a `focus` list.
+  3. TRAVERSAL STRATEGY — either OVERVIEW_FIRST or DETAIL_FIRST, already decided for you,
+     together with the reasoning and a high-level narrative outline.
+  4. ANIMATION STYLE — the constraints your sequence must satisfy.
+  5. MAXIMUM DEPTH — the finest level of detail the animation may address.
+
+  ### WHAT YOU MUST PRODUCE
+
+  A hierarchy of presentation nodes plus an explicit traversal order over them.
+
+  These are two different things and you must keep them distinct:
+  - `nodes` describes the EXPLANATION STRUCTURE — which semantic units exist and how they nest.
+  - `traversal` describes the PLAYBACK ORDER — the order in which those units are visited.
+
+  A node is one coherent step of the explanation: a moment where the viewer is asked to attend
+  to a specific part of the figure. It is NOT the same as a diagram element — one node
+  typically groups several elements that should be understood together.
+
+  ### RULES
+
+  1. **Element grounding.** Every entry in a node's `focus` list MUST be an `id` that appears in
+     the STRUCTURE XML, copied exactly. Never invent an id. Never reference an element that is
+     not in the XML.
+
+  2. **Hierarchy.** The first node is the root: `"parent": null`, `"depth": 1`. Every other node
+     names an existing node as its `parent`, and its `depth` is exactly the parent's depth + 1.
+     Children must refine their parent, never contradict it — a child node's focus elements
+     should be a subset of, or contained within, its parent's region of the figure.
+
+  3. **Maximum depth.** No node may have a `depth` greater than the stated MAXIMUM DEPTH. This
+     is a semantic limit, not just a numeric one: do not smuggle fine-grained detail into a
+     shallow node to evade it.
+
+  4. **Traversal.** Every node id must appear in `traversal`. Respect the traversal strategy:
+     - OVERVIEW_FIRST: visit a parent before any of its children, establishing the big picture
+       before descending into detail.
+     - DETAIL_FIRST: follow the data/logical flow; when the flow reaches a module, descend into
+       that module's children immediately before moving to the next sibling.
+
+  5. **Style compliance.** Obey the ANIMATION STYLE constraints exactly. Use only the actions it
+     permits.
+
+  6. **Grouping.** Elements combined into one node must form a meaningful explanatory unit — a
+     stage of the pipeline, a module and its label, an input and the arrow leaving it. Do not
+     group unrelated elements merely to shorten the sequence.
+
+  7. **Narration.** Each node carries one sentence a presenter would say at that moment. Ground
+     it in the diagram and the provided context; do not invent claims the paper does not make.
+
+  8. **Duration.** Seconds that step should hold, as a number. Scale with how much the viewer
+     must absorb — roughly 2-4s for a simple reveal, 5-8s for a dense step with narration.
+
+  ### OUTPUT FORMAT
+
+  Respond with ONLY a single JSON object. No markdown fences, no commentary, no `<think>`
+  blocks, nothing before or after the JSON.
+
+  {
+    "traversal_style": "OVERVIEW_FIRST",
+    "nodes": [
+      {
+        "id": "node_01",
+        "parent": null,
+        "depth": 1,
+        "focus": ["block_pipeline", "node_input", "node_output"],
+        "action": "reveal",
+        "narration": "The full pipeline maps an input image to a segmentation mask.",
+        "duration": 4.0
+      },
+      {
+        "id": "node_02",
+        "parent": "node_01",
+        "depth": 2,
+        "focus": ["block_encoder"],
+        "action": "reveal",
+        "narration": "The encoder extracts multi-scale features from the input.",
+        "duration": 5.0
+      }
+    ],
+    "traversal": ["node_01", "node_02"]
+  }
+
+  ### THE TASK
+
+  MAXIMUM DEPTH: {max_depth}
+
+  {style_block}
+
+  TRAVERSAL STRATEGY: {traversal_style}
+
+  STRATEGY REASONING: {strategy_reasoning}
+
+  NARRATIVE OUTLINE (high-level; you must ground each item in real element ids):
+  {strategy_sequence}
+
+  STRUCTURE XML:
+  {structure_xml}

@@ -1,0 +1,11 @@
+<svg width="240" height="120" viewBox="0 0 240 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Placeholder logo — swap this file out for a real logo. -->
+  <rect x="4" y="4" width="76" height="112" rx="20" fill="#134e4a"/>
+  <rect x="30" y="28" width="24" height="64" rx="8" fill="#ffffff"/>
+
+  <path d="M96 4 L136 4 C158 4 172 16 172 36 C172 54 160 66 140 66 L116 66 L116 92 L172 92 L172 116 L96 116 Z
+           M116 26 L116 44 L136 44 C144 44 148 40 148 35 C148 30 144 26 136 26 Z" fill="#ec4899"/>
+
+  <rect x="188" y="4" width="48" height="112" rx="20" fill="#134e4a"/>
+  <rect x="204" y="28" width="16" height="64" rx="8" fill="#ffffff"/>
+</svg>

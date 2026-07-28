@@ -1,0 +1,85 @@
+prompt: |
+  You are an expert TikZ animation engineer. You are given a static diagram's TikZ source and a
+  validated animation sequence. Your task is to rewrite the TikZ so it animates according to
+  that sequence, in the required style.
+
+  ### INPUTS
+
+  1. The original diagram image, for reference.
+  2. DIAGRAM CODE — the static TikZ. Every element carries an `xml id=...` key. The sequence's
+     `focus` entries are those ids, and each id is also the TikZ node name in parentheses.
+  3. THE ANIMATION SEQUENCE — nodes, their focus elements, actions, and the traversal order.
+  4. The required animation style.
+
+  ### THE ANIMATION MECHANISM
+
+  Wrap the picture in an `animateinline` environment driven by `\multiframe`, and gate each
+  element's appearance on the frame counter. This is the required skeleton:
+
+      \documentclass{standalone}
+      \usepackage{tikz}
+      \usepackage{animate}
+      \usetikzlibrary{fit, positioning, arrows.meta, shapes.geometric, calc}
+
+      \begin{document}
+      \begin{animateinline}[controls, loop]{1}   % 1 frame per second
+      \multiframe{N}{iFrame=1+1}{
+      \begin{tikzpicture}[
+          ... all style definitions from the original, unchanged ...
+      ]
+          % Pin the canvas so it does not resize between frames.
+          \path [use as bounding box] (x0, y0) rectangle (x1, y1);
+
+          % One opacity macro per animated unit, gated on the frame counter.
+          \pgfmathsetmacro{\opEncoder}{\iFrame >= 2 ? 1 : 0}
+
+          % Wrap each unit's drawing commands in a scope carrying its opacity.
+          \begin{scope}[opacity=\opEncoder, transparency group]
+              ... the original \node / \draw commands for that unit ...
+          \end{scope}
+      }
+      \end{animateinline}
+      \end{document}
+
+  Two details are not optional:
+
+  - **`use as bounding box`** must pin the canvas to the full extent of the diagram. Without it
+    the picture resizes as elements appear and the animation jitters. Derive the rectangle from
+    the original diagram's extent and add a small margin.
+  - **`transparency group`** must be on every scope that sets `opacity`. Without it, overlapping
+    shapes inside one scope blend against each other instead of fading as a unit.
+
+  ### MAPPING THE SEQUENCE ONTO FRAMES
+
+  Walk `traversal` in order. Each step gets a frame index, starting at 1. A step's `duration`
+  tells you how long it should hold: with a 1 fps rate, a step of duration 4.0 occupies roughly
+  4 frames before the next step begins. Set `N` in `\multiframe{N}` to the total.
+
+  For each step, every element in its `focus` list becomes visible (or highlighted, or covered
+  by the attention box, per the style) from that step's frame onward.
+
+  ### RULES
+
+  1. **Preserve the diagram.** Every element in the original must still be drawn, at the same
+     coordinates, with the same styles. You are adding time, not redrawing the figure.
+  2. **Preserve `xml id` keys.** Carry them through unchanged onto the same elements.
+  3. **Only sequenced elements animate.** An element no step focuses should be visible
+     throughout, not permanently hidden — unless the style says otherwise.
+  4. **It must compile.** Standalone LaTeX with pdflatex, no external files, no undefined
+     macros, no undefined colours. Declare every style you use in the tikzpicture options.
+  5. **Plain ASCII.** No non-breaking spaces, no smart quotes, no tab characters.
+
+  ### OUTPUT
+
+  Respond with ONLY the complete LaTeX document, starting at `\documentclass` and ending at
+  `\end{document}`. No markdown fences, no commentary, no `<think>` block.
+
+  ### THE TASK
+
+  {style_block}
+
+  THE ANIMATION SEQUENCE:
+  {sequence_json}
+
+  DIAGRAM CODE:
+  {diagram_code}

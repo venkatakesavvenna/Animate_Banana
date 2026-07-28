@@ -1,0 +1,72 @@
+prompt: |
+   Get the height and width of the diagram
+   Convert this diagram into absolutely faithful, clean, and machine-parseable SVG code. Use the exact pixel dimensions of the source image for the viewBox (e.g., `viewBox="0 0 W H"`).
+
+   You must treat this SVG not just as a visual canvas, but as a queryable formal graph database. FOLLOW THE INSTRUCTIONS GIVEN BELOW STRICTLY:
+
+   #1. ZERO-TOLERANCE PIXEL COORDINATE MAPPING (CRITICAL)
+
+   * You must STRICTLY place every element, box, and text using absolute pixel coordinates mapped 1:1 from the source image.
+   * DO NOT use relative positioning. DO NOT guess offsets.
+   * SVG renders elements back-to-front. Structure the DOM logically: background containers first, edges/lines second, foreground nodes and text last.
+   * If you wrap edges in a `<g>` tag for Z-index sorting, that `<g>` MUST BE PLAIN. Do NOT assign `data-id`, `data-class`, or `data-parent` to structural Z-index wrappers.
+
+   #2. SEMANTIC HIERARCHY & FORMAL REPRESENTATION
+   You must infuse every element with structural metadata using HTML5 `data-*` attributes.
+
+   A. **`data-id`**: EVERY drawn element, block, node, and arrow MUST have a unique, descriptive `data-id`. Apply this same string to the standard SVG `id` attribute.
+
+   B. **`data-class`**: You are STRICTLY RESTRICTED to using ONLY the following predefined classes:
+
+   * `block`: Parent containers (a `<g>` containing a background `<rect>` and child elements).
+   * `text_node`: Pure text annotations or floating titles. **CRITICAL:** See Rule 2F. If an arrow touches the text, it is NOT a `text_node`.
+   * `standalone_node`: Independent nodes NOT contained within any parent block. **CRITICAL:** This includes structural text entities (see Rule 2F).
+   * `child_node`: Standard nodes visually contained within a block. **CRITICAL:** This includes structural text entities (see Rule 2F).
+   * `raster_node`: (CRITICAL) Use strictly for the `<rect>` and internal `<text>` placeholders representing complex graphics.
+   * `composite_whole`: An invisible grouping `<g>` tag acting as the anchor for a complex vector element.
+   * `composite_part`: The individual paths or shapes inside a `composite_whole`.
+   * `edge`: ALL arrows and lines that connect elements.
+
+   C. **`data-parent`**: Explicitly define the hierarchical parent for EVERY element (except edges):
+
+   * If class is `standalone_node` or a top-level `block`, set `data-parent="root"`.
+   * If class is `child_node`, `text_node`, or a nested `block`, set `data-parent="[id of the enclosing block]"`.
+   * If class is `composite_part`, set `data-parent="[id of the composite_whole]"`.
+   * If class is `raster_node`, set its parent to `"root"` or `"[id of the enclosing block]"`.
+
+   D. **`data-source` & `data-target`**: For EVERY element with `data-class="edge"`, specify the `data-id` of the node it originates from (`data-source`) and points to (`data-target`). Arrows pointing to composite elements MUST target the `<g>` whole.
+
+   E. **COMPOSITE SHAPE MANDATE (CRITICAL):** For complex drawn elements made of multiple shapes (like MLP layers, UNet hourglasses, or Camera icons), you MUST tag the outer `<g>` as `data-class="composite_whole"`. You MUST tag EVERY internal `<path>`, `<rect>`, or `<circle>` that makes up that shape as `data-class="composite_part"` with a corresponding `data-id` and `data-parent`. DO NOT tag complex groups as `child_node` and DO NOT leave internal paths untagged.
+
+   F. **THE "TEXT-AS-A-NODE" MANDATE (CRITICAL HARD FAIL):** You are explicitly forbidden from mindlessly categorizing all `<text>` elements as `text_node`. Before tagging ANY text, you MUST check its visual connections. If a text string acts as a structural endpoint or origin for an arrow (e.g., mathematical variables like $\mathcal{L}$, $p, d$, or structural labels like "Text Embedding"), it participates in the graph routing. You MUST tag it as `child_node` or `standalone_node`. Use `text_node` EXCLUSIVELY for purely decorative titles, floating labels, or captions with absolutely zero connected edges.
+
+   #3. THE PLACEHOLDER MANDATE AND DUAL-TEXT RULE (CRITICAL HARD FAIL)
+   You are STRICTLY FORBIDDEN from drawing 3D elements, human faces, natural images, heatmaps, meshes, or textured color maps. You MUST replace them with placeholders using a STRICT TWO-PART TEXT SYSTEM:
+
+   * **Part 1: The Box AND Internal ID:** Draw a simple `<rect>` with a dashed border (`stroke-dasharray="5,5"`). You MUST ALSO draw a `<text>` element perfectly centered INSIDE this rectangle containing a bracketed identifier. Group both the `<rect>` and this internal `<text>` together under `data-class="raster_node"`.
+   * **CRITICAL ANTI-SPILL RULE:** The internal `<text>` MUST NOT spill outside the dashed box. You MUST use a very small font size (e.g., `font-size="10"` or `8`), set `text-anchor="middle"`, and align its `x` and `y` directly to the geometric center of the `<rect>`. Keep the identifier string brief.
+   * **Part 2: The Faithful External Label:** You MUST ALSO draw the actual, original text label exactly where it appears in the source image (outside the box). This external text MUST be a completely separate element tagged as `data-class="text_node"`.
+   * **DO NOT SHIFT THE LAYOUT:** Place the external `text_node` using its true absolute `x` and `y` coordinates.
+
+   #4. STRICT ARROWHEAD AND EXACT EDGE ROUTING (CRITICAL HARD FAIL)
+
+   * **NO MISSING EDGES:** You CANNOT MISS any edge present in the original diagram. All must be faithfully replicated.
+   * **NO HALLUCINATED CONNECTIONS:** You are STRICTLY FORBIDDEN from inventing edges, floating icons, cameras, or nodes that do not explicitly exist in the source image. Only draw lines that are visibly present.
+   * **EXACT ROUTING FIDELITY:** You must visually trace the exact path of the original lines. If a line branches orthogonally (e.g., up and then right), you MUST use orthogonal SVG path commands (`M ... L ... L ...`) to match it perfectly. Do not take diagonal shortcuts if the original line is orthogonal. Do not draw straight lines if the original is curved (`Q` or `C`).
+   * **NO MANUAL ARROWHEADS:** You are STRICTLY FORBIDDEN from manually drawing arrowheads using standalone `<polygon>`, `<path>`, or floating triangles.
+   * You MUST use `<line>` or continuous `<path>` for the arrow body, and you MUST apply arrowheads EXCLUSIVELY by referencing defined markers (e.g., `marker-end="url(#arrow)"`).
+
+   #5. MATH AND EXACT TEXT RENDERING (CRITICAL FIX)
+
+   * Render mathematical variables cleanly using standard SVG `<text>` elements.
+   * **NO NAMED ENTITY HALLUCINATIONS:** You are STRICTLY FORBIDDEN from guessing or inventing HTML/XML named entities for mathematical symbols or variables (e.g., do not use `&Ncirc;`, `&Lscr;`, etc.). For complex math characters or letters with diacritics (hats, tildes, bars), you MUST use standard XML numeric hex references (e.g., using `&#x0302;` placed immediately after a base letter for a combining circumflex) or raw Unicode.
+   * **ANTI-COLLISION RULE FOR SCRIPTS:** SVG does not automatically shrink text for subscripts/superscripts. You MUST explicitly reduce the font size inside the tspan. Use EXACTLY this format: `<tspan font-size="0.65em" baseline-shift="sub">` or `<tspan font-size="0.65em" baseline-shift="super">`.
+   * **CRITICAL:** Ensure every `<text>` element has explicitly defined `x` and `y` coordinates. Do NOT rely on inherited positioning or arbitrary `dx`/`dy` shifts, as this causes text overlapping.
+   * Use standard presentation attributes (`fill`, `stroke`) rather than external CSS classes. Use exact hex codes.
+
+   CRITICAL OUTPUT INSTRUCTIONS:
+   Provide ONLY the rewritten, complete, and perfectly valid SVG code.
+   Do NOT wrap your response in markdown code blocks (e.g., no ```xml).
+   Do NOT output any conversational text, reasoning, preambles, or concluding remarks.
+   Do NOT use <think> tags.
+   DO NOT BE LAZY AND SKIP WRITING ANY PART OF THE CODE. IT SHOULD BE THERE IN TOTALITY.

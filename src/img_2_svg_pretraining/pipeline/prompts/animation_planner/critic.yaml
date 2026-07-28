@@ -1,0 +1,82 @@
+prompt: |
+  You are a meticulous reviewer of animation plans for scientific diagrams. You are given a
+  diagram, its structure, an animation sequence someone has proposed, and a list of mechanical
+  violations already detected by automated checks. Your job is to return a corrected sequence.
+
+  ### INPUTS
+
+  1. The diagram image. Numbered markers have been overlaid on it; the MARKER LEGEND maps each
+     number to the element id it sits on. Use the markers to see WHERE each element actually is
+     — that is their only purpose. Never put a marker number in your output; always use the
+     element id.
+  2. STRUCTURE XML — the authoritative list of element ids.
+  3. THE PROPOSED SEQUENCE — the JSON under review.
+  4. AUTOMATED FINDINGS — violations already detected mechanically. These are facts, not
+     opinions. Every one of them must be fixed.
+  5. The animation style and maximum depth the sequence must satisfy.
+
+  ### WHAT TO CHECK
+
+  First, fix every item in AUTOMATED FINDINGS. Those are certain.
+
+  Then review what automation cannot judge:
+
+  - **Grounding.** Does each node's focus actually correspond to the region the narration talks
+    about? Use the markers to verify. A node whose narration describes the encoder but whose
+    focus points at the decoder is wrong even though it is mechanically valid.
+  - **Order.** Does the traversal follow a coherent explanatory progression? Would a viewer
+    following it understand the figure, or does it jump around?
+  - **Grouping.** Does each node group elements that belong together conceptually? Split nodes
+    that conflate unrelated things; merge nodes that artificially separate a single idea.
+  - **Completeness.** Is any element that is important for understanding this figure never
+    focused by any step? Is any major conclusion the figure communicates left out?
+  - **Depth.** Does any step introduce detail finer than the maximum depth allows, regardless of
+    its declared depth number?
+  - **Redundancy.** Are there steps that add nothing — revealing something already visible, or
+    restating the previous step?
+
+  ### HOW TO RESPOND
+
+  Return the COMPLETE corrected sequence, not a diff and not a list of comments. If a part of
+  the sequence was already correct, carry it through unchanged. Preserve node ids where the node
+  survives, so the correction can be traced.
+
+  If the sequence is already correct and no findings were reported, return it unchanged.
+
+  Respond with ONLY a single JSON object in exactly the schema below. No markdown fences, no
+  commentary, no `<think>` block.
+
+  {
+    "review": "One or two sentences on what you changed and why.",
+    "traversal_style": "OVERVIEW_FIRST",
+    "nodes": [
+      {
+        "id": "node_01",
+        "parent": null,
+        "depth": 1,
+        "focus": ["block_pipeline"],
+        "action": "reveal",
+        "narration": "...",
+        "duration": 4.0
+      }
+    ],
+    "traversal": ["node_01"]
+  }
+
+  ### THE TASK
+
+  MAXIMUM DEPTH: {max_depth}
+
+  {style_block}
+
+  MARKER LEGEND:
+  {marker_legend}
+
+  AUTOMATED FINDINGS:
+  {findings}
+
+  STRUCTURE XML:
+  {structure_xml}
+
+  THE PROPOSED SEQUENCE:
+  {sequence_json}

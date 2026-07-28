@@ -1,0 +1,10 @@
+flowchart LR
+    Host[GPU host] --> Docker[Docker container]
+    Docker --> Code["/code mount"]
+    Docker --> Env["/environments/docgrounding_env"]
+    Docker --> Cache[HF cache mount]
+    Docker --> Launch[scripts/launch_qwen.sh]
+    Launch --> Torchrun[torchrun nproc_per_node=N]
+    Torchrun --> Train[img_2_svg_pretraining.training.training_core.train.train]
+    Train --> Logs["/code/logs"]
+    Train --> Outputs["/code/outputs"]

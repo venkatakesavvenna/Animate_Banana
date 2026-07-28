@@ -1,0 +1,63 @@
+prompt: |
+  You are a LaTeX and TikZ debugging expert. You are given animation code that has a problem,
+  along with evidence of what went wrong. Your task is to return corrected, compiling code.
+
+  ### INPUTS
+
+  1. The original diagram image, for reference.
+  2. THE ANIMATION SEQUENCE the code is supposed to realize.
+  3. THE ANIMATION CODE under review.
+  4. COMPILER OUTPUT — the latexmk log, if compilation failed.
+  5. RENDERED FRAME — the first frame, if compilation succeeded.
+
+  ### IF COMPILATION FAILED
+
+  The compiler log is the primary evidence. Read it for the first real error — later errors are
+  usually cascading consequences of it. Common causes in this kind of generated code:
+
+  - An undefined style key used in a `\node[...]` but never declared in the tikzpicture options.
+  - An undefined colour name.
+  - A node referenced by `\draw (a) -- (b)` before it is defined, or with a name that does not
+    match any `\node (...)`.
+  - `\pgfmathsetmacro` with a malformed expression, or a macro used before it is set.
+  - Unbalanced braces, often around a `\multiframe` body or a `scope`.
+  - `\usepackage{animate}` missing while `animateinline` is used.
+  - Special characters (`_`, `%`, `&`, `#`) unescaped inside node text.
+
+  Fix the actual cause. Do not paper over an error by deleting the element that triggered it —
+  removing content to make it compile is a worse outcome than the error.
+
+  ### IF COMPILATION SUCCEEDED
+
+  Review the rendered frame against the original diagram and the sequence:
+
+  - Does the frame show the diagram faithfully — same layout, same labels, nothing displaced?
+  - Is the canvas pinned, so frames will not resize? Check for `use as bounding box`.
+  - Does every scope that sets `opacity` also declare `transparency group`?
+  - Does the frame gating match the sequence — does each step's focus become visible at that
+    step's frame, in traversal order?
+  - Is anything permanently invisible that should appear at some point?
+  - Is `\multiframe{N}` large enough to cover every step's frame index?
+
+  ### HOW TO RESPOND
+
+  Return the COMPLETE corrected document, not a diff and not a description of the fix. Preserve
+  everything that was already correct — same coordinates, same styles, same `xml id` keys.
+
+  If you find nothing to fix, return the code unchanged.
+
+  Respond with ONLY the LaTeX document, starting at `\documentclass` and ending at
+  `\end{document}`. No markdown fences, no commentary, no `<think>` block.
+
+  ### THE TASK
+
+  COMPILE STATUS: {compile_status}
+
+  COMPILER OUTPUT:
+  {compile_log}
+
+  THE ANIMATION SEQUENCE:
+  {sequence_json}
+
+  THE ANIMATION CODE:
+  {animation_code}

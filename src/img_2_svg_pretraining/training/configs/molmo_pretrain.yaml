@@ -1,0 +1,136 @@
+# Molmo-7B-O Pre-Training Replication on PixMo-Cap
+#
+# Follows AllenAI Molmo technical report (arXiv:2409.17146) Table A.2:
+#   - Initialize from Molmo-7B-O (OLMo backbone + CLIP ViT-L/14)
+#   - Train on local PixMo-Cap (~707K captions)
+#   - Per-component LRs: connector 2e-4  /  LLM 2e-5  /  ViT 6e-6
+#   - AdamW betas=[0.9,0.95]  eps=1e-6  weight_decay=0.0
+#   - Cosine LR to 10% floor  |  warmup 200 steps  |  grad_clip 1.0
+#   - bfloat16  |  ZeRO-3
+#
+# Hardware:  4× H100 80GB  (CUDA_VISIBLE_DEVICES=4,5,6,7)
+#
+# W&B:  project=img-2-svg-pretraining  run="Molmo PT replication"
+#
+# Training math:
+#   707,647 examples × 1 epoch  /  global_batch_128  ≈  5,528 steps  (1 epoch)
+#   4 GPUs × per_device_batch_2 × grad_accum_16 = 128 global batch ✓
+#   Full 4-epoch run ≈ 22,100 steps — change num_train_epochs to 4 to extend.
+
+vlm_family: molmovlm
+base_model: /fsxvision_new/anirudh.srinivasan/hf_cache/hub/models--allenai--Molmo-7B-O-0924/snapshots/7a8c4bf80c839c243a6908c6ebbb0f1ee576d7ca
+model_family_name: molmo
+attn_implementation: null
+
+# No SAM head — pure captioning / CE loss only
+sam_version: none
+out_dim: 256
+
+run_name: "molmo-pt-replication"
+split_ratio: 0.995       # ~703K train / ~3.5K val
+seed: 42
+
+wandb_project: img-2-svg-pretraining
+logging_dir: /code/src/img_2_svg_pretraining/training/outputs/molmo_pt/logs
+output_dir: /code/src/img_2_svg_pretraining/training/outputs/molmo_pt/checkpoints
+
+# ── Checkpoint ───────────────────────────────────────────────────────────────
+# Start from Molmo-7B-O weights with no prior fine-tune on our framework.
+checkpoint:
+  resume: false
+  path: null
+  mode: weights_only
+
+# ── Trainer ──────────────────────────────────────────────────────────────────
+trainer:
+  deepspeed: /code/src/img_2_svg_pretraining/training/configs/deepspeed/zero3.json
+
+  # 1 epoch to validate pipeline; change to 4 for the full pre-training run.
+  num_train_epochs: 1
+
+  # 4 GPUs × 2 × 16 = 128 global batch (matches paper)
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 16
+
+  # Eval / save
+  eval_strategy: "steps"
+  eval_steps: 500
+  save_strategy: "steps"
+  save_steps: 1000
+  save_total_limit: 3
+
+  # LR — base is LLM rate; per-component overrides live in param_groups below.
+  # cosine_with_min_lr decays to min_lr_rate × peak (paper: cosine to 10%).
+  learning_rate: 2.0e-5
+  lr_scheduler_type: "cosine_with_min_lr"
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.1
+  # 200-step warmup = connector's binding constraint.
+  # ViT/LLM paper warmup is 2000 but HF uses a global scheduler;
+  # the connector converges faster so 200 is the safe choice.
+  warmup_steps: 200
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+
+  # AdamW — match paper: betas=(0.9, 0.95), eps=1e-6
+  optim: "adamw_torch"
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  adam_epsilon: 1.0e-6
+
+  # Precision
+  bf16: true
+  gradient_checkpointing: true
+
+  # Misc
+  logging_steps: 10
+  dataloader_num_workers: 4
+  report_to: "wandb"
+  run_name: ${run_name}
+
+loss:
+  ce_loss_weight: 1.0
+
+# ── Per-Component Learning Rates ─────────────────────────────────────────────
+# Patterns match against VLMOnly.named_parameters().
+# Molmo-7B-O hierarchy (confirmed from model inspection):
+#   backbone.molmo.model
+#   ├── transformer.*               → OLMo LLM (blocks, wte, ff_out LM head)
+#   └── vision_backbone
+#       ├── image_vit.*             → CLIP ViT
+#       ├── image_pooling_2d.*      → attention-pooling connector layer
+#       └── image_projector.*       → MLP connector layer
+#
+# First-match-wins order: ViT → connector (vision_backbone minus ViT) → LLM.
+param_groups:
+  - pattern: "backbone\\.molmo\\.model\\.vision_backbone\\.image_vit\\."
+    lr: 6.0e-6          # CLIP ViT: low LR, already well-pretrained
+    weight_decay: 0.0
+  - pattern: "backbone\\.molmo\\.model\\.vision_backbone\\."
+    lr: 2.0e-4          # connector (image_pooling_2d + image_projector): high LR
+    weight_decay: 0.0
+  - pattern: "backbone\\.molmo\\.model\\."
+    lr: 2.0e-5          # OLMo transformer + LM head (ff_out lives in transformer)
+    weight_decay: 0.0
+
+# ── Dataset ──────────────────────────────────────────────────────────────────
+datasets:
+  train:
+    - name: pixmo_cap_local
+      dataset_kwargs:
+        data_path: /fsxvision_new/pratyush.jena/Datasets/pixmo-cap-images/extracted_dataset
+        mode: captions
+  val:
+    - name: pixmo_cap_local
+      dataset_kwargs:
+        data_path: /fsxvision_new/pratyush.jena/Datasets/pixmo-cap-images/extracted_dataset
+        mode: captions
+
+# ── Captioning Eval Callback ──────────────────────────────────────────────────
+# generate() on 64 val samples every 500 steps → BLEU-4 + W&B examples table.
+captioning_eval:
+  eval_steps: 500
+  num_samples: 64
+  max_new_tokens: 256
+  do_sample: false

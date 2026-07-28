@@ -1,0 +1,124 @@
+# Molmo-7B-O Pre-Training Replication — Multi-Node
+#
+# True replication of arXiv:2409.17146 §3 initialization:
+#   image_vit   ← CLIP ViT-L/14@336     (pretrained vision encoder)
+#   connector   ← random N(0, 0.02)     (attention pooling + SwiGLU projector)
+#   transformer ← OLMo-7B-1024-preview  (pretrained text-only LLM)
+# then trained end-to-end on PixMo-Cap.
+#
+# For fine-tuning from the full Molmo-7B-O-0924 checkpoint see mn_molmo_pretrain.yaml.
+#
+# Batch math:
+#   48 GPUs × per_device=2 × grad_accum=1 = global_batch 96
+
+# ── Multi-node settings ───────────────────────────────────────────────────────
+multinode:
+  nodes: "3,11"
+  gpus_per_node: 8
+
+vlm_family: molmovlm
+base_model: /fsxvision_new/anirudh.srinivasan/hf_cache/hub/models--allenai--Molmo-7B-O-0924/snapshots/7a8c4bf80c839c243a6908c6ebbb0f1ee576d7ca
+model_family_name: molmo
+attn_implementation: null
+
+molmo_max_crops: 6
+
+sam_version: none
+out_dim: 256
+
+run_name: "molmo-pt-replication"
+split_ratio: 0.995
+seed: 42
+
+wandb_project: img-2-svg-pretraining
+logging_dir: /code/src/img_2_svg_pretraining/training/outputs/molmo_pt_replication/logs
+output_dir: /code/src/img_2_svg_pretraining/training/outputs/molmo_pt_replication/checkpoints
+
+# ── Checkpoint ───────────────────────────────────────────────────────────────
+checkpoint:
+  resume: false
+  path: null
+  mode: weights_only
+
+# ── Trainer ──────────────────────────────────────────────────────────────────
+trainer:
+  deepspeed: /code/src/img_2_svg_pretraining/training/configs/deepspeed/zero3.json
+
+  num_train_epochs: 1
+
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 1
+
+  eval_strategy: "steps"
+  eval_steps: 500
+  save_strategy: "steps"
+  save_steps: 1000
+  save_total_limit: 3
+
+  learning_rate: 2.0e-5
+  lr_scheduler_type: "cosine_with_min_lr"
+  lr_scheduler_kwargs:
+    min_lr_rate: 0.1
+  warmup_steps: 200
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+
+  optim: "adamw_torch"
+  adam_beta1: 0.9
+  adam_beta2: 0.95
+  adam_epsilon: 1.0e-6
+
+  bf16: true
+  gradient_checkpointing: true
+
+  logging_steps: 10
+  dataloader_num_workers: 4
+  report_to: "wandb"
+  run_name: ${run_name}
+
+loss:
+  ce_loss_weight: 1.0
+
+# ── Pre-training initialization ───────────────────────────────────────────────
+# Replaces Molmo-7B-O weights before training begins.
+# Model IDs are resolved from HF hub cache (~/.cache/huggingface/hub).
+# OLMo will be downloaded on first run if not already cached.
+pretrain_init:
+  clip_checkpoint: openai/clip-vit-large-patch14-336
+  lm_checkpoint: allenai/OLMo-7B-1024-preview
+  reset_connector: true
+
+# ── Per-Component Learning Rates ─────────────────────────────────────────────
+# Connector LR is 40× higher than ViT — it starts from random init.
+# Matches Molmo paper: connector 2e-4, ViT 6e-6, LLM 2e-5.
+param_groups:
+  - pattern: "backbone\\.molmo\\.model\\.vision_backbone\\.image_vit\\."
+    lr: 6.0e-6    # CLIP ViT — pretrained
+    weight_decay: 0.0
+  - pattern: "backbone\\.molmo\\.model\\.vision_backbone\\."
+    lr: 2.0e-4    # Connector — random init, needs high LR
+    weight_decay: 0.0
+  - pattern: "backbone\\.molmo\\.model\\."
+    lr: 2.0e-5    # OLMo LLM — pretrained
+    weight_decay: 0.0
+
+# ── Dataset ──────────────────────────────────────────────────────────────────
+datasets:
+  train:
+    - name: pixmo_cap_local
+      dataset_kwargs:
+        data_path: /fsxvision_new/pratyush.jena/Datasets/pixmo-cap-images/extracted_dataset
+        mode: captions
+  val:
+    - name: pixmo_cap_local
+      dataset_kwargs:
+        data_path: /fsxvision_new/pratyush.jena/Datasets/pixmo-cap-images/extracted_dataset
+        mode: captions
+
+# ── Captioning Eval Callback ──────────────────────────────────────────────────
+captioning_eval:
+  eval_steps: 500
+  num_samples: 64
+  max_new_tokens: 256
+  do_sample: false
