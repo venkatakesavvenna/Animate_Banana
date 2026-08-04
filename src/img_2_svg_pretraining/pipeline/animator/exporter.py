@@ -23,6 +23,45 @@ from ..samples import PaperSample
 AGENT = "exporter"
 
 
+def _export_narrated(ctx: AgentContext, sample: PaperSample, frames: list[Path],
+                     out_dir: Path) -> str:
+    """Synthesize the narration and mux it against the frames.
+
+    Returns a short status note rather than raising, so a missing narration
+    script or an exhausted TTS quota costs only the narrated video -- the PDF,
+    MP4, GIF and PPTX for this sample are already written by this point and
+    must not be discarded over the audio track.
+    """
+    from ..export.narration import (
+        NarrationError, mux_narrated_video, synthesize_narration,
+    )
+
+    script = ctx.paths.narration_jsonl(sample.id)
+    if not script.exists():
+        return "narrated_mp4 skipped (no narration; run the narrate stage)"
+
+    try:
+        keys = _tts_keys(ctx)
+        clips = synthesize_narration(script, ctx.paths.audio(sample.id), api_keys=keys)
+        mux_narrated_video(frames, clips, out_dir / "animation_narrated.mp4")
+        spoken = sum(1 for c in clips if c.text)
+        return f"narrated_mp4 ({spoken}/{len(clips)} steps spoken)"
+    except NarrationError as e:
+        return f"narrated_mp4 failed ({e})"
+
+
+def _tts_keys(ctx: AgentContext) -> list[str]:
+    """API keys for TTS, from the same pool the chat backends draw on."""
+    from ..backends.keys import resolve_keys
+
+    # Prefer whatever backend the narrative writer used, so TTS follows the
+    # same credentials as the text it is speaking.
+    writer = ctx.cfg.agents.get("narrative_writer")
+    backend_name = writer.backend if writer else None
+    cfg = ctx.cfg.backend_cfg(backend_name) if backend_name else {}
+    return resolve_keys("gemini", cfg, default_env="GOOGLE_API_KEY")
+
+
 def export_sample(ctx: AgentContext, sample: PaperSample, formats: list[str],
                   fps: int, dpi: int) -> tuple[Path, str]:
     """Render one sample's animation. Returns (output dir, detail)."""
@@ -42,7 +81,7 @@ def export_sample(ctx: AgentContext, sample: PaperSample, formats: list[str],
     pdf_path = compile_pdf(to_multipage_pdf_source(code), out_dir / "animation.pdf")
 
     produced = ["pdf"]
-    needs_frames = {"mp4", "gif"} & set(formats)
+    needs_frames = {"mp4", "gif", "narrated_mp4"} & set(formats)
     frames: list[Path] = []
     if needs_frames:
         frames = pdf_to_frames(pdf_path, out_dir / "frames", dpi=dpi)
@@ -56,6 +95,10 @@ def export_sample(ctx: AgentContext, sample: PaperSample, formats: list[str],
     if "pptx" in formats:
         pdf_to_pptx(pdf_path, out_dir / "animation.pptx", dpi=dpi)
         produced.append("pptx")
+
+    if "narrated_mp4" in formats:
+        note = _export_narrated(ctx, sample, frames, out_dir)
+        produced.append(note)
 
     detail = f"{len(frames) or '?'} frames"
     if frames_declared and frames and len(frames) != frames_declared:

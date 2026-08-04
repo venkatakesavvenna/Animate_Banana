@@ -37,6 +37,49 @@ from .types import GenerationResult, ImagePart, Message, TextPart
 MODEL_CLASSES = ("image_text_to_text", "multimodal_lm")
 
 
+def _preload_nvrtc() -> str | None:
+    """Load the NVRTC that matches torch's CUDA, before torch can pick another.
+
+    Symptom this fixes, seen on Qwen3.6-27B the first time it generated:
+
+        nvrtc: error: failed to open libnvrtc-builtins.so.13.0.
+
+    The model loads fine and only fails once torch JIT-compiles a reduction
+    kernel at runtime. The cause is two CUDA generations installed side by
+    side in the same venv: torch is built against cu130 and `nvidia/cu13/lib`
+    holds `libnvrtc-builtins.so.13.0`, but the older `nvidia/cuda_nvrtc/lib`
+    (12.8) sits earlier on the search path. NVRTC 12.8 gets loaded, then looks
+    for its own 13.0 builtins and finds nothing.
+
+    `LD_LIBRARY_PATH` cannot be changed usefully from inside a running process
+    -- the loader reads it once at exec -- so the matching `libnvrtc.so.<major>`
+    is opened explicitly here instead. Loading it into the global namespace
+    means the later dlopen resolves to this one, and its builtins sit beside
+    it. Returns the path loaded, or None when nothing needed doing.
+    """
+    import ctypes
+    import sysconfig
+    from pathlib import Path
+
+    site = sysconfig.get_paths().get("purelib")
+    if not site:
+        return None
+
+    # Only the `cu<major>` layout carries the version-matched builtins; if it
+    # is absent the environment has a single CUDA generation and is already
+    # consistent.
+    for lib_dir in sorted(Path(site).glob("nvidia/cu*/lib")):
+        for candidate in sorted(lib_dir.glob("libnvrtc.so.*")):
+            if ".alt." in candidate.name:
+                continue   # the `.alt.` build is a fallback, not the default
+            try:
+                ctypes.CDLL(str(candidate), mode=ctypes.RTLD_GLOBAL)
+                return str(candidate)
+            except OSError:
+                continue
+    return None
+
+
 class HFLocalBackend(ChatBackend):
     def __init__(self, name: str, model: str, hf_repo: str,
                  model_class: str = "image_text_to_text",
@@ -47,6 +90,7 @@ class HFLocalBackend(ChatBackend):
                  max_new_tokens: int = 16384,
                  cudnn: bool = False,
                  batch_size: int = 2,
+                 max_memory: dict | None = None,
                  **kwargs):
         # Local generation is inherently serial on one GPU; concurrency > 1
         # would only contend for the same device.
@@ -58,6 +102,8 @@ class HFLocalBackend(ChatBackend):
             raise ValueError(
                 f"backend '{name}': model_class must be one of {MODEL_CLASSES}, got '{model_class}'"
             )
+
+        _preload_nvrtc()
 
         import torch
         from transformers import AutoProcessor
@@ -93,13 +139,45 @@ class HFLocalBackend(ChatBackend):
         # read and a single ~62GB GPU-side write, and it OOM'd a fully idle
         # 80GB H100 loading gemma-4-31B. device_map streams weights straight to
         # the device during loading -- same final footprint, no OOM.
+        #
+        # `device_map="auto"` additionally shards one model across every
+        # visible GPU, which is how the models too large for a single card
+        # (GLM-4.6V at ~215GB) run here. Pair it with CUDA_VISIBLE_DEVICES to
+        # choose *which* cards, since accelerate will otherwise happily place
+        # weights on a card another job is using.
+        load_kwargs = {}
+        if max_memory:
+            # Keys arrive from YAML as strings ("0": "70GiB"); accelerate wants
+            # int keys for GPU ordinals and leaves "cpu"/"disk" as-is.
+            load_kwargs["max_memory"] = {
+                (int(k) if str(k).isdigit() else k): v for k, v in max_memory.items()
+            }
+
         self.hf_model = _Model.from_pretrained(
             hf_repo,
             trust_remote_code=trust_remote_code,
             attn_implementation=attn_implementation,
             dtype=getattr(torch, dtype),
             device_map=device,
+            **load_kwargs,
         ).eval()
+
+    @property
+    def input_device(self):
+        """Where to put input tensors.
+
+        With `device_map="auto"` the model is spread over several GPUs and
+        `self.device` is the literal string "auto", which is not a device --
+        moving tensors there raises. The embedding layer's own device is the
+        right target in both cases, since that is the shard the forward pass
+        starts on, so ask the model rather than assuming.
+        """
+        if self.device != "auto":
+            return self.device
+        try:
+            return self.hf_model.get_input_embeddings().weight.device
+        except (AttributeError, StopIteration):
+            return next(self.hf_model.parameters()).device
 
     def unload(self) -> None:
         import gc
@@ -137,7 +215,7 @@ class HFLocalBackend(ChatBackend):
                 self._to_hf(messages),
                 add_generation_prompt=True, tokenize=True,
                 return_dict=True, return_tensors="pt",
-            ).to(self.device)
+            ).to(self.input_device)
 
             input_len = inputs["input_ids"].shape[-1]
             gen_kwargs = {"max_new_tokens": max_new_tokens}
@@ -239,7 +317,7 @@ class HFLocalBackend(ChatBackend):
                     [self._to_hf(m) for m in batch],
                     add_generation_prompt=True, tokenize=True,
                     return_dict=True, return_tensors="pt", padding=True,
-                ).to(self.device)
+                ).to(self.input_device)
 
                 input_len = inputs["input_ids"].shape[-1]
                 output_ids = self.hf_model.generate(

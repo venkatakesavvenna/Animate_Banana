@@ -92,6 +92,21 @@ planner:
       # least as much room as the sequencer.
       max_tokens: 32768
 
+  # Stage 2e. Writes the spoken narration into the finished sequence -- only
+  # the `narrative` field changes, the structure is grafted back verbatim.
+  # The prompt reference deliberately carries no '#key': the variant is chosen
+  # from context_tier at runtime (image_only gets the visually-grounded
+  # prompt, everything else the paper-grounded one).
+  narrative_writer:
+    backend: gemini_flash
+    prompt: animation_planner/narrative_writer.yaml
+    context_tier: full
+    params:
+      temperature: 0.3
+      # Echoes the whole sequence back with narration added, so it needs at
+      # least as much room as the sequencer.
+      max_tokens: 32768
+
 animator:
   designer:
     backend: qwen_local
@@ -109,6 +124,6 @@ animator:
       temperature: 0.2
 
   exporter:
-    outputs: [pdf, mp4, gif, pptx]
+    outputs: [pdf, mp4, gif, pptx, narrated_mp4]
     fps: 2
     dpi: 300

@@ -11,6 +11,7 @@ Three stages, each a set of agents:
     parse              diagram structure/hierarchy XML
     sequence           animation sequence, conditioned on the style
     critique-sequence  review and repair the sequence
+    narrate            write the spoken narration into the sequence
 
   STAGE 3  DIAGRAM ANIMATOR
     design             animation code from the sequence
@@ -50,6 +51,7 @@ STAGE_MODULES = {
     "parse": ("planner.parser", "parser"),
     "sequence": ("planner.sequencer", "sequencer"),
     "critique-sequence": ("planner.critic", "planner_critic"),
+    "narrate": ("planner.narrative_writer", "narrative_writer"),
     "design": ("animator.designer", "designer"),
     "critique-animation": ("animator.critic", "animator_critic"),
     "export": ("animator.exporter", "exporter"),
@@ -57,7 +59,7 @@ STAGE_MODULES = {
 
 STAGE_GROUPS = {
     "stage1": ["convert-code", "integrate-rasters"],
-    "stage2": ["strategize", "parse", "sequence", "critique-sequence"],
+    "stage2": ["strategize", "parse", "sequence", "critique-sequence", "narrate"],
     "stage3": ["design", "critique-animation", "export"],
 }
 STAGE_GROUPS["all"] = STAGE_GROUPS["stage1"] + STAGE_GROUPS["stage2"] + STAGE_GROUPS["stage3"]

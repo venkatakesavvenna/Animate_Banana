@@ -186,16 +186,48 @@ validity metrics report, so the critic and the scorer agree on what "invalid" me
 them), the designer (which realizes them), and the benchmark (which scores them):
 `progressive_reveal`, `sliding_bbox`, `highlight_dim`, `zoom_pan`.
 
-1. Gemma4 31B (+other versions of gemini)
-2. Qwen 3.6 27B (+vl 3.5 large models)
-3. Kimi k2.5
-4. qwen3.5-397b-a17b
-5. GLM-4.6v
-6. LLama4-Scout
-7. InternVL3.5-Flash Models
-8. Mistral-Large
-9. Deepseek-V4 Pro
-10. MinimMax M3b
+## Open-weights roster
+
+Configured in `configs/open_weights.yaml`. Weight sizes are **measured** from the HuggingFace
+repos (bf16, weights only — add 10-20% for activations and KV cache), not estimated.
+
+Host budget is GPUs 4-7, four H100 80GB = **320GB**. GPUs 0-3 belong to another job; select
+cards with `--gpu 4,5,6,7`, which sets `CUDA_VISIBLE_DEVICES` before torch initializes.
+
+| Model | Repo | Weights | Placement |
+|---|---|---|---|
+| Qwen3.6 27B | `Qwen/Qwen3.6-27B` | 55.6 GB | 1 GPU |
+| Gemma 4 31B | `google/gemma-4-31B-it` | 62.5 GB | 1 GPU |
+| Qwen3.6 35B-A3B | `Qwen/Qwen3.6-35B-A3B` | 71.9 GB | 2 GPUs (MoE headroom) |
+| GLM-4.6V | `zai-org/GLM-4.6V` | 215.4 GB | 4 GPUs, `max_memory` 70GiB/card |
+
+**Too large for this host** — declared in the config so the sizes are recorded rather than
+rediscovered, but they will OOM at bf16:
+
+| Model | Repo | Weights | Needs |
+|---|---|---|---|
+| InternVL3.5 241B-A28B-Flash | `OpenGVLab/InternVL3_5-241B-A28B-Flash` | 483.4 GB | ~7-8 H100 |
+| MiniMax-M3 | `MiniMaxAI/MiniMax-M3` | 854.2 GB | ~12 H100 |
+
+**Not wired** — no verified vision-capable repo id, and far past budget regardless: Kimi K2.5
+(~1T), Qwen3.5-397B-A17B (~800GB), DeepSeek-V4 Pro, Llama4-Scout. **Mistral-Large** is excluded
+on a second ground: it is text-only, and every stage of this pipeline sends an image.
+
+Run under `/environments/gemma4` (transformers 5.13.0), which was verified to carry all four
+runnable architectures — `glm4v_moe`, `qwen3_5_moe`, `qwen3_5`, `gemma4`. The main venv (5.3.0)
+lacks `gemma4`. No new venv is needed.
+
+```bash
+source /environments/gemma4/bin/activate
+python -u -m img_2_svg_pretraining.pipeline.run_pipeline all \
+  --config src/img_2_svg_pretraining/pipeline/configs/open_weights.yaml \
+  --gpu 4,5,6,7 --limit 1
+```
+
+Sharding is accelerate's `device_map: auto`, not vLLM. vLLM 0.24.0 is installed but unusable
+here — it requires `torch==2.11.0` against the base image's `2.7.0a0`, and the earlier attempt
+recorded in `backends/hf_local.py` hit a flash-attn/CUDA mismatch plus an NCCL that segfaulted
+above one GPU. The cost is throughput: no continuous batching, so requests serialize.
 
 
 ## Artifacts

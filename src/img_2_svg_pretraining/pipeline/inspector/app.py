@@ -76,6 +76,7 @@ def _stage_rows(sample_id: str) -> list[dict]:
         ("2b", "Structure XML", p.xml(sample_id), "xml"),
         ("2c", "Sequence", p.sequence(sample_id), "json"),
         ("2d", "Sequence (final)", p.sequence_final(sample_id), "json"),
+        ("2e", "Sequence (narrated)", p.sequence_narrated(sample_id), "json"),
         ("3a", "Animation code", p.animation(sample_id), "tex"),
         ("3c", "Animation (final)", p.animation_final(sample_id), "tex"),
     ]
@@ -85,6 +86,45 @@ def _stage_rows(sample_id: str) -> list[dict]:
          "size": path.stat().st_size if path.exists() else 0}
         for stage, label, path, kind in rows
     ]
+
+
+def _narration(sample_id: str) -> dict:
+    """The spoken script plus whichever audio clips have been synthesized.
+
+    Script and audio are reported independently because they are produced by
+    different stages: `narrate` writes the text, `export` turns it into WAVs.
+    A sample with a script and no clips has simply not been exported yet, and
+    the UI should say so rather than showing an empty player.
+    """
+    paths: CachePaths = STATE["paths"]
+    script_path = paths.narration_jsonl(sample_id)
+    audio_dir = paths.audio(sample_id)
+
+    steps = []
+    if script_path.exists():
+        for line in script_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            timestamp = entry.get("timestamp")
+            clip = audio_dir / f"audio_ts_{timestamp}.wav"
+            steps.append({
+                "timestamp": timestamp,
+                "text": entry.get("text"),
+                "audio": clip.name if clip.is_file() else None,
+            })
+
+    return {
+        "available": bool(steps),
+        "script": str(script_path),
+        "audio_dir": str(audio_dir),
+        "spoken": sum(1 for s in steps if s["text"]),
+        "clips": sum(1 for s in steps if s["audio"]),
+        "steps": steps,
+    }
 
 
 def _export_files(sample_id: str) -> dict:
@@ -137,8 +177,12 @@ def api_sample(sample_id):
         row["content"] = _read(Path(row["path"])) if row["exists"] else None
 
     sequence = None
-    final = STATE["paths"].sequence_final(sample_id)
-    raw = _read(final) or _read(STATE["paths"].sequence(sample_id))
+    # Newest artifact first: the narrated sequence carries everything the
+    # earlier two do, plus the spoken script.
+    paths = STATE["paths"]
+    raw = (_read(paths.sequence_narrated(sample_id))
+           or _read(paths.sequence_final(sample_id))
+           or _read(paths.sequence(sample_id)))
     if raw:
         try:
             sequence = json.loads(raw)
@@ -153,6 +197,7 @@ def api_sample(sample_id):
         "tiers": sample.available_tiers(),
         "stages": rows,
         "sequence": sequence,
+        "narration": _narration(sample_id),
         "exports": _export_files(sample_id),
     })
 
@@ -270,6 +315,15 @@ def api_raster_asset(sample_id, name):
     if ".." in name or "/" in name or not path.is_file():
         abort(404)
     return send_file(path)
+
+
+@app.get("/api/audio/<sample_id>/<name>")
+def api_audio(sample_id, name):
+    """One narration clip. Served with a mimetype so <audio> will play it."""
+    path = STATE["paths"].audio(sample_id) / name
+    if ".." in name or "/" in name or not path.is_file():
+        abort(404)
+    return send_file(path, mimetype="audio/wav")
 
 
 @app.get("/api/marked/<sample_id>")

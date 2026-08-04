@@ -1,5 +1,7 @@
 data/
 
+*.csv
+
 *cache/*
 
 # Python
@@ -33,6 +35,8 @@ src/img_2_svg_pretraining/data_engine/sam_finetuning/masks_processed
 src/img_2_svg_pretraining/data_engine/sam_finetuning/checkpoints
 src/img_2_svg_pretraining/data_engine/sam_finetuning/qa
 src/img_2_svg_pretraining/data_engine/sam_finetuning/splits.json
+
+src/img_2_svg_pretraining/pipeline/configs/run_one.yaml
 
 *.env
 

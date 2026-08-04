@@ -64,6 +64,12 @@
   .step { border-left: 2px solid var(--accent); padding: 6px 0 6px 12px; margin-bottom: 10px; }
   .step .h { font-family: ui-monospace, monospace; font-size: 11.5px; }
   .step .n { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  /* The spoken script, distinct from the planner's own one-line gloss above
+     it -- these are different fields written by different stages. */
+  .step .narrative { color: var(--fg); font-size: 12.5px; margin-top: 4px;
+                     font-style: italic; line-height: 1.45; }
+  audio { height: 30px; margin-top: 6px; max-width: 100%; vertical-align: middle;
+          filter: invert(0.88) hue-rotate(180deg); }
   .chip { display: inline-block; background: var(--panel2); border: 1px solid var(--line);
           border-radius: 3px; padding: 1px 6px; margin: 2px 3px 0 0;
           font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--accent); }
@@ -244,15 +250,43 @@ function render(d) {
     <div class="card" style="margin-bottom:22px">
       <h3>Animation sequence &mdash; ${order.length} steps
         <span class="pill" style="margin-left:6px">${esc(seq.traversal_style || "")}</span></h3>
-      ${order.map((n,i) => `
+      ${order.map((n,i) => {
+        // Narration steps are 1-based and indexed by traversal position, the
+        // same numbering the audio clips use.
+        const nar = (d.narration?.steps || []).find(s => s.timestamp === i+1);
+        return `
         <div class="step">
           <div class="h">${i+1}. ${esc(n.id)}
             <span class="pill">d${n.depth}</span>
             <span class="pill">${esc(n.action || "")}</span>
             ${n.duration ? `<span class="pill">${n.duration}s</span>` : ""}</div>
           <div class="n">${esc(n.narration || "")}</div>
+          ${n.narrative ? `<div class="narrative">&ldquo;${esc(n.narrative)}&rdquo;</div>` : ""}
+          ${nar?.audio ? `<audio controls preload="none" src="/api/audio/${d.id}/${nar.audio}"></audio>` : ""}
           <div>${(n.focus||[]).map(f => `<span class="chip">${esc(f)}</span>`).join("")}</div>
-        </div>`).join("")}
+        </div>`; }).join("")}
+    </div>` : ""}
+
+    ${d.narration?.available ? `
+    <div class="card" style="margin-bottom:22px">
+      <h3>Narration &mdash; ${d.narration.spoken}/${d.narration.steps.length} steps spoken
+        <span class="pill" style="margin-left:6px">${d.narration.clips} audio clip${d.narration.clips===1?"":"s"}</span></h3>
+      ${d.narration.clips ? `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <button onclick="playNarration()" id="narbtn">&#9654; play narration</button>
+        <span class="sub2" style="margin:0">plays each clip in order, advancing the frame view</span>
+      </div>` : `
+      <div class="sub2" style="margin:0 0 10px">
+        script written, no audio yet &mdash; run the export stage with
+        <code>narrated_mp4</code> in the exporter outputs</div>`}
+      <table><thead><tr><th style="width:44px">#</th><th>Narration</th><th style="width:220px">Audio</th></tr></thead>
+      <tbody>${d.narration.steps.map(s => `
+        <tr>
+          <td class="tag">${s.timestamp}</td>
+          <td>${s.text ? esc(s.text) : `<span class="sub2" style="margin:0">(silent)</span>`}</td>
+          <td>${s.audio ? `<audio controls preload="none" src="/api/audio/${d.id}/${s.audio}"></audio>` : ""}</td>
+        </tr>`).join("")}</tbody></table>
+      <div class="sub2" style="margin:8px 0 0;font-size:11px">script: <code>${esc(d.narration.script)}</code></div>
     </div>` : ""}
 
     <div id="rasters"></div>
@@ -275,6 +309,8 @@ function render(d) {
   FRAMES = d.exports.frames;
   FRAME = 0;
   stopPlay();
+  stopNarration();
+  NARRATION = d.narration;
   setMode(MODE);
   const first = d.stages.findIndex(s => s.exists);
   if (first >= 0) show(first);
@@ -312,6 +348,48 @@ function stopPlay() {
   TIMER = null;
   const btn = $("#playbtn");
   if (btn) btn.innerHTML = "&#9654; play";
+}
+
+/* -- narration playback ------------------------------------------------ */
+/* Plays the clips in order and moves the frame view with them. Frames are
+   mapped to steps by the same proportional rule the muxer uses, so what you
+   hear here lines up with the exported narrated MP4 rather than being a
+   second, subtly different alignment. */
+let NARRATION = null, NAR_AUDIO = null, NAR_STEP = 0;
+
+function playNarration() {
+  if (NAR_AUDIO) { stopNarration(); return; }
+  const clips = (NARRATION?.steps || []).filter(s => s.audio);
+  if (!clips.length) return;
+  stopPlay();
+  NAR_STEP = 0;
+  setMode("scrub");
+  const btn = $("#narbtn");
+  if (btn) btn.innerHTML = "&#10073;&#10073; stop narration";
+  playNarrationStep();
+}
+
+function playNarrationStep() {
+  const steps = NARRATION?.steps || [];
+  const total = steps.length;
+  if (NAR_STEP >= total) { stopNarration(); return; }
+
+  const entry = steps[NAR_STEP];
+  // Show the first frame belonging to this step.
+  if (FRAMES && total) gotoFrame(Math.floor(NAR_STEP * FRAMES / total));
+
+  if (!entry.audio) { NAR_STEP++; setTimeout(playNarrationStep, 1500); return; }
+
+  NAR_AUDIO = new Audio(`/api/audio/${CURRENT}/${entry.audio}`);
+  NAR_AUDIO.onended = () => { NAR_STEP++; playNarrationStep(); };
+  NAR_AUDIO.onerror = () => { NAR_STEP++; playNarrationStep(); };
+  NAR_AUDIO.play().catch(stopNarration);
+}
+
+function stopNarration() {
+  if (NAR_AUDIO) { NAR_AUDIO.pause(); NAR_AUDIO = null; }
+  const btn = $("#narbtn");
+  if (btn) btn.innerHTML = "&#9654; play narration";
 }
 
 function setMode(mode) {

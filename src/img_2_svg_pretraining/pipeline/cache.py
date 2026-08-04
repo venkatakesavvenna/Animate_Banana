@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import PipelineConfig
+from .config import ConfigError, PipelineConfig
 
 CODE_SUFFIX = {"tikz": ".tex", "svg": ".svg"}
 
@@ -84,6 +84,20 @@ class CachePaths:
                 f"__{self._model_for('sequencer')}__{self.cfg.style}")
 
     @property
+    def narrative_lineage(self) -> str:
+        """Stage 2e. Deliberately NOT part of `animation_lineage`.
+
+        Narration is spoken text laid over the animation; it does not change a
+        single frame. Folding it into the animation lineage would invalidate
+        every cached render whenever the narrative prompt or tier changed, and
+        re-compiling a run's TikZ is far more expensive than re-writing its
+        script.
+        """
+        agent = self.cfg.agents.get("narrative_writer")
+        tier = agent.option("context_tier", "full") if agent else "full"
+        return f"{self.sequence_lineage}__{self._model_for('narrative_writer')}__{tier}"
+
+    @property
     def animation_lineage(self) -> str:
         return f"{self.sequence_lineage}__{self._model_for('designer')}"
 
@@ -119,6 +133,18 @@ class CachePaths:
 
     def sequence_final(self, sample_id: str) -> Path:
         return self.root / "sequence_final" / self.sequence_lineage / f"{sample_id}.json"
+
+    def sequence_narrated(self, sample_id: str) -> Path:
+        """Stage 2e output: the same sequence with spoken narration filled in."""
+        return self.root / "sequence_narrated" / self.narrative_lineage / f"{sample_id}.json"
+
+    def narration_jsonl(self, sample_id: str) -> Path:
+        """The narration alone, timestamp-indexed, as the TTS stage wants it."""
+        return self.root / "narration" / self.narrative_lineage / f"{sample_id}.jsonl"
+
+    def audio(self, sample_id: str) -> Path:
+        """Per-timestamp narration clips: `audio_ts_<n>.wav`."""
+        return self.root / "audio" / self.narrative_lineage / sample_id
 
     def animation(self, sample_id: str, round_index: int | None = None) -> Path:
         name = (f"{sample_id}{self._ext}" if round_index is None
@@ -170,6 +196,14 @@ class CachePaths:
         try:
             out["strategy"] = self.strategy(sample_id)
         except ValueError:
+            pass
+        # Absent from configs that predate stage 2e, so a missing agent is a
+        # gap in the listing rather than a failure to print any paths at all.
+        try:
+            out["sequence_narrated"] = self.sequence_narrated(sample_id)
+            out["narration"] = self.narration_jsonl(sample_id)
+            out["audio"] = self.audio(sample_id)
+        except (ValueError, ConfigError):
             pass
         return {k: str(v) for k, v in out.items()}
 

@@ -1,0 +1,238 @@
+# Open-weights model roster, for benchmarking the pipeline across backends.
+#
+# Every model below is declared so the roster is complete and comparable. Only
+# some of them can actually run on this host -- see FITS/TOO LARGE per entry.
+#
+# ---------------------------------------------------------------------------
+# HOST BUDGET
+# ---------------------------------------------------------------------------
+# GPUs 4-7 (four H100 80GB) = 320GB usable. GPUs 0-3 belong to another job and
+# must not be touched: select cards with `--gpu 4,5,6,7`, which the CLI sets as
+# CUDA_VISIBLE_DEVICES before torch initializes.
+#
+# Weight sizes below are measured from the HuggingFace repos, not estimated.
+# Read them as bf16 weights only -- add roughly 10-20% for activations and the
+# KV cache, which is why the 215GB model is given all four cards rather than
+# the three that would nominally hold it.
+#
+# ---------------------------------------------------------------------------
+# WHY transformers AND NOT vLLM
+# ---------------------------------------------------------------------------
+# vLLM 0.24.0 is installed in the main venv but is not usable here: it requires
+# torch==2.11.0 while the NVIDIA base image ships 2.7.0a0, and pip reports that
+# conflict on every install. `backends/hf_local.py` records the earlier attempt
+# -- the container's flash-attn build targets a different CUDA toolkit than the
+# installed torch, and NCCL segfaulted above one GPU. So sharding here is
+# accelerate's `device_map: auto`, which costs throughput (no continuous
+# batching) but works.
+#
+# ---------------------------------------------------------------------------
+# NVRTC / CUDA MISMATCH (handled in code)
+# ---------------------------------------------------------------------------
+# The gemma4 venv has two CUDA generations side by side: torch is cu130, and
+# nvidia/cu13/lib holds libnvrtc-builtins.so.13.0, but the older
+# nvidia/cuda_nvrtc/lib (12.8) sits earlier on the loader's search path. The
+# model then LOADS FINE and only fails at the first generate, when torch JIT
+# compiles a reduction kernel:
+#
+#   nvrtc: error: failed to open libnvrtc-builtins.so.13.0
+#
+# `backends/hf_local.py::_preload_nvrtc` opens the matching libnvrtc before
+# torch is imported, so nothing needs setting in the shell. If you run these
+# models outside the pipeline, export this first:
+#
+#   export LD_LIBRARY_PATH=/environments/gemma4/lib/python3.12/site-packages/nvidia/cu13/lib:$LD_LIBRARY_PATH
+#
+# ---------------------------------------------------------------------------
+# VENV
+# ---------------------------------------------------------------------------
+# Run this config under /environments/gemma4 (transformers 5.13.0), NOT the
+# main venv (5.3.0, which has no `gemma4` architecture). 5.13.0 was verified to
+# carry all four runnable architectures -- glm4v_moe, qwen3_5_moe, qwen3_5,
+# gemma4 -- so no new venv is needed:
+#
+#   docker exec -it img-2-svg-pretraining-singlenode-venkat.kesav bash
+#   source /environments/gemma4/bin/activate
+#   python -u -m img_2_svg_pretraining.pipeline.run_pipeline all \
+#     --config src/img_2_svg_pretraining/pipeline/configs/open_weights.yaml \
+#     --gpu 4,5,6,7 --limit 1
+
+dataset:
+  root: /code/data/test_benchmark
+  limit: 0
+
+animation_style: progressive_reveal
+target: tikz
+
+backends:
+  # -- FITS: single card -------------------------------------------------
+  # 55.6GB weights on an 80GB card, so no sharding and no max_memory needed.
+  qwen36_27b:
+    type: hf_local
+    hf_repo: Qwen/Qwen3.6-27B
+    model: qwen3.6-27b
+    attn_implementation: eager
+    device: cuda:0                # first *visible* card, i.e. GPU 4
+    batch_size: 1
+
+  # 62.5GB weights. Gemma 4 is the architecture the eager/cuDNN workarounds in
+  # hf_local.py were written for; keep both.
+  gemma4_31b:
+    type: hf_local
+    hf_repo: google/gemma-4-31B-it
+    model: gemma4-31b
+    attn_implementation: eager
+    device: cuda:0
+    cudnn: false
+    batch_size: 1
+
+  # -- FITS: sharded -----------------------------------------------------
+  # 71.9GB total but MoE: sharding across two cards keeps headroom for the
+  # expert routing buffers, which spike well above the dense footprint.
+  qwen36_35b_a3b:
+    type: hf_local
+    hf_repo: Qwen/Qwen3.6-35B-A3B
+    model: qwen3.6-35b-a3b
+    attn_implementation: eager
+    device: auto
+    max_memory:
+      0: 70GiB
+      1: 70GiB
+    batch_size: 1
+
+  # 215.4GB weights -- the largest model that fits here, and only across all
+  # four cards. 70GiB/card caps accelerate at 280GB, deliberately short of the
+  # 320GB total so activations and KV cache have somewhere to live.
+  glm46v:
+    type: hf_local
+    hf_repo: zai-org/GLM-4.6V
+    model: glm-4.6v
+    attn_implementation: eager
+    device: auto
+    max_memory:
+      0: 70GiB
+      1: 70GiB
+      2: 70GiB
+      3: 70GiB
+    batch_size: 1
+
+  # -- TOO LARGE for 4xH100 (declared, will OOM if invoked) --------------
+  # Kept so the roster is complete and the sizes are recorded rather than
+  # rediscovered. Each needs either more cards or a quantized checkpoint;
+  # none of these will load at bf16 on 320GB.
+  #
+  # 483.4GB weights -- needs ~7-8 H100s at bf16.
+  internvl35_241b_flash:
+    type: hf_local
+    hf_repo: OpenGVLab/InternVL3_5-241B-A28B-Flash
+    model: internvl3.5-241b-a28b-flash
+    attn_implementation: eager
+    device: auto
+    trust_remote_code: true       # InternVLChatModel is not a native arch
+    batch_size: 1
+
+  # 854.2GB weights -- needs ~12 H100s at bf16.
+  minimax_m3:
+    type: hf_local
+    hf_repo: MiniMaxAI/MiniMax-M3
+    model: minimax-m3
+    attn_implementation: eager
+    device: auto
+    batch_size: 1
+
+  # The remaining three from the roster have no verified vision-capable repo
+  # id and are far past this host's budget regardless, so they are recorded
+  # here as names rather than as configs that would fail confusingly at
+  # download time:
+  #
+  #   Kimi K2.5          ~1T params, trillion-parameter class
+  #   Qwen3.5-397B-A17B  ~800GB at bf16
+  #   DeepSeek-V4 Pro    same class as the above
+  #   Mistral-Large      ~246GB, and TEXT-ONLY -- cannot serve any stage of
+  #                      this pipeline, every one of which sends an image
+  #
+  # Give me repo ids for any of these and I will wire them the same way.
+
+  # Commercial fallback, so a run can mix local and API models.
+  gemini_flash:
+    type: gemini
+    model: gemini-3.6-flash
+    max_concurrency: 4
+
+transmuter:
+  code_converter:
+    backend: qwen36_27b
+    prompt: diagram_transmuter/tikz_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  raster_integrator:
+    enabled: true
+    backend: qwen36_27b
+    params:
+      temperature: 0.0
+      max_tokens: 4096
+
+planner:
+  strategizer:
+    backend: qwen36_27b
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+    params:
+      temperature: 0.3
+
+  parser:
+    backend: qwen36_27b
+    prompt: animation_planner/tikz_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  sequencer:
+    backend: qwen36_27b
+    prompt: animation_planner/sequencer.yaml#prompt
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    enabled: false
+    backend: qwen36_27b
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    use_set_of_mark: true
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  narrative_writer:
+    backend: qwen36_27b
+    prompt: animation_planner/narrative_writer.yaml
+    context_tier: full
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+animator:
+  designer:
+    backend: qwen36_27b
+    prompt: animation_designer/designer.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  critic:
+    enabled: false
+    backend: qwen36_27b
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+
+  exporter:
+    # narrated_mp4 needs a TTS key; drop it for a purely local run.
+    outputs: [pdf, mp4, gif, pptx]
+    fps: 2
+    dpi: 300

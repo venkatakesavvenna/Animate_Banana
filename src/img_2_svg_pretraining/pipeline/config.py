@@ -27,6 +27,7 @@ AGENTS: dict[str, tuple[str, bool]] = {
     "parser": ("planner", True),
     "sequencer": ("planner", True),
     "planner_critic": ("planner", True),
+    "narrative_writer": ("planner", True),
     "designer": ("animator", True),
     "animator_critic": ("animator", True),
     "exporter": ("animator", False),
@@ -34,7 +35,7 @@ AGENTS: dict[str, tuple[str, bool]] = {
 
 SECTIONS = ("transmuter", "planner", "animator")
 TARGETS = ("tikz", "svg")
-EXPORT_FORMATS = ("pdf", "mp4", "gif", "pptx")
+EXPORT_FORMATS = ("pdf", "mp4", "gif", "pptx", "narrated_mp4")
 
 # Agent config keys understood by the runner; anything else is a typo.
 _AGENT_KEYS = {
@@ -105,6 +106,13 @@ class PipelineConfig:
         ).hexdigest()[:16]
 
 
+# Agents that pick their prompt variant at runtime rather than in the config,
+# and so may name a multi-variant file with no '#key'. The narrative writer
+# selects by context tier, exactly as the strategizer would if its tier keys
+# were not already spelled out per-config.
+_RUNTIME_VARIANT_AGENTS = {"narrative_writer"}
+
+
 def _validate_prompt_ref(agent_name: str, ref: str) -> None:
     file_part, key = parse_ref(ref)
     try:
@@ -115,7 +123,7 @@ def _validate_prompt_ref(agent_name: str, ref: str) -> None:
         raise ConfigError(
             f"agent '{agent_name}': prompt '{file_part}' has no key '{key}'. Available: {keys}"
         )
-    if key is None and len(keys) > 1:
+    if key is None and len(keys) > 1 and agent_name not in _RUNTIME_VARIANT_AGENTS:
         raise ConfigError(
             f"agent '{agent_name}': prompt '{file_part}' has {len(keys)} variants, "
             f"so the reference needs a '#key' suffix. Available: {keys}"

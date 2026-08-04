@@ -33,6 +33,12 @@ class SequenceNode:
     action: str = "reveal"
     narration: str | None = None
     duration: float | None = None
+    # Stage 2e. `narration` is the sequencer's one-line gloss of what the step
+    # shows; `narrative` is the spoken script written against the paper (or the
+    # figure alone) and is what gets sent to TTS. They are kept separate so a
+    # re-run of the narrative writer never destroys the planner's own reasoning,
+    # and so the benchmark can tell a planned step apart from a narrated one.
+    narrative: str | None = None
 
 
 @dataclass
@@ -76,6 +82,7 @@ class AnimationSequence:
                 action=raw.get("action") or "reveal",
                 narration=raw.get("narration"),
                 duration=raw.get("duration"),
+                narrative=raw.get("narrative"),
             ))
         return cls(
             style=data.get("style") or "",
@@ -110,6 +117,38 @@ class AnimationSequence:
 
     def max_depth(self) -> int:
         return max((n.depth for n in self.nodes), default=0)
+
+    def has_narrative(self) -> bool:
+        """Whether the narrative writer has run and produced any spoken text."""
+        return any(n.narrative for n in self.nodes)
+
+    def narration_script(self) -> list[dict]:
+        """The spoken script, one entry per playback step, in traversal order.
+
+        Timestamps are 1-based and index the *traversal*, not the node list --
+        the animation renders one frame per traversal entry, so this is the
+        numbering the frames and the audio clips must agree on. A step whose
+        narrative is null still gets an entry with `text: None`; dropping it
+        would shift every later timestamp and desync the audio from the video.
+        """
+        by_id = {n.id: n for n in self.nodes}
+        script = []
+        for index, node_id in enumerate(self.traversal, 1):
+            node = by_id.get(node_id)
+            script.append({
+                "timestamp": index,
+                "node_id": node_id,
+                "text": node.narrative if node else None,
+                "duration": node.duration if node else None,
+            })
+        return script
+
+    def narration_jsonl(self) -> str:
+        """The script as timestamp-indexed JSONL, the TTS stage's input format."""
+        return "".join(
+            json.dumps({"timestamp": e["timestamp"], "text": e["text"]}) + "\n"
+            for e in self.narration_script()
+        )
 
     # -- validation ------------------------------------------------------
 
