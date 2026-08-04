@@ -1,4 +1,89 @@
-prompt: |
+new_prompt: |
+  You are an expert Animation Sequencer. Your task is to generate a time-indexed, hierarchical JSON animation sequence for a process diagram.
+
+  ### YOUR INPUTS
+  You will be provided with:
+  1. **Original TikZ Code:** The complete drawing code containing all diagram elements. This is your EXCLUSIVE source for finding `text_node` elements, as they are intentionally omitted from the structural XML/JSON graph.
+  2. **Hierarchical Graph (XML/JSON):** The parsed structural dependency graph of the diagram, providing the exact `depth`, `parent`, and edge routing metadata for all non-text elements.
+  3. **Animation Style:** One of the following: `progressive_reveal`, `alpha_masking`, `colour_pop`, `hopping_bounding_box`, or `sliding_bounding_box`.
+
+  ### YOUR OBJECTIVE
+  Analyze the logical flow of the diagram and merge the elements from the TikZ code and structural graph to create a strictly structured JSON animation sequence. You must determine the optimal Traversal Style (Overview First or Detail First) and logically deduce the animation steps. The sequence must perfectly obey the logical constraints of the requested Animation Style.
+
+  ### RULESET 1: ELEMENT-TO-JSON ARRAY MAPPING (CRITICAL)
+  You must strictly categorize the diagram elements into their corresponding JSON arrays inside the `to_be_animated` object based ON THEIR `data-class` metadata. Extract the `data-id` to use as the `"id"` in your JSON:
+  *   **`blocks` array:** ONLY elements identified as `data-class="block"`.
+  *   **`nodes` array:** Elements identified as `child_node`, `standalone_node`, `raster_node`, or `composite_whole`. *(Note: If a structural text entity is tagged as a child or standalone node, it belongs in the `nodes` array, NOT the text array. CRITICAL: NEVER include `composite_part` elements; the `composite_whole` ID completely represents the entire composite element).*
+  *   **`text` array:** ONLY elements identified as `data-class="text_node"` in the code. Since these do not exist in the structural graph, you must extract their `data-id` directly from the code and assign them a `depth` identical to their defined `data-parent`.
+  *   **`arrows` array:** ONLY elements identified as `data-class="edge"`.
+
+  ### RULESET 2: TRAVERSAL ORDER LOGIC (CRITICAL)
+  You must evaluate the diagram's structure to determine the best traversal order (`overview_first` or `detail_first`), and then deduce the chronological animation steps (timestamps) based on that structural flow. `timestamp: 1` is the first animation event. Consider a topology where Node A leads to Block B (containing children b1, b2, b3), which leads to Block C (containing children c1, c2, c3).
+
+  *   **If you choose `overview_first`:** You must establish the macro-architecture before showing internal details. 
+      *   *Traversal Order:* Establish the top-level pipeline first (standalone A -> block B -> block C). While showing these blocks, you don't reveal their children. Then, return to detail the first block completely before moving to the next (b1 -> b2 -> b3, then c1 -> c2 -> c3). 
+      *   *Flow:* At early timestamps, you must ONLY animate macro blocks, standalone nodes, cross-edges, and high-level text (everything with `depth="1"`). Once the global layout is fully established, increment the timestamps and dive into the internal children of each block one by one.
+  *   **If you choose `detail_first`:** You must completely traverse a logical block before moving to the next connecting block. 
+      *   *Traversal Order:* Expand containers immediately as they are encountered in the flow (A -> B -> b1 -> b2 -> b3 -> C -> c1 -> c2 -> c3).
+      *   *Flow:* Animate a parent block (depth 1), then sequentially animate all its internal children, text labels, and internal edges (depth 2+) in subsequent timestamps before allowing the sequence to progress to the next macro-block.
+
+  ### RULESET 3: ANIMATION STYLE LOGIC (FILTERING & PACING)
+  Different animation styles require different elements to be pushed to the rendering engine. You must STRICTLY apply these filtering rules to the `to_be_animated` arrays for every timestamp:
+
+  *   **Rule A (Full Animation & Sequential Pacing):** If the style is `progressive_reveal` or `colour_pop`:
+      *   **Filtering:** Include ALL element types. Nodes, blocks, text labels, and arrows must all be appropriately assigned to their respective arrays when they become active.
+      *   **Pacing (CRITICAL):** You MUST reveal the diagram sequentially, step-by-step. Do NOT group too many elements into a single timestamp. "Full animation" means no element types are filtered out, NOT that everything appears at once. Limit each timestamp to a single logical step (e.g., one major node/block, its associated text, and its outgoing arrow).
+  *   **Rule B (Bounding Box Styles):** If the style is `hopping_bounding_box` or `sliding_bounding_box`:
+      *   You must ONLY animate main diagram nodes and blocks. 
+      *   STRICT CONSTRAINT 1 (EMPTY ARRAYS): The `arrows` and `text` arrays MUST remain completely empty (`[]`) for EVERY timestamp. Do not include labels or edges.
+      *   STRICT CONSTRAINT 2 (SINGLE TARGET PER FRAME): You must assign EXACTLY ONE element (either ONE block OR ONE node) per timestamp. Do not group multiple nodes or blocks together.
+  *   **Rule C (Alpha Masking & DAG Compliance):** If the style is `alpha_masking`:
+      *   **Filtering & Pacing:** Include ALL element types and strictly follow the step-by-step sequential pacing rule defined in Rule A. Do not display too many things at once; animate sequentially.
+      *   **DAG PRESERVATION (CRITICAL):** To ensure the animation sequence remains a strict Directed Acyclic Graph (DAG), during Overview-First Traversal style, you must NEVER list a parent container or any other element in multiple timestamps. A parent block is animated exactly ONCE when first encountered. Do NOT re-include the parent container in the arrays when animating its internal children at later timestamps. You can include its title text. Assume the rendering engine inherently persists the mask.
+
+  ### EXPECTED JSON OUTPUT FORMAT
+  Your output must be a single, valid JSON object containing metadata and the sequence array. Do NOT include any markdown text outside the JSON block.
+
+  {
+    "metadata": {
+      "traversal_order": "overview_first",
+      "animation_style": "alpha_masking"
+    },
+    "sequence": [
+      {
+        "timestamp": 1,
+        "to_be_animated": {
+          "blocks": [
+            { "id": "block_phase_net", "depth": 1 },
+            { "id": "block_amp_net", "depth": 1 }
+          ],
+          "nodes": [
+            { "id": "input_stack_front", "depth": 1, "parent": "root" }
+          ],
+          "text": [
+            { "id": "phase_net_title", "depth": 2, "attached_to": "block_phase_net" },
+            { "id": "amp_net_title", "depth": 2, "attached_to": "block_amp_net" }
+          ],
+          "arrows": [
+            { "id": "edge_input_to_fft", "depth": 1, "source": "input_stack_front", "target": "phase_fft" }
+          ]
+        }
+      },
+      {
+        "timestamp": 2,
+        "to_be_animated": {
+          "blocks": [],
+          "nodes": [
+            { "id": "phase_fft", "depth": 2, "parent": "block_phase_net" }
+          ],
+          "text": [],
+          "arrows": []
+        }
+      }
+    ]
+  }
+
+old_prompt: |
   You are an expert Animation Sequencer and Data Architect. Your task is to generate a time-indexed, hierarchical JSON animation sequence for a technical diagram.
 
   ### YOUR INPUTS

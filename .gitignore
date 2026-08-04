@@ -36,4 +36,8 @@ src/img_2_svg_pretraining/data_engine/sam_finetuning/splits.json
 
 *.env
 
-*.csv
+*.csvsrc/img_2_svg_pretraining/pipeline/configs/run_one.yaml
+.mkrunconfig.py
+
+
+tmp/

@@ -4,7 +4,7 @@ Three stages, each a set of agents:
 
   STAGE 1  DIAGRAM TRANSMUTER
     convert-code       image -> animation-aware diagram code
-    integrate-rasters  Molmo2 + SAM -> crop photographic regions into the code
+    integrate-rasters  locate raster regions with the VLM -> crop into the code
 
   STAGE 2  ANIMATION PLANNER
     strategize         traversal strategy (OVERVIEW_FIRST | DETAIL_FIRST)
@@ -21,10 +21,16 @@ Each agent runs over the whole sample set and hands off to the next purely
 through on-disk artifacts, so only the model a given agent needs is ever
 loaded, and any agent can be re-run alone after a prompt change.
 
+Any run can be narrowed to a window of stages with `--from`/`--to`, which is
+how a partially-complete run is resumed without recomputing what already
+succeeded. Both bounds are inclusive.
+
 Examples:
     run_pipeline.py convert-code --config configs/default.yaml --limit 1
     run_pipeline.py stage2 --config configs/default.yaml
     run_pipeline.py all --config configs/default.yaml --only CVPR_2025_pipe00002
+    run_pipeline.py all --from sequence            # resume: sequence -> export
+    run_pipeline.py all --from parse --to design   # just the middle
     run_pipeline.py paths --config configs/default.yaml
 """
 from __future__ import annotations
@@ -56,6 +62,45 @@ STAGE_GROUPS = {
 }
 STAGE_GROUPS["all"] = STAGE_GROUPS["stage1"] + STAGE_GROUPS["stage2"] + STAGE_GROUPS["stage3"]
 
+# Canonical agent order, which is what `--from`/`--to` slice against. The
+# groups above are contiguous windows of this list, so a range never has to be
+# reconciled against them separately.
+STAGE_ORDER = STAGE_GROUPS["all"]
+
+
+def resolve_stages(stage: str, start: str | None = None, stop: str | None = None) -> list[str]:
+    """The agents to run, honouring `--from`/`--to`.
+
+    Without either flag this is just the named subcommand or group. With them
+    the selection is narrowed to a window of `STAGE_ORDER`, so `all --from
+    sequence` resumes a partially-complete run and `all --to parse` stops
+    before the expensive half. Both bounds are inclusive.
+
+    Narrowing applies to whatever was named, rather than always slicing the
+    full pipeline: `stage2 --from sequence` stays inside stage 2.
+    """
+    stages = STAGE_GROUPS.get(stage, [stage])
+
+    for flag, name in (("--from", start), ("--to", stop)):
+        if name is not None and name not in STAGE_ORDER:
+            raise SystemExit(
+                f"{flag}: unknown stage '{name}'. Known: {', '.join(STAGE_ORDER)}")
+
+    if start is not None:
+        begin = STAGE_ORDER.index(start)
+        stages = [s for s in stages if STAGE_ORDER.index(s) >= begin]
+    if stop is not None:
+        end = STAGE_ORDER.index(stop)
+        stages = [s for s in stages if STAGE_ORDER.index(s) <= end]
+
+    if not stages:
+        # Silently running nothing looks like success; say why the window is
+        # empty, since the usual cause is the bounds being the wrong way round.
+        raise SystemExit(
+            f"no stages selected: '{stage}' contains nothing between "
+            f"'{start or STAGE_ORDER[0]}' and '{stop or STAGE_ORDER[-1]}'")
+    return stages
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -73,6 +118,10 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="recompute even when the artifact is cached")
         p.add_argument("--gpu", default=None,
                        help="CUDA_VISIBLE_DEVICES for local backends")
+        p.add_argument("--from", dest="from_stage", default=None, metavar="STAGE",
+                       help="start at this stage, skipping earlier ones (inclusive)")
+        p.add_argument("--to", dest="to_stage", default=None, metavar="STAGE",
+                       help="stop after this stage (inclusive)")
         return p
 
     for name in list(STAGE_MODULES) + list(STAGE_GROUPS):
@@ -119,8 +168,10 @@ def _run_stage(name: str, cfg, samples, force: bool) -> bool:
     try:
         module = importlib.import_module(f".{module_path}", package=__package__)
     except ImportError as e:
-        print(f"\n[{name}] not available: {e}")
-        return False
+        # An agent that isn't implemented yet is skipped, not a failure --
+        # it must not halt a multi-stage run. Stage 1b is optional by design.
+        print(f"\n[{name}] skipped: not implemented ({e})")
+        return True
 
     agent_cfg = cfg.agents.get(agent)
     if agent_cfg is None:
@@ -132,7 +183,9 @@ def _run_stage(name: str, cfg, samples, force: bool) -> bool:
 
     report = module.run(cfg, samples, force=force)
     report.print_report()
-    return not report.failed or bool(report.ok)
+    # An unresolved artifact still feeds the next stage, so only a stage that
+    # produced nothing at all should halt the chain.
+    return bool(report.produced)
 
 
 def main() -> None:
@@ -165,7 +218,9 @@ def main() -> None:
     print(f"{len(samples)} sample(s) | style={cfg.style} | target={cfg.target} "
           f"| config={Path(args.config).name}")
 
-    stages = STAGE_GROUPS.get(args.stage, [args.stage])
+    stages = resolve_stages(args.stage, args.from_stage, args.to_stage)
+    if stages != STAGE_GROUPS.get(args.stage, [args.stage]):
+        print(f"running: {' -> '.join(stages)}")
     for name in stages:
         ok = _run_stage(name, cfg, samples, args.force)
         # In a multi-stage run, a stage that produced nothing means every

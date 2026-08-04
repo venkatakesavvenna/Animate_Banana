@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 
 from .base import ChatBackend, RetriableError
+from .keys import KeyRing
 from .types import GenerationResult, ImagePart, Message, TextPart
 
 _RETRIABLE_MARKERS = ("429", "500", "502", "503", "504",
@@ -16,7 +17,8 @@ _RETRIABLE_MARKERS = ("429", "500", "502", "503", "504",
 
 
 class GeminiBackend(ChatBackend):
-    def __init__(self, name: str, model: str, api_key: str | None = None, **kwargs):
+    def __init__(self, name: str, model: str, api_key: str | None = None,
+                 api_keys: list[str] | None = None, **kwargs):
         super().__init__(name=name, model=model, **kwargs)
         try:
             from google import genai
@@ -24,12 +26,39 @@ class GeminiBackend(ChatBackend):
             raise ImportError(
                 "google-genai package required for gemini backend: pip install google-genai"
             ) from e
-        if not api_key:
+
+        keys = list(api_keys) if api_keys else ([api_key] if api_key else [])
+        if not keys:
             raise ValueError(
-                f"backend '{name}': no API key. Set GOOGLE_API_KEY or api_key_env in the config."
+                f"backend '{name}': no API key. Set GOOGLE_API_KEY, api_key_env in the "
+                f"config, or add a Google row to api_keys.csv."
             )
+
         self._genai = genai
-        self._client = genai.Client(api_key=api_key)
+        self._ring = KeyRing(keys)
+        self._clients = {}
+        self._client = self._client_for(self._ring.current)
+
+        # With a key pool, the retry budget must be able to walk the whole
+        # pool: quotas are per key, so the first N-1 attempts may each be a
+        # different exhausted key rather than a transient fault.
+        if len(self._ring) > 1:
+            self.max_retries = max(self.max_retries, len(self._ring) + 1)
+
+    def _client_for(self, key: str):
+        """One client per key, built once and reused."""
+        if key not in self._clients:
+            self._clients[key] = self._genai.Client(api_key=key)
+        return self._clients[key]
+
+    def _rotate_key(self) -> None:
+        """Move to the next key after a rate-limit rejection.
+
+        With one key this is a no-op beyond the backoff the base class already
+        applies; with several it turns a per-key quota into a pooled one.
+        """
+        if len(self._ring) > 1:
+            self._client = self._client_for(self._ring.rotate())
 
     def _to_gemini(self, messages: list[Message]) -> tuple[list, str | None]:
         """Returns (contents, system_instruction)."""
@@ -76,8 +105,18 @@ class GeminiBackend(ChatBackend):
                 config=gtypes.GenerateContentConfig(**cfg_kwargs) if cfg_kwargs else None,
             )
         except Exception as e:
-            if any(marker in str(e) for marker in _RETRIABLE_MARKERS):
-                raise RetriableError(str(e)) from e
+            message = str(e)
+            if any(marker in message for marker in _RETRIABLE_MARKERS):
+                # Quotas are per key, so move to the next one before the base
+                # class retries -- otherwise every retry hits the same limit.
+                error = RetriableError(message)
+                if any(m in message for m in ("429", "RESOURCE_EXHAUSTED")):
+                    self._ring.mark_exhausted()
+                    self._rotate_key()
+                    # Tell the retry loop not to back off: a different key is
+                    # now active, so the next attempt should go straight out.
+                    error.rotated = len(self._ring) > 1
+                raise error from e
             raise
 
         usage = {}

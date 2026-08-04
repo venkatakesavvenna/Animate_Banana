@@ -52,15 +52,29 @@ class StageReport:
     def skipped(self) -> list[SampleOutcome]:
         return [o for o in self.outcomes if o.status == "skipped"]
 
+    @property
+    def unresolved(self) -> list[SampleOutcome]:
+        return [o for o in self.outcomes if o.status == "unresolved"]
+
+    @property
+    def produced(self) -> list[SampleOutcome]:
+        """Outcomes with a usable artifact, whether or not it converged."""
+        return [o for o in self.outcomes if o.status in ("ok", "unresolved", "skipped")]
+
     def summary(self) -> str:
-        return (f"{self.agent}: {len(self.ok)} ok, {len(self.failed)} failed, "
-                f"{len(self.skipped)} skipped")
+        parts = [f"{len(self.ok)} ok"]
+        if self.unresolved:
+            parts.append(f"{len(self.unresolved)} unresolved")
+        parts.append(f"{len(self.failed)} failed")
+        parts.append(f"{len(self.skipped)} skipped")
+        return f"{self.agent}: {', '.join(parts)}"
 
     def print_report(self) -> None:
         print(f"\n=== {self.summary()} ===")
-        for o in self.outcomes:
-            if o.status == "failed":
-                print(f"  FAIL {o.sample_id}: {o.detail}")
+        for o in self.failed:
+            print(f"  FAIL {o.sample_id}: {o.detail}")
+        for o in self.unresolved:
+            print(f"  WARN {o.sample_id}: {o.detail} -> {o.path}")
         for o in self.ok:
             note = f" ({o.detail})" if o.detail else ""
             print(f"  ok   {o.sample_id}{note} -> {o.path}")

@@ -21,7 +21,6 @@ from ..samples import PaperSample
 
 AGENT = "code_converter"
 
-
 def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
     prompt = load_prompt(ctx.agent.prompt)
     return [Message.user(prompt, images=[sample.image_path])]

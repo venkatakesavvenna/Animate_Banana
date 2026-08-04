@@ -69,6 +69,7 @@ prompt: |
   Define all styles at the beginning of the code. Ensure the XML keys are declared so the compiler ignores them visually but retains them in the parsing structure.
   For example:
       \documentclass[tikz, border=10pt]{standalone}
+      \usepackage{amsmath, amssymb}
       \usetikzlibrary{fit, positioning, arrows.meta, shapes, calc}
       \begin{document}
       \begin{tikzpicture}[
@@ -79,4 +80,10 @@ prompt: |
 
   #7. COMPILATION & FORMATTING
   - Strongly ensure that the code compiles without errors.
+  - You MUST include `\usepackage{amsmath, amssymb}` in the preamble. Scientific figures are
+    full of math notation, and commands like `\text{}`, `\mathbb{}` and `\mathcal{}` are
+    undefined without it -- a single `\text{x}` in a label otherwise fails the whole document
+    with `! Undefined control sequence.`
+  - Every command you use must come from the packages you load. If you need a symbol from
+    another package (e.g. `\checkmark` from amssymb, or a font package), load that package too.
   - Strictly use standard ASCII spaces for all indentation. Do NOT output non-breaking spaces or tabs anywhere in the code.

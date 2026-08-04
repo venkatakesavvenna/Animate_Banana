@@ -28,7 +28,7 @@ from pathlib import Path
 
 from ..backends import Message
 from ..cache import write_text
-from ..extract import extract_json
+from ..extract import extract_json, looks_truncated
 from ..prompts import load_and_render
 from ..runner import AgentContext, StageReport, run_iterative_agent
 from ..samples import PaperSample
@@ -172,7 +172,10 @@ class _Critic:
 
         data = extract_json(result.text)
         if data is None:
-            raise ValueError("critic response contained no JSON object")
+            raise ValueError(
+                "critic response was truncated mid-JSON -- raise this agent's "
+                "params.max_tokens" if looks_truncated(result.text)
+                else "critic response contained no JSON object")
 
         review = data.pop("review", "") if isinstance(data, dict) else ""
         data.setdefault("style", self.cfg.style)

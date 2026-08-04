@@ -115,6 +115,13 @@ class ChatBackend(ABC):
                 last_err = e
                 if attempt == self.max_retries - 1:
                     break
+                # A key-exhausted failure is not transient for *this* key, so
+                # backing off achieves nothing -- the backend has already
+                # rotated to a different key and the retry should go out
+                # immediately. Sleeping here is what made a pool with live
+                # keys still fail: the retry budget drained on waits.
+                if getattr(e, "rotated", False):
+                    continue
                 # Exponential backoff with jitter; jitter matters because
                 # generate_batch fans out concurrently and un-jittered retries
                 # would re-collide in lockstep.

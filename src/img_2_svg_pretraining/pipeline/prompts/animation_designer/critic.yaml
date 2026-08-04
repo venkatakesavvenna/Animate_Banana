@@ -15,6 +15,10 @@ prompt: |
   The compiler log is the primary evidence. Read it for the first real error — later errors are
   usually cascading consequences of it. Common causes in this kind of generated code:
 
+  - `! Improper \prevdepth.` — almost always `\documentclass[tikz, ...]{standalone}` carried over
+    from the static diagram code. The `tikz` class option is incompatible with `animateinline`.
+    Fix it by using a bare `\documentclass{standalone}` plus `\usepackage{tikz}`, taking any
+    margin from a larger `use as bounding box` rectangle instead of `border=`.
   - An undefined style key used in a `\node[...]` but never declared in the tikzpicture options.
   - An undefined colour name.
   - A node referenced by `\draw (a) -- (b)` before it is defined, or with a name that does not
@@ -33,18 +37,43 @@ prompt: |
 
   - Does the frame show the diagram faithfully — same layout, same labels, nothing displaced?
   - Is the canvas pinned, so frames will not resize? Check for `use as bounding box`.
+  - **Is anything clipped at the edges?** Look specifically at the leftmost and rightmost
+    labels: text is centred on its node and extends past it, so a bounding box fitted to the
+    shapes alone cuts off the outer captions (e.g. "3D Smooth Convex" rendering as
+    "D Smooth Convex"). If so, widen the `use as bounding box` rectangle.
   - Does every scope that sets `opacity` also declare `transparency group`?
   - Does the frame gating match the sequence — does each step's focus become visible at that
     step's frame, in traversal order?
   - Is anything permanently invisible that should appear at some point?
   - Is `\multiframe{N}` large enough to cover every step's frame index?
 
+  ### SCOPE — WHAT YOU MAY AND MAY NOT CHANGE
+
+  You are fixing defects, NOT improving the illustration. This distinction matters more than
+  anything else in this prompt.
+
+  You MAY change: the preamble, style definitions, the bounding box, frame gating, opacity
+  macros, scope structure, and anything the compiler complained about.
+
+  You MUST NOT:
+  - **Add drawing commands for content that is not already there.** An empty or sparsely drawn
+    box is not a bug. Placeholder boxes are often deliberately empty — the content belongs to a
+    different pipeline stage — and inventing geometry to fill them produces degenerate shapes
+    that are far worse than the empty box you started from.
+  - Redraw an element "better". If it draws without error, leave it exactly as it is.
+  - Replace an `\includegraphics` with drawn shapes, or vice versa.
+  - Change coordinates, sizes or styles of anything that already renders.
+
+  If your corrected document has substantially more drawing commands than the original, you
+  have overstepped. Go back and remove the additions.
+
   ### HOW TO RESPOND
 
   Return the COMPLETE corrected document, not a diff and not a description of the fix. Preserve
   everything that was already correct — same coordinates, same styles, same `xml id` keys.
 
-  If you find nothing to fix, return the code unchanged.
+  If you find nothing to fix, return the code unchanged. Returning it unchanged is a perfectly
+  good outcome and is strongly preferred over speculative edits.
 
   Respond with ONLY the LaTeX document, starting at `\documentclass` and ending at
   `\end{document}`. No markdown fences, no commentary, no `<think>` block.

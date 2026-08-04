@@ -59,10 +59,19 @@ def pdf_to_frames(pdf_path: Path, out_dir: Path, dpi: int = DEFAULT_DPI) -> list
         ["pdftoppm", "-png", "-r", str(dpi), str(pdf_path), str(out_dir / "frame")],
         capture_output=True, text=True,
     )
-    frames = sorted(out_dir.glob("frame*.png"))
+    # Sort numerically, not lexicographically: pdftoppm pads page numbers only
+    # to the width of the total count, so a 10+ page document yields
+    # frame-1, frame-10, frame-2 under a plain sorted() and the video would
+    # play out of order.
+    frames = sorted(out_dir.glob("frame*.png"), key=_frame_index)
     if proc.returncode != 0 or not frames:
         raise RenderError(f"pdftoppm failed: {proc.stdout}\n{proc.stderr}")
     return frames
+
+
+def _frame_index(path: Path) -> int:
+    digits = "".join(c for c in path.stem if c.isdigit())
+    return int(digits) if digits else 0
 
 
 def _load_uniform_frames(frames: list[Path]):

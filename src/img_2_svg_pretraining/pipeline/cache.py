@@ -56,14 +56,15 @@ class CachePaths:
 
     @property
     def code_lineage(self) -> str:
-        """Stage-1 lineage. Raster models are included only when the
+        """Stage-1 lineage. The integrator's model is included only when the
         integrator is enabled, so disabling it doesn't invalidate Stage-1
         artifacts that never involved it."""
         parts = [self._model_for("code_converter")]
         integrator = self.cfg.agents.get("raster_integrator")
         if integrator and integrator.option("enabled", False):
-            parts.append(_slug(integrator.option("point_backend", "nopoint")))
-            parts.append(_slug(integrator.option("segment_backend", "noseg")))
+            # Stage 1b detects raster regions with an ordinary chat backend, so
+            # its lineage component is just that model.
+            parts.append(self._model_for("raster_integrator"))
         return "__".join(parts)
 
     @property

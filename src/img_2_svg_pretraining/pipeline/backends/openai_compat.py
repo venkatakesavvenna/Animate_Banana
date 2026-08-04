@@ -1,14 +1,14 @@
 """OpenAI-compatible chat backend.
 
-Covers a locally served vLLM endpoint (`vllm serve ... --port 8000`, whose
-`/v1` surface is OpenAI-shaped) and any other OpenAI-compatible provider.
-This is the primary route for large-scale judging and for local open-weight
-models, since vLLM handles batching and KV-cache reuse far better than
-in-process `.generate()` does.
+Covers any OpenAI-compatible provider -- OpenAI itself, and the hosted APIs
+several open-weight vendors expose (Moonshot, MiniMax, DeepSeek), which is how
+to reach models too large to run locally.
 
-For a local vLLM server the API key is usually a placeholder -- vLLM does not
-check it unless started with `--api-key` -- so a missing key env var falls
-back to a dummy rather than failing.
+For local open weights use `hf_local` instead; this container cannot run an
+inference server (see that module's docstring).
+
+The API key falls back to a dummy rather than failing, since some endpoints
+ignore it entirely.
 """
 from __future__ import annotations
 

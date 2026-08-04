@@ -1,3 +1,7 @@
+# Same as default.yaml but with stage 1b off.
+# Enabling 1b changes the code lineage (it adds the Molmo2/SAM models to the
+# path), so downstream artifacts produced before 1b existed live under a
+# different directory. Use this config to inspect those runs.
 # Default pipeline configuration.
 #
 # Every agent names a backend independently, so a run can mix a commercial
@@ -43,16 +47,14 @@ transmuter:
       temperature: 0.2
       max_tokens: 16384
 
-  # Stage 1b. One call: the VLM is shown the source figure plus the
-  # placeholders stage 1a emitted, and returns a bounding box per placeholder
-  # it can locate. Crops are cut from the source and spliced in. No separate
-  # vision checkpoints, so only one model is ever loaded.
+  # Stage 1b. Molmo2 points at candidate raster regions, a Gemini Set-of-Mark
+  # pass filters those proposals, the fine-tuned SAM3 checkpoint segments the
+  # survivors, and a second SoM pass maps each crop to the placeholder it
+  # belongs in. `backend` is the VLM used for both SoM passes.
   raster_integrator:
-    enabled: true
+    enabled: false            # pre-1b run; see default.yaml for the 1b config
     backend: gemini_flash
     params:
-      # Detection should be reproducible; this is a localisation task, not a
-      # generative one.
       temperature: 0.0
       max_tokens: 4096
 

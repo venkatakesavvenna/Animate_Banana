@@ -10,15 +10,16 @@ var; a config may override with `api_key_env`.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from .base import BackendError, ChatBackend, PointBackend, RetriableError, SegmentBackend
+from .keys import KeyRing, find_key_file, resolve_keys
 from .types import GenerationResult, ImagePart, Message, Part, TextPart
 
 __all__ = [
     "BackendError", "ChatBackend", "PointBackend", "SegmentBackend", "RetriableError",
     "GenerationResult", "ImagePart", "Message", "Part", "TextPart",
+    "KeyRing", "find_key_file", "resolve_api_key", "resolve_api_keys",
     "make_backend", "CHAT_BACKENDS", "DEFAULT_KEY_ENV",
 ]
 
@@ -32,12 +33,17 @@ DEFAULT_KEY_ENV = {
 
 # Keys consumed by the factory itself; everything else is passed to the
 # backend constructor.
-_FACTORY_KEYS = {"type", "api_key_env", "cache_dir"}
+_FACTORY_KEYS = {"type", "api_key_env", "api_key", "api_key_file", "cache_dir"}
+
+
+def resolve_api_keys(backend_type: str, cfg: dict) -> list[str]:
+    """Every usable key for this backend: inline > env var > api_keys.csv."""
+    return resolve_keys(backend_type, cfg, DEFAULT_KEY_ENV.get(backend_type))
 
 
 def resolve_api_key(backend_type: str, cfg: dict) -> str | None:
-    env_var = cfg.get("api_key_env") or DEFAULT_KEY_ENV.get(backend_type)
-    return os.environ.get(env_var) if env_var else None
+    keys = resolve_api_keys(backend_type, cfg)
+    return keys[0] if keys else None
 
 
 def make_backend(name: str, cfg: dict, cache_root: Path | None = None) -> ChatBackend:
@@ -70,7 +76,9 @@ def make_backend(name: str, cfg: dict, cache_root: Path | None = None) -> ChatBa
 
     if backend_type == "gemini":
         from .gemini import GeminiBackend
-        kwargs["api_key"] = resolve_api_key(backend_type, cfg)
+        # Pass every key: Gemini quotas are per key, so a pool lets a long
+        # batch rotate past a rate limit instead of stalling on backoff.
+        kwargs["api_keys"] = resolve_api_keys(backend_type, cfg)
         return GeminiBackend(name=name, **kwargs)
 
     if backend_type == "anthropic":

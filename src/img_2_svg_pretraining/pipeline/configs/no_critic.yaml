@@ -1,8 +1,17 @@
-# Default pipeline configuration.
+# Both critics disabled -- default.yaml otherwise.
 #
-# Every agent names a backend independently, so a run can mix a commercial
-# API for one agent with local open weights for another. Copy this
-# file and edit rather than editing it in place.
+# The critic loops are the expensive half of a run: each round is a full
+# round-trip that echoes back the whole sequence or the whole animation, so
+# turning them off roughly halves the API calls per sample. That matters on a
+# free tier capped at 20 requests/day/model.
+#
+# Nothing downstream breaks. The designer falls back from `sequence_final` to
+# `sequence`, and the exporter from `animation_final` to `animation`, so a run
+# without critics produces the same artifact chain minus the review passes.
+#
+# What you lose is real, though: the planner critic catches schema-invalid
+# traversal styles and dangling focus ids, and the animation critic repairs
+# non-compiling output using the latexmk log. Expect a lower compile rate.
 
 dataset:
   root: /code/data/test_benchmark
@@ -81,6 +90,7 @@ planner:
       max_tokens: 32768
 
   critic:
+    enabled: false
     backend: gemini_flash
     prompt: animation_planner/critic.yaml#prompt
     max_rounds: 2
@@ -100,6 +110,7 @@ animator:
       max_tokens: 16384
 
   critic:
+    enabled: false
     backend: gemini_flash
     prompt: animation_designer/critic.yaml#prompt
     max_rounds: 3

@@ -1,7 +1,7 @@
 """Pipeline configuration: load, validate, and hand out per-agent settings.
 
 One YAML file drives a whole run. Every agent independently names a backend,
-so a run can mix a commercial API for one agent with a local vLLM server for
+so a run can mix a commercial API for one agent with local open weights for
 another.
 
 Validation happens eagerly at load: unknown agent names, backend references
@@ -39,8 +39,8 @@ EXPORT_FORMATS = ("pdf", "mp4", "gif", "pptx")
 # Agent config keys understood by the runner; anything else is a typo.
 _AGENT_KEYS = {
     "backend", "prompt", "params", "enabled", "context_tier", "max_rounds",
-    "use_set_of_mark", "compile_check", "outputs", "fps", "point_backend",
-    "segment_backend", "dpi",
+    "use_set_of_mark", "compile_check", "outputs", "fps", "dpi", "max_depth",
+    "gpu",
 }
 
 
@@ -89,7 +89,11 @@ class PipelineConfig:
         return self.backends[name]
 
     def backend_model(self, backend_name: str) -> str:
-        """Short model label used in cache path lineage."""
+        """Short model label used in cache path lineage.
+
+        Identified by the weights, not by the config's nickname for them, so
+        two backends pointing at different models never share a cache path.
+        """
         cfg = self.backend_cfg(backend_name)
         model = cfg.get("model") or cfg.get("hf_repo") or backend_name
         return str(model).replace("/", "-")

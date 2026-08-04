@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 from ..backends import Message
-from ..extract import extract_json
+from ..extract import extract_json, looks_truncated
 from ..prompts import load_and_render
 from ..runner import AgentContext, StageReport, run_agent
 from ..samples import PaperSample
@@ -68,10 +68,10 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
 def parse_response(ctx: AgentContext, sample: PaperSample, raw: str) -> str:
     data = extract_json(raw)
     if data is None:
-        raise ValueError(
-            "no JSON object in the response; "
-            f"raw output kept at {ctx.paths.raw_output(AGENT, sample.id)}"
-        )
+        reason = ("response was truncated mid-JSON -- raise this agent's "
+                  "params.max_tokens" if looks_truncated(raw)
+                  else "no JSON object in the response")
+        raise ValueError(f"{reason}; raw output kept at {ctx.paths.raw_output(AGENT, sample.id)}")
 
     data.setdefault("style", ctx.cfg.style)
     sequence = AnimationSequence.from_dict(data)

@@ -46,6 +46,26 @@ def _trim_log(log: str) -> str:
     return f"{head}\n\n... [log truncated] ...\n\n{tail}"
 
 
+# A critic edit to already-compiling code that adds more than this many
+# drawing commands is treated as invention rather than repair. Legitimate
+# fixes (a missing style, a bounding box, frame gating) change the preamble
+# and options, not the number of things drawn.
+BLOAT_ABSOLUTE = 6
+BLOAT_RATIO = 1.5
+
+
+def _draw_count(code: str) -> int:
+    """Roughly, how much is drawn: \\draw, \\node, \\path, \\fill commands."""
+    return sum(code.count(f"\\{cmd}") for cmd in ("draw", "node", "path", "fill"))
+
+
+def _is_bloated(before: str, after: str) -> bool:
+    old, new = _draw_count(before), _draw_count(after)
+    if new <= old + BLOAT_ABSOLUTE:
+        return False
+    return new > old * BLOAT_RATIO
+
+
 def compile_animation(code: str, cache_dir: Path):
     """Compile and rasterize the first frame. Returns a CompileResult."""
     from img_2_svg_pretraining.viewer.compile import compile_tikz
@@ -108,6 +128,17 @@ class _Critic:
             raise ValueError(f"critic response contained no {self.cfg.target} document")
 
         write_text(self.ctx.paths.animation(sample.id, round_index), revised)
+
+        # Guard against the critic "improving" the illustration. Observed on
+        # CVPR_2025_pipe00002: asked to review a document that already
+        # compiled, it invented geometry to fill deliberately-empty
+        # placeholder boxes, tripling the draw commands and rendering the
+        # first four pipeline stages as single dots. When the code already
+        # compiled, a large expansion is a regression, not a repair.
+        if compiled_ok and _is_bloated(code, revised):
+            return True, code, (f"round {round_index}: rejected critic edit "
+                                f"(added {_draw_count(revised) - _draw_count(code)} "
+                                f"drawing commands to already-compiling code)")
 
         now_ok = True
         if self.compile_check and self.cfg.target == "tikz":

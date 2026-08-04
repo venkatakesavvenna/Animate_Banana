@@ -2,7 +2,7 @@
 
 Models wrap answers in markdown fences, prefix them with reasoning blocks,
 and append commentary. These extractors are provider-agnostic -- the same
-text post-processing applies whether the output came from Gemini, a vLLM
+text post-processing applies whether the output came from Gemini, a local
 server or a local checkpoint.
 
 `extract_tikz` is ported from `benchmark/infer.py::_extract_tikz`, which was
@@ -128,6 +128,22 @@ def extract_json(raw_output: str) -> object | None:
             except json.JSONDecodeError:
                 continue
     return None
+
+
+def looks_truncated(raw_output: str) -> bool:
+    """Whether a response looks cut off mid-generation rather than malformed.
+
+    Distinguishes "the model ignored the format" from "max_tokens was too
+    low", which need different fixes -- the first a prompt change, the second
+    a config change.
+    """
+    text = largest_fenced_block(strip_reasoning(raw_output)).rstrip()
+    if not text:
+        return False
+    opens = text.count("{") - text.count("}")
+    brackets = text.count("[") - text.count("]")
+    # Unbalanced delimiters with no closing fence: generation stopped early.
+    return (opens > 0 or brackets > 0) and not text.endswith(("}", "]"))
 
 
 # -- strategizer output --------------------------------------------------

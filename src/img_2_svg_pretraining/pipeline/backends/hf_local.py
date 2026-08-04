@@ -10,14 +10,26 @@ to pick between AutoModelForImageTextToText and AutoModelForMultimodalLM,
 which silently sent `gemma-4-31b` down the wrong arm. Here the class is a
 config field (`model_class`) instead.
 
-Prefer the openai_compat backend against a vLLM server for anything at
-scale; this exists for models that are easier to run in-process, and for
-running without a server.
+**This is the route for local open weights in this container**, matching
+`benchmark/models.py`, whose docstring already records why: the container's
+flash-attn build is tied to a different CUDA toolkit than the installed torch
+and cannot be used. vLLM was tried and hit that same wall plus an NCCL that
+segfaults above one GPU; plain transformers avoids both.
+
+Two settings matter for Gemma 4 here, both verified by actually generating:
+
+- `attn_implementation="eager"`. Neither `flash_attention_2` (broken build) nor
+  `sdpa` works -- sdpa routes into cuDNN, which raises `cuDNN Frontend error:
+  No valid execution plans built` on Gemma 4's head shapes.
+- `cudnn=False`, which disables the cuDNN backend for the same reason.
+
+The tradeoff against a server is throughput: no continuous batching, so
+requests serialize on the device. `generate_batch` issues one true batched
+`.generate()`, which is the main lever available.
 """
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 from .base import ChatBackend
 from .types import GenerationResult, ImagePart, Message, TextPart
@@ -29,10 +41,12 @@ class HFLocalBackend(ChatBackend):
     def __init__(self, name: str, model: str, hf_repo: str,
                  model_class: str = "image_text_to_text",
                  trust_remote_code: bool = False,
-                 attn_implementation: str = "sdpa",
+                 attn_implementation: str = "eager",
                  dtype: str = "bfloat16",
                  device: str = "cuda",
                  max_new_tokens: int = 16384,
+                 cudnn: bool = False,
+                 batch_size: int = 2,
                  **kwargs):
         # Local generation is inherently serial on one GPU; concurrency > 1
         # would only contend for the same device.
@@ -52,6 +66,18 @@ class HFLocalBackend(ChatBackend):
         self.device = device
         self.hf_repo = hf_repo
         self.max_new_tokens = max_new_tokens
+        # How many samples share one `.generate()` call. Small by default:
+        # these prompts carry a figure each, and padding to the longest member
+        # means one long prompt inflates the whole batch. `_run_chunk` halves
+        # on OOM, so this is a starting point rather than a hard limit.
+        self.batch_size = max(1, int(batch_size))
+
+        # Gemma 4's head shapes have no cuDNN execution plan in this container
+        # ("cuDNN Frontend error: No valid execution plans built" at the first
+        # attention call). Disabling the backend costs nothing measurable here
+        # and is the difference between generating and crashing.
+        if not cudnn:
+            torch.backends.cudnn.enabled = False
 
         self.processor = AutoProcessor.from_pretrained(
             hf_repo, trust_remote_code=trust_remote_code,
@@ -62,17 +88,23 @@ class HFLocalBackend(ChatBackend):
         else:
             from transformers import AutoModelForImageTextToText as _Model
 
-        self.model = _Model.from_pretrained(
+        # `device_map=` rather than `.from_pretrained(...).to(device)`: the
+        # load-then-transfer path briefly needs headroom for both the CPU-side
+        # read and a single ~62GB GPU-side write, and it OOM'd a fully idle
+        # 80GB H100 loading gemma-4-31B. device_map streams weights straight to
+        # the device during loading -- same final footprint, no OOM.
+        self.hf_model = _Model.from_pretrained(
             hf_repo,
             trust_remote_code=trust_remote_code,
             attn_implementation=attn_implementation,
             dtype=getattr(torch, dtype),
-        ).to(device).eval()
+            device_map=device,
+        ).eval()
 
     def unload(self) -> None:
         import gc
-        if hasattr(self, "model"):
-            del self.model
+        if hasattr(self, "hf_model"):
+            del self.hf_model
         if hasattr(self, "processor"):
             del self.processor
         gc.collect()
@@ -117,7 +149,7 @@ class HFLocalBackend(ChatBackend):
             else:
                 gen_kwargs["do_sample"] = False
 
-            output_ids = self.model.generate(**inputs, **gen_kwargs)
+            output_ids = self.hf_model.generate(**inputs, **gen_kwargs)
             text = self.processor.decode(output_ids[0][input_len:], skip_special_tokens=True)
 
         return GenerationResult(
@@ -149,18 +181,45 @@ class HFLocalBackend(ChatBackend):
             else:
                 todo.append(i)
 
-        if todo:
-            try:
-                fresh = self._generate_batch_uncached([batch[i] for i in todo], **merged)
-            except Exception as e:
-                err = f"{type(e).__name__}: {e}"
-                fresh = [GenerationResult(text="", model=self.model_name, error=err)
-                         for _ in todo]
-            for i, result in zip(todo, fresh):
+        for chunk in [todo[i:i + self.batch_size]
+                      for i in range(0, len(todo), self.batch_size)]:
+            fresh = self._run_chunk([batch[i] for i in chunk], merged)
+            for i, result in zip(chunk, fresh):
                 results[i] = result
                 self._cache_put(batch[i], merged, result)
 
         return [r for r in results if r is not None]
+
+    def _run_chunk(self, chunk: list[list[Message]], params: dict
+                   ) -> list[GenerationResult]:
+        """Generate one micro-batch, halving it on OOM.
+
+        Peak memory depends on the longest prompt in the batch and on how many
+        images it carries, neither of which is known before tokenizing -- a
+        fixed `batch_size` that is safe for text-only prompts can still OOM on
+        a figure-heavy one. Rather than tune for the worst case and give up the
+        throughput everywhere else, this catches OOM and retries smaller,
+        bottoming out at one sample so a single oversized item fails alone
+        instead of taking its neighbours with it.
+        """
+        torch = self._torch
+        try:
+            return self._generate_batch_uncached(chunk, **params)
+        except torch.cuda.OutOfMemoryError as e:
+            if len(chunk) == 1:
+                torch.cuda.empty_cache()
+                return [GenerationResult(text="", model=self.model_name,
+                                         error=f"OutOfMemoryError: {e}")]
+            torch.cuda.empty_cache()
+            half = len(chunk) // 2
+            print(f"[{self.name}] OOM at batch {len(chunk)}, retrying as "
+                  f"{half}+{len(chunk) - half}")
+            return (self._run_chunk(chunk[:half], params)
+                    + self._run_chunk(chunk[half:], params))
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            return [GenerationResult(text="", model=self.model_name, error=err)
+                    for _ in chunk]
 
     def _generate_batch_uncached(self, batch: list[list[Message]], **params
                                  ) -> list[GenerationResult]:
@@ -183,7 +242,7 @@ class HFLocalBackend(ChatBackend):
                 ).to(self.device)
 
                 input_len = inputs["input_ids"].shape[-1]
-                output_ids = self.model.generate(
+                output_ids = self.hf_model.generate(
                     **inputs, max_new_tokens=max_new_tokens, do_sample=False,
                 )
                 texts = [

@@ -1,0 +1,118 @@
+# All-local run: every agent on open weights via HuggingFace transformers.
+#
+# Run it under the gemma4 venv, which has the transformers the Gemma 4
+# architecture needs (the main venv's is too old -- `AutoConfig` raises
+# `KeyError: 'gemma4'`):
+#
+#   source /environments/gemma4/bin/activate && cd /code
+#   python -m img_2_svg_pretraining.pipeline.run_pipeline all \
+#       --config src/img_2_svg_pretraining/pipeline/configs/hf_local.yaml --gpu 0
+#
+# Every agent names the same backend, so the model is loaded once per agent
+# invocation and freed on unload. That is the cost of in-process inference:
+# stage-batch execution keeps it to one load per agent rather than per sample.
+#
+# Attention: `eager` with cuDNN off. Not a preference -- `flash_attention_2`
+# has no usable build in this container, and `sdpa` routes into cuDNN, which
+# has no execution plan for Gemma 4's head shapes. See backends/hf_local.py.
+
+dataset:
+  root: /code/data/test_benchmark
+  limit: 0
+
+animation_style: progressive_reveal
+target: tikz
+
+backends:
+  # 12B: ~24GB in bf16, fits one card with room to spare. Verified generating.
+  gemma4_12b:
+    type: hf_local
+    hf_repo: google/gemma-4-12B-it
+    model: gemma4-12b
+    model_class: image_text_to_text
+    attn_implementation: eager
+    dtype: bfloat16
+    device: cuda
+
+  # 31B: ~62GB in bf16. Needs a genuinely idle 80GB card -- this node is
+  # shared, so check `nvidia-smi` before selecting it with --gpu.
+  gemma4_31b:
+    type: hf_local
+    hf_repo: google/gemma-4-31B-it
+    model: gemma4-31b
+    model_class: image_text_to_text
+    attn_implementation: eager
+    dtype: bfloat16
+    device: cuda
+
+transmuter:
+  code_converter:
+    backend: gemma4_12b
+    prompt: diagram_transmuter/tikz_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  # Stage 1b keeps its own models (Molmo2 + SAM3) in their own venv; `backend`
+  # here is only the VLM used for the two Set-of-Mark passes.
+  # Stage 1b locates raster regions with the same chat backend as every other
+  # agent, so this all-local config needs no extra checkpoint and no second
+  # card -- it reuses the model already resident.
+  raster_integrator:
+    enabled: true
+    backend: gemma4_12b
+    params:
+      temperature: 0.0
+      max_tokens: 4096
+
+planner:
+  strategizer:
+    backend: gemma4_12b
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+    params:
+      temperature: 0.3
+
+  parser:
+    backend: gemma4_12b
+    prompt: animation_planner/tikz_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  sequencer:
+    backend: gemma4_12b
+    prompt: animation_planner/sequencer.yaml#prompt
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    backend: gemma4_12b
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    use_set_of_mark: true
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+animator:
+  designer:
+    backend: gemma4_12b
+    prompt: animation_designer/designer.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  critic:
+    backend: gemma4_12b
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+
+  exporter:
+    outputs: [pdf, mp4, gif, pptx]
+    fps: 2
+    dpi: 300

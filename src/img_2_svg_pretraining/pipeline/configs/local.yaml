@@ -1,3 +1,5 @@
+# All agents on a locally-served model -- no API quota needed.
+# Slower than the API but unmetered. Run with --gpu to pick a device.
 # Default pipeline configuration.
 #
 # Every agent names a backend independently, so a run can mix a commercial
@@ -27,52 +29,51 @@ backends:
     model: gemini-3.6-flash
     max_concurrency: 4
 
-  # Local open weights, in-process. See configs/hf_local.yaml for an all-local
-  # run, and backends/hf_local.py for why it is transformers and not a server.
-  gemma4_12b:
+  # Local open weights, in-process. See backends/hf_local.py.
+  qwen_local:
     type: hf_local
-    hf_repo: google/gemma-4-12B-it
-    model: gemma4-12b
-    attn_implementation: eager
+    hf_repo: Qwen/Qwen3-VL-8B-Instruct
+    model_class: image_text_to_text
+    attn_implementation: sdpa
+    dtype: bfloat16
+    device: cuda
 
 transmuter:
   code_converter:
-    backend: gemini_flash
+    backend: qwen_local
     prompt: diagram_transmuter/tikz_diagram_to_code.yaml#prompt
     params:
       temperature: 0.2
       max_tokens: 16384
 
-  # Stage 1b. One call: the VLM is shown the source figure plus the
-  # placeholders stage 1a emitted, and returns a bounding box per placeholder
-  # it can locate. Crops are cut from the source and spliced in. No separate
-  # vision checkpoints, so only one model is ever loaded.
+  # Stage 1b. Molmo2 points at candidate raster regions, a Gemini Set-of-Mark
+  # pass filters those proposals, the fine-tuned SAM3 checkpoint segments the
+  # survivors, and a second SoM pass maps each crop to the placeholder it
+  # belongs in. `backend` is the VLM used for both SoM passes.
   raster_integrator:
     enabled: true
-    backend: gemini_flash
+    backend: qwen_local
     params:
-      # Detection should be reproducible; this is a localisation task, not a
-      # generative one.
       temperature: 0.0
       max_tokens: 4096
 
 planner:
   strategizer:
-    backend: gemini_flash
+    backend: qwen_local
     prompt: animation_planner/strategizer.yaml#full-context-prompt
     context_tier: full          # image_only | caption | abstract | full
     params:
       temperature: 0.3
 
   parser:
-    backend: gemini_flash
+    backend: qwen_local
     prompt: animation_planner/tikz_parser.yaml#prompt
     params:
       temperature: 0.0
       max_tokens: 16384
 
   sequencer:
-    backend: gemini_flash
+    backend: qwen_local
     prompt: animation_planner/sequencer.yaml#prompt
     params:
       temperature: 0.3
@@ -81,7 +82,7 @@ planner:
       max_tokens: 32768
 
   critic:
-    backend: gemini_flash
+    backend: qwen_local
     prompt: animation_planner/critic.yaml#prompt
     max_rounds: 2
     use_set_of_mark: true
@@ -93,14 +94,14 @@ planner:
 
 animator:
   designer:
-    backend: gemini_flash
+    backend: qwen_local
     prompt: animation_designer/designer.yaml#prompt
     params:
       temperature: 0.2
       max_tokens: 16384
 
   critic:
-    backend: gemini_flash
+    backend: qwen_local
     prompt: animation_designer/critic.yaml#prompt
     max_rounds: 3
     compile_check: true

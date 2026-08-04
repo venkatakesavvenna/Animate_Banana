@@ -41,13 +41,26 @@ prompt: |
       \end{animateinline}
       \end{document}
 
-  Two details are not optional:
+  CRITICAL -- the documentclass line must be exactly `\documentclass{standalone}` with NO class
+  options. The input diagram code almost certainly begins with
+  `\documentclass[tikz, border=10pt]{standalone}`; you MUST change it. The `tikz` class option
+  makes `standalone` treat the document body as one picture, which is incompatible with the
+  `animateinline` wrapper and fails to compile with `! Improper \prevdepth.` Load TikZ via
+  `\usepackage{tikz}` instead, and take margin from a slightly larger `use as bounding box`
+  rectangle rather than from a `border=` class option.
+
+  Three details are not optional:
 
   - **`use as bounding box`** must pin the canvas to the full extent of the diagram. Without it
     the picture resizes as elements appear and the animation jitters. Derive the rectangle from
-    the original diagram's extent and add a small margin.
+    the original diagram's extent and add a generous margin on every side — at least 20pt.
+    The box must enclose the *text* of every label, not just the shapes: a label is centred on
+    its node and extends past it, so a rectangle fitted to the shapes alone clips the leftmost
+    and rightmost captions. When in doubt, make the rectangle larger; empty margin is harmless,
+    clipped content is not.
   - **`transparency group`** must be on every scope that sets `opacity`. Without it, overlapping
     shapes inside one scope blend against each other instead of fading as a unit.
+  - **No `tikz` class option**, as described above.
 
   ### MAPPING THE SEQUENCE ONTO FRAMES
 
