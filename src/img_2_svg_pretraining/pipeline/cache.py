@@ -140,6 +140,10 @@ class CachePaths:
     def code_final(self, sample_id: str) -> Path:
         return self.root / "code_final" / self.code_lineage / f"{sample_id}{self._ext}"
 
+    def code_reviewed(self, sample_id: str) -> Path:
+        """Stage 1c output: the critic's best-scoring version of the code."""
+        return self.root / "code_reviewed" / self.code_lineage / f"{sample_id}{self._ext}"
+
     def strategy(self, sample_id: str) -> Path:
         return self.root / "strategy" / self.strategy_lineage / f"{sample_id}.json"
 
@@ -183,20 +187,25 @@ class CachePaths:
 
     # -- input resolution -------------------------------------------------
 
-    def resolve_code(self, sample_id: str) -> Path:
-        """The diagram code to plan against.
+    def resolve_code(self, sample_id: str, reviewed: bool = True) -> Path:
+        """The diagram code to plan against, newest usable version first.
 
-        Prefers the raster-integrated version when it exists, since that is
-        the more complete artifact, and falls back to the converter output.
+        Order is critic-reviewed, then raster-integrated, then the raw
+        converter output. `reviewed=False` stops at the raster-integrated
+        version, which is what the critic itself needs -- otherwise it would
+        read its own output and refine its refinement.
         """
-        final = self.code_final(sample_id)
-        if final.exists():
-            return final
-        code = self.code(sample_id)
-        if code.exists():
-            return code
+        candidates = []
+        if reviewed:
+            candidates.append(self.code_reviewed(sample_id))
+        candidates += [self.code_final(sample_id), self.code(sample_id)]
+
+        for path in candidates:
+            if path.exists():
+                return path
+        listed = "\n  ".join(str(c) for c in candidates)
         raise FileNotFoundError(
-            f"no diagram code for '{sample_id}'. Looked for:\n  {final}\n  {code}\n"
+            f"no diagram code for '{sample_id}'. Looked for:\n  {listed}\n"
             f"Run the code-converter stage first."
         )
 

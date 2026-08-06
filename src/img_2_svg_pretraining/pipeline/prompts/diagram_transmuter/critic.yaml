@@ -1,0 +1,198 @@
+# Stage 1c -- Diagram Critic.
+#
+# Three prompts forming one repair round: score the render, diagnose what is
+# wrong, then rewrite the code. Scoring and diagnosis are deliberately
+# separate calls -- a model asked to both grade and fix in one breath tends to
+# justify its score rather than find the defect, and the score has to be
+# trustworthy because it is the loop's gate and its accept/reject test.
+#
+# The failure this exists for, observed on CVPR_2025_pipe00041: the converter
+# declares `fit` blocks AFTER the nodes they contain and gives them an opaque
+# `fill`, so every container paints over its own children. The document
+# compiles with zero warnings and the render is nearly empty. No compile check
+# can see that; only comparing the render against the original can.
+
+compile_fix: |
+  You are repairing generated TikZ code that fails to compile.
+
+  The document below produced the LaTeX error shown. Fix the error so the document compiles,
+  changing as little as possible.
+
+  ### THE ERROR
+  {compile_log}
+
+  ### WHAT THESE ERRORS USUALLY MEAN
+
+  Nearly all of them are the same mistake: the code USES something it never DEFINED.
+
+  - `Undefined color 'x'` -- a colour name that xcolor does not ship. Define it with
+    `\definecolor{x}{RGB}{...}` in the preamble, choosing values that match how the figure
+    actually looks. Do not silently substitute a different named colour.
+  - `I do not know the key '/tikz/somestyle'` -- a style used in a node's option list but never
+    declared. Add it to the `\begin{tikzpicture}[...]` option list as
+    `somestyle/.style={...}`, consistent with how sibling elements are styled.
+  - `No shape named 'foo' is known` -- a `fit=`, `at`, or edge endpoint referring to a node that
+    is never declared, or that is declared LATER in the file. Either declare the missing node,
+    or move the referring element after the node it refers to.
+  - `Undefined control sequence` -- a macro that was never defined, or a package that was never
+    loaded (`\includegraphics` needs `graphicx`, `\fit` needs the `fit` library).
+  - Brace or bracket imbalance -- count them in the fragment the error points at.
+
+  ### RULES
+
+  1. **Fix only the compile error.** Do not restyle, reposition, or redesign anything.
+  2. **Preserve every `xml id`, `xml class`, `xml parent`, `xml source` and `xml target`
+     exactly.** Later pipeline stages address elements by these ids; the set of ids in your
+     output must be identical to the set in the input.
+  3. **Preserve every `\includegraphics` path exactly as written.** Those files exist at those
+     absolute paths; a rewritten path resolves to nothing.
+  4. Prefer defining the missing thing over deleting the code that uses it. Deleting an element
+     to silence an error loses figure content, which is a worse outcome than the error.
+  5. The result must be a complete, compilable standalone document.
+
+  ### THE CODE
+  {diagram_code}
+
+  ### OUTPUT
+
+  Return ONLY the complete corrected TikZ document, from `\documentclass` to `\end{document}`,
+  inside a single ```latex code block. No commentary before or after.
+
+score: |
+  You are comparing two images of the same technical figure.
+
+  **Image 1** is the original figure. **Image 2** is a reconstruction of it, compiled from
+  generated drawing code. Rate how faithfully the reconstruction reproduces the original.
+
+  ### RATE ON FIVE AXES
+
+  1. **Semantic fidelity** -- is every element of the original present, undistorted, and drawn
+     as the right kind of thing (a box is a box, an arrow is an arrow, a label is a label)?
+  2. **Logical layout fidelity** -- is containment right? Does everything that sits inside a
+     block in the original sit inside the corresponding block here?
+  3. **Geometric layout fidelity** -- are relative positions and alignment preserved? Does the
+     flow read in the same direction?
+  4. **Style and colour fidelity** -- do colours, fonts and line styles match? Distinguish a
+     harmless palette difference from one that changes meaning.
+  5. **Proportion and scale fidelity** -- are element sizes and aspect ratios consistent?
+
+  ### WEIGHTING
+
+  Weight **logical layout** and **geometric layout** most heavily. A reconstruction that gets
+  the structure right and the colours wrong is a good reconstruction; one that looks similar
+  but nests elements incorrectly is not.
+
+  Missing content is the most serious defect there is. If elements that exist in the original
+  are simply absent from the reconstruction -- blank areas, empty containers, boxes with no
+  content -- the score must be low no matter how tidy what remains looks.
+
+  Placeholder imagery replaced by a cropped photograph of the original region is faithful, not
+  a defect.
+
+  ### OUTPUT
+
+  Respond with ONLY a single JSON object -- no markdown fences, no commentary. `score` is
+  overall fidelity from 0.0 (unrecognisable) to 1.0 (indistinguishable).
+
+  {
+    "score": 0.82,
+    "breakdown": {
+      "semantic": 0.9, "logical_layout": 0.85, "geometric_layout": 0.8,
+      "style_colour": 0.7, "proportion_scale": 0.75
+    },
+    "notes": "All seven stages present and correctly ordered; the histogram has four bars instead of five."
+  }
+
+diagnose: |
+  You are diagnosing why a generated TikZ reconstruction does not match its source figure.
+
+  **Image 1** is the original figure. **Image 2** is what the code below actually renders. Your
+  job is NOT to rewrite the code -- it is to identify precisely what is wrong and say which
+  lines cause it.
+
+  ### WHAT TO LOOK FOR
+
+  Work from the visible difference back to its cause in the code. The most common causes, in
+  rough order of how much damage they do:
+
+  1. **Content that renders but is invisible.** TikZ paints in source order, so a node declared
+     LATER with an opaque `fill` covers everything declared before it in the same area. A `fit`
+     block written after its children is the classic case: the block paints over the very nodes
+     it was fitted to. Symptom: empty-looking containers whose contents exist in the code.
+  2. **Missing elements** -- something in the original was never drawn at all.
+  3. **Wrong containment** -- an element sits in the wrong block, or a `fit` list omits members.
+  4. **Position and alignment errors** -- elements in the wrong place or order.
+  5. **Size and scale errors** -- boxes far larger or smaller than the original.
+  6. **Style errors** -- colours or fonts that change meaning.
+
+  Before reporting "missing", check whether the element is present in the code. If it is, the
+  defect is that it does not SHOW, which is a different fix.
+
+  ### RULES
+
+  - Report only defects you can see by comparing the two images. Do not speculate.
+  - Quote the actual line or fragment from the code that causes each defect, copied exactly.
+  - Be specific about the fix: "move this node before line N" or "add `opacity=0`", not
+    "improve the layout".
+  - Order findings by how much visual damage they do. One defect that hides ten elements
+    matters more than ten small colour differences.
+  - If the reconstruction is genuinely faithful, return an empty findings list.
+
+  ### THE CODE
+  {diagram_code}
+
+  ### OUTPUT
+
+  Respond with ONLY a single JSON object -- no markdown fences, no commentary.
+
+  {
+    "findings": [
+      {
+        "problem": "The Step 1 container paints over all ten elements inside it, so the block renders empty.",
+        "cause": "\\node[... fill=yellow!12, fit=(a) (b) ...] (block_step1) {}; is declared after the nodes it fits, and TikZ draws in source order.",
+        "code_fragment": "\\node[draw=orange!80!black, fill=yellow!12, rounded corners=12pt, fit=(txt_step1_title)",
+        "fix": "Move this fit node before the nodes it contains, or draw it on a background layer.",
+        "severity": "critical"
+      }
+    ]
+  }
+
+  `severity` is one of "critical" (content is hidden or missing), "major" (structure or position
+  is wrong), or "minor" (style only).
+
+fix: |
+  You are repairing generated TikZ code so that it renders faithfully to its source figure.
+
+  **Image 1** is the original figure the code should reproduce. **Image 2** is what the code
+  currently renders. A reviewer has already diagnosed the defects; your job is to apply those
+  fixes and return the corrected code.
+
+  ### THE DIAGNOSED DEFECTS
+  {findings}
+
+  ### RULES -- READ BEFORE EDITING
+
+  1. **Fix exactly what was diagnosed.** Do not redesign the figure, restyle it, or "improve"
+     anything that was not reported. Every unnecessary change is a chance to break something
+     that currently works.
+  2. **Preserve every `xml id`, `xml class`, `xml parent`, `xml source` and `xml target`
+     attribute exactly.** Later pipeline stages reference elements by these ids; changing or
+     dropping one breaks the animation plan for that element. The set of ids in your output
+     must be identical to the set in the input.
+  3. **Preserve every `\includegraphics` path exactly as written.** Those files exist at those
+     absolute paths; a "tidied" path resolves to nothing and the image silently disappears.
+  4. **Preserve the node geometry** -- `at (x, y)` coordinates, `minimum width`, `minimum
+     height` -- unless a finding specifically says the geometry is the defect.
+  5. **When the fix is draw order** (a container painting over its contents), the correct repair
+     is to move the container's declaration BEFORE the elements it fits, or to place it in a
+     `\begin{scope}[on background layer]`. Do not solve it by removing the fill, which loses
+     the visual grouping the original figure has.
+  6. The code must remain a complete, compilable standalone document.
+
+  ### THE CODE TO FIX
+  {diagram_code}
+
+  ### OUTPUT
+
+  Return ONLY the complete corrected TikZ document, from `\documentclass` to `\end{document}`,
+  inside a single ```latex code block. No commentary before or after.

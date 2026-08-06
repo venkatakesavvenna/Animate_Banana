@@ -23,6 +23,7 @@ from .samples import TIERS
 AGENTS: dict[str, tuple[str, bool]] = {
     "code_converter": ("transmuter", True),
     "raster_integrator": ("transmuter", False),
+    "diagram_critic": ("transmuter", True),
     "strategizer": ("planner", True),
     "parser": ("planner", True),
     "sequencer": ("planner", True),
@@ -41,7 +42,7 @@ EXPORT_FORMATS = ("pdf", "mp4", "gif", "pptx", "narrated_mp4")
 _AGENT_KEYS = {
     "backend", "prompt", "params", "enabled", "context_tier", "max_rounds",
     "use_set_of_mark", "compile_check", "outputs", "fps", "dpi", "max_depth",
-    "gpu",
+    "gpu", "fidelity_threshold",
 }
 
 
@@ -110,7 +111,9 @@ class PipelineConfig:
 # and so may name a multi-variant file with no '#key'. The narrative writer
 # selects by context tier, exactly as the strategizer would if its tier keys
 # were not already spelled out per-config.
-_RUNTIME_VARIANT_AGENTS = {"narrative_writer"}
+# The diagram critic uses three variants of one file in a single round
+# (score, diagnose, fix), so naming one in the config would be meaningless.
+_RUNTIME_VARIANT_AGENTS = {"narrative_writer", "diagram_critic"}
 
 
 def _validate_prompt_ref(agent_name: str, ref: str) -> None:

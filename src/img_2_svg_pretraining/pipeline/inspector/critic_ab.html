@@ -1,0 +1,232 @@
+<title>Stage 1 critic — before / after</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --panel2: #23272f; --line: #2f343d;
+    --fg: #e6e8ec; --dim: #949aa6; --accent: #6ea8fe; --ok: #4ec9a0;
+    --warn: #e0af68; --bad: #f07178;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; }
+
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+           position: sticky; top: 0; z-index: 10; }
+  h1 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+  .controls { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  label { color: var(--dim); font-size: 11px; text-transform: uppercase;
+          letter-spacing: .6px; margin-right: 6px; }
+  select, button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+                   border-radius: 4px; padding: 6px 10px; font-size: 12.5px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+
+  /* the toggle */
+  .toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 5px;
+            overflow: hidden; }
+  .toggle button { border: none; border-radius: 0; padding: 7px 16px; font-weight: 600;
+                   background: var(--panel2); color: var(--dim); }
+  .toggle button.on { background: var(--accent); color: #10131a; }
+  .toggle button:first-child.on { background: var(--bad); color: #10131a; }
+
+  main { padding: 20px; }
+  .cell { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+          padding: 14px; margin-bottom: 18px; }
+  .cell h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase;
+             letter-spacing: .7px; color: var(--dim); font-weight: 600;
+             display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .cell h3 .tag { text-transform: none; letter-spacing: 0; color: var(--accent);
+                  font-family: ui-monospace, monospace; font-size: 11px; }
+  img { width: 100%; border-radius: 4px; background: #fff; display: block; }
+  .missing { padding: 50px 12px; text-align: center; color: var(--dim);
+             background: var(--panel2); border-radius: 4px; }
+
+  /* swipe comparison */
+  .swipe { position: relative; overflow: hidden; border-radius: 4px; background: #fff; }
+  .swipe .after { position: absolute; inset: 0; overflow: hidden; }
+  .swipe .after img { position: absolute; top: 0; left: 0; height: 100%; width: auto;
+                      max-width: none; }
+  .swipe .handle { position: absolute; top: 0; bottom: 0; width: 2px;
+                   background: var(--accent); pointer-events: none; }
+  .swipe .badge { position: absolute; top: 8px; padding: 2px 8px; border-radius: 3px;
+                  font-size: 10.5px; font-weight: 600; background: #000a; color: #fff; }
+  input[type=range] { width: 100%; margin-top: 8px; accent-color: var(--accent); }
+
+  .scores { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+  .score { font-family: ui-monospace, monospace; font-size: 20px; font-weight: 600; }
+  .score.before { color: var(--bad); }
+  .score.after { color: var(--ok); }
+  .arrow { color: var(--dim); font-size: 16px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10.5px;
+          background: var(--panel2); border: 1px solid var(--line); color: var(--dim); }
+  .pill.ok { color: var(--ok); border-color: #2c5c4c; }
+  .pill.warn { color: var(--warn); border-color: #5c4a2c; }
+
+  .findings { margin-top: 10px; }
+  .finding { border-left: 2px solid var(--bad); padding: 6px 0 6px 12px; margin-bottom: 8px; }
+  .finding.major { border-color: var(--warn); }
+  .finding.minor { border-color: var(--line); }
+  .finding .p { font-size: 12.5px; }
+  .finding .f { color: var(--dim); font-size: 11.5px; margin-top: 3px; }
+  .sub { color: var(--dim); font-size: 11px; margin-top: 6px; }
+</style>
+
+<header>
+  <h1>Stage 1 diagram critic &mdash; before / after</h1>
+  <div class="controls">
+    <span><label>Sample</label><select id="sample" onchange="load()"></select></span>
+    <span><label>View</label>
+      <span class="toggle">
+        <button id="t-before" onclick="setMode('before')">without critic</button>
+        <button id="t-after"  onclick="setMode('after')">with critic</button>
+        <button id="t-swipe"  onclick="setMode('swipe')">swipe</button>
+      </span>
+    </span>
+    <span id="status" class="sub" style="margin:0"></span>
+  </div>
+</header>
+
+<main><div id="grid"></div></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let MODE = "swipe", DATA = null;
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+async function boot() {
+  const index = await (await fetch("/api/index")).json();
+  $("#sample").innerHTML = index.samples
+    .map(s => `<option value="${s.id}">${s.id}</option>`).join("");
+  setMode(MODE);
+  load();
+}
+
+function setMode(mode) {
+  MODE = mode;
+  for (const m of ["before", "after", "swipe"]) {
+    const btn = document.getElementById("t-" + m);
+    if (btn) btn.classList.toggle("on", m === mode);
+  }
+  if (DATA) render();
+}
+
+function fmt(v) { return typeof v === "number" ? v.toFixed(2) : "—"; }
+
+function panelBody(p, id) {
+  const before = `/api/render/${encodeURIComponent(p.label)}/${id}/before`;
+  const after  = `/api/render/${encodeURIComponent(p.label)}/${id}/after`;
+
+  if (!p.has_before) return `<div class="missing">stage 1 not run for this model</div>`;
+  if (!p.has_after)
+    return `<div class="missing">critic not run yet &mdash; showing pre-critic render</div>
+            <img src="${before}">`;
+
+  if (MODE === "before") return `<img src="${before}">`;
+  if (MODE === "after")  return `<img src="${after}">`;
+
+  // Swipe: the after-render is clipped to a draggable width over the before.
+  const uid = "sw" + Math.random().toString(36).slice(2, 8);
+  return `
+    <div class="swipe" id="${uid}">
+      <img src="${before}" onload="sizeSwipe('${uid}')">
+      <div class="after" id="${uid}-clip"><img src="${after}"></div>
+      <div class="handle" id="${uid}-handle"></div>
+      <div class="badge" style="left:8px">without critic</div>
+      <div class="badge" style="right:8px">with critic</div>
+    </div>
+    <input type="range" min="0" max="100" value="50"
+           oninput="moveSwipe('${uid}', this.value)">`;
+}
+
+function sizeSwipe(uid) {
+  const box = document.getElementById(uid);
+  if (!box) return;
+  const img = box.querySelector(":scope > img");
+  const clip = document.getElementById(uid + "-clip");
+  const inner = clip ? clip.querySelector("img") : null;
+  if (inner) inner.style.width = img.clientWidth + "px";
+  moveSwipe(uid, 50);
+}
+
+function moveSwipe(uid, pct) {
+  const box = document.getElementById(uid);
+  const clip = document.getElementById(uid + "-clip");
+  const handle = document.getElementById(uid + "-handle");
+  if (!box || !clip) return;
+  const w = box.clientWidth * (pct / 100);
+  clip.style.width = w + "px";
+  if (handle) handle.style.left = w + "px";
+}
+
+function scoreRow(p) {
+  if (p.skipped) return `<span class="pill">${esc(p.skipped)}</span>`;
+  const delta = (typeof p.final_score === "number" && typeof p.baseline_score === "number")
+    ? p.final_score - p.baseline_score : null;
+  return `
+    <span class="score before">${fmt(p.baseline_score)}</span>
+    <span class="arrow">&rarr;</span>
+    <span class="score after">${fmt(p.final_score)}</span>
+    ${delta !== null
+      ? `<span class="pill ${delta > 0 ? "ok" : "warn"}">
+           ${delta > 0 ? "+" : ""}${delta.toFixed(2)} fidelity</span>` : ""}
+    <span class="pill">${p.rounds_run ?? 0} round(s)</span>
+    ${p.improved === false && delta === 0
+      ? `<span class="pill warn">repair rejected: did not improve</span>` : ""}`;
+}
+
+function findingsBlock(p) {
+  if (!p.findings || !p.findings.length) return "";
+  return `<div class="findings">
+    <div class="sub" style="margin-bottom:6px">What the critic found in the original:</div>
+    ${p.findings.map(f => `
+      <div class="finding ${esc(f.severity)}">
+        <div class="p">${esc(f.problem)}</div>
+        <div class="f">fix: ${esc(f.fix)}</div>
+      </div>`).join("")}
+  </div>`;
+}
+
+function render() {
+  const d = DATA;
+  const cells = [`
+    <div class="cell">
+      <h3><span>Source figure</span><span class="tag">ground truth</span></h3>
+      <img src="${d.figure}">
+      <div class="sub">${esc(d.title || "")}</div>
+    </div>`];
+
+  for (const p of d.panels) {
+    cells.push(`
+      <div class="cell">
+        <h3><span>${esc(p.label)}</span><span class="tag">${esc(p.model)}</span></h3>
+        ${p.shared_with && p.shared_with.length ? `
+          <div class="sub" style="margin:0 0 8px">
+            Stage 1 is shared with ${esc(p.shared_with.join(", "))} via
+            <code>code_from</code>, so this one result covers
+            ${p.shared_with.length + 1} configs rather than being repeated per model.
+          </div>` : ""}
+        <div class="scores">${scoreRow(p)}</div>
+        ${panelBody(p, d.id)}
+        ${findingsBlock(p)}
+      </div>`);
+  }
+  $("#grid").innerHTML = cells.join("");
+  document.querySelectorAll(".swipe").forEach(el => sizeSwipe(el.id));
+}
+
+async function load() {
+  const id = $("#sample").value;
+  if (!id) return;
+  $("#status").textContent = "loading… (renders compile on demand)";
+  DATA = await (await fetch(`/api/compare/${id}`)).json();
+  const reviewed = DATA.panels.filter(p => p.has_after).length;
+  $("#status").textContent = `${reviewed}/${DATA.panels.length} model(s) reviewed`;
+  render();
+}
+
+boot();
+</script>

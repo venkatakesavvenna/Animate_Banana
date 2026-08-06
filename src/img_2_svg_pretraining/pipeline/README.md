@@ -10,6 +10,7 @@ a given agent needs is ever loaded, and any agent can be re-run alone after a pr
 STAGE 1  DIAGRAM TRANSMUTER
   1a convert-code        image -> animation-aware diagram code (TikZ/SVG)
   1b integrate-rasters   VLM locates each placeholder's region -> crop -> splice
+  1c critique-diagram    render, compare with the source, diagnose, repair
 
 STAGE 2  ANIMATION PLANNER
   2a strategize          traversal strategy: OVERVIEW_FIRST | DETAIL_FIRST   ┐ independent
@@ -355,6 +356,55 @@ toward finding something for it. The omission path is currently unexercised.
 
 Details, the coordinate convention, and the failure behaviour:
 [vision/README.md](vision/README.md).
+
+## Stage 1c (diagram critic)
+
+Stages 1a and 1b are write-only: nothing ever looked at what the generated code actually
+*draws*. The critic closes that loop — render, compare against the source figure, diagnose,
+repair — and it is the only check in Stage 1 that can see a defect the compiler cannot.
+
+```
+score render -> below threshold? -> diagnose -> repair -> re-score -> keep if better
+```
+
+Four rules make the loop safe to run unattended:
+
+| Rule | Why |
+|---|---|
+| Gate on fidelity before any repair work | Code already at `fidelity_threshold` (0.7) costs one scoring call and stops. Good samples stay cheap. |
+| Keep a repair only if it scores **higher** | The critic can degrade code. The best version seen wins, never the last one tried. |
+| Reject a repair that drops an `xml id` | Every later stage addresses elements by id; losing one breaks the animation plan for that element. |
+| Reject a repair that does not compile | Never trade a rendering defect for a broken document. |
+
+Scoring and diagnosis are separate calls on purpose: a model asked to grade and fix in one
+breath tends to justify its grade instead of finding the defect, and the score has to stay
+honest because it is both the entry gate and the accept test. The rubric is the same one
+AnimateBench's Rendering Fidelity metric uses, so the loop optimises against the measure it
+will later be judged by.
+
+The loop runs in two phases. **Compile repair first** — a document that produces no PDF cannot
+be compared with anything, and these failures are self-contained (the code used a colour, style
+or node it never declared, and the LaTeX log names which). **Then the render/score loop.**
+
+**Measured across all five AnimateBench samples** (2026-08-06, gemini-3.6-flash):
+
+| Sample | Before | After | Defect |
+|---|---|---|---|
+| pipe00002 | 0.52 | 0.52 | cosmetic; repair **rejected for not improving** |
+| pipe00010 | *did not compile* | **0.88** | undefined shape, then 3 overpainting containers |
+| pipe00041 | 0.20 | **0.76** | 4 overpainting containers |
+| pipe00045 | *did not compile* | **0.83** | undefined node ref, then 2 overpainting containers |
+| pipe00137 | *did not compile* | **0.72** | undefined TikZ style |
+
+**Three of five samples produced nothing at all before this stage existed.** The dominant
+rendering defect — a `fit` container declared after its contents with an opaque fill, painting
+over its own children — appeared independently in three samples, so it is a systematic
+converter habit rather than a one-off. AnimateBench, scoring the artifacts separately, agrees
+with the critic's own numbers (`rendering_fidelity` 0.300 → 0.760 on pipe00041).
+
+Full findings, the LaTeX errors, and before/after renders:
+[docs/critic_evidence/](docs/critic_evidence/README.md). Interactive swipe comparison:
+`inspector/critic_ab.py` on port 8602.
 
 ## Verified against live models (2026-07-29, gemini-3.6-flash)
 

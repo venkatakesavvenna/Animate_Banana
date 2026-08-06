@@ -56,6 +56,24 @@ transmuter:
       temperature: 0.0
       max_tokens: 4096
 
+  # Stage 1c. Renders the code, compares it with the source figure, and
+  # repairs what differs. Gated on rendering fidelity: code already scoring
+  # >= fidelity_threshold costs one scoring call and nothing more, so a good
+  # sample is cheap. Exists because 1a/1b are write-only -- nothing had ever
+  # looked at what the code actually draws, and a document can compile with
+  # zero warnings while rendering almost nothing (observed on pipe00041,
+  # where every `fit` block painted over its own children).
+  diagram_critic:
+    enabled: true
+    backend: gemini_pro
+    prompt: diagram_transmuter/critic.yaml
+    fidelity_threshold: 0.7
+    max_rounds: 3
+    params:
+      # Scoring wants determinism; the repair benefits from a little room.
+      temperature: 0.1
+      max_tokens: 32768
+
 planner:
   strategizer:
     backend: gemini_flash

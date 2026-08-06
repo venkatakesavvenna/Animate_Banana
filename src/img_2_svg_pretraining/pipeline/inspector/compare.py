@@ -103,6 +103,35 @@ def _reference(sample_id: str) -> dict:
         return {}
 
 
+def _metrics(cfg, config_file: str, style: str, sample_id: str) -> dict:
+    """AnimateBench scores for one panel, with each metric's description.
+
+    Reads the eval records the metrics CLI writes; a panel that has not been
+    scored yet simply reports nothing rather than blocking the videos.
+    """
+    from img_2_svg_pretraining.animatebench import descriptions, results
+
+    root = results.evals_root(cfg.cache_root, cfg.dataset_root.name)
+    config_name = Path(config_file).stem
+
+    suites: list[dict] = []
+    for suite in ("stage1", "xml", "sequence", "stage3"):
+        record = results.read_record(
+            results.suite_path(root, config_name, style, sample_id, suite))
+        if record is None:
+            continue
+        entries = []
+        for key in descriptions.ordered(suite):
+            if key not in record or record[key] is None:
+                continue
+            entries.append({"key": key, "value": record[key],
+                            **descriptions.describe(key)})
+        if entries:
+            suites.append({"suite": suite, "metrics": entries,
+                           "error": record.get("error")})
+    return {"available": bool(suites), "suites": suites}
+
+
 def _sequence_summary(path: Path) -> dict | None:
     if not path.exists():
         return None
@@ -161,6 +190,8 @@ def api_compare(sample_id, style):
                         or _sequence_summary(paths.sequence(sample_id)),
             "code": paths.animation(sample_id).exists(),
             "dir": str(exports),
+            "metrics": _metrics(STATE["models"][label]["cfg"],
+                                STATE["models"][label]["file"], style, sample_id),
         })
 
     # The bundle ships one reference video per (target, style, tier); the

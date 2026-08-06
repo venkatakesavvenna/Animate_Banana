@@ -61,6 +61,31 @@
                margin-top: 2px; word-break: break-all; }
   .toggle { background: none; border: none; color: var(--accent); cursor: pointer;
             font-size: 11px; padding: 4px 0; text-align: left; }
+
+  /* metrics block */
+  .metrics { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .msuite { margin-bottom: 10px; }
+  .msuite > .h { color: var(--dim); font-size: 10px; text-transform: uppercase;
+                 letter-spacing: .7px; margin-bottom: 4px; }
+  .metric { display: flex; align-items: baseline; gap: 8px; padding: 3px 0;
+            border-bottom: 1px solid #23272f; }
+  .metric:last-child { border-bottom: none; }
+  .metric .name { flex: 1; font-size: 12px; }
+  .metric .val { font-family: ui-monospace, monospace; font-size: 13px;
+                 font-weight: 600; min-width: 52px; text-align: right; }
+  .metric .val.good { color: var(--ok); }
+  .metric .val.mid  { color: var(--warn); }
+  .metric .val.bad  { color: var(--bad); }
+  .metric .why { color: var(--dim); font-size: 11px; line-height: 1.4;
+                 margin: 0 0 4px 0; }
+  .metric .q { color: var(--dim); cursor: help; font-size: 10px;
+               border: 1px solid var(--line); border-radius: 50%;
+               width: 14px; height: 14px; display: inline-flex;
+               align-items: center; justify-content: center; flex: 0 0 14px; }
+  .metric .q:hover { color: var(--accent); border-color: var(--accent); }
+  .mrow { border-bottom: 1px solid #23272f; padding: 5px 0; }
+  .mrow:last-child { border-bottom: none; }
+  .caveat { color: var(--warn); font-size: 10.5px; margin-top: 2px; }
 </style>
 
 <header>
@@ -90,7 +115,7 @@ async function boot() {
   load();
 }
 
-function panelCell(title, tag, videoUrl, stats, note, scriptId) {
+function panelCell(title, tag, videoUrl, stats, note, scriptId, metrics) {
   return `
     <div class="cell">
       <h3><span>${title}</span><span class="tag">${tag || ""}</span></h3>
@@ -101,6 +126,7 @@ function panelCell(title, tag, videoUrl, stats, note, scriptId) {
       ${scriptId ? `<button class="toggle" onclick="toggleScript('${scriptId}')"
                       id="btn-${scriptId}">&#9662; narration</button>
                     <div class="script" id="${scriptId}">loading…</div>` : ""}
+      ${metrics !== undefined ? metricsBlock(metrics) : ""}
     </div>`;
 }
 
@@ -128,6 +154,58 @@ function renderScript(el, seq, err) {
       <div style="flex:1;min-width:0">${txt}
         <div class="ids">${esc(ids.join(", "))}</div></div></div>`;
   }).join("");
+}
+
+/* Colour a value by whether it is good, using each metric's own direction --
+   "lower is better" metrics (violations, integration footprint) must not be
+   painted red for being small. */
+function metricClass(m) {
+  const v = m.value;
+  if (typeof v === "boolean") return v ? "good" : "bad";
+  if (typeof v !== "number") return "";
+  if (m.better === "lower") {
+    // Unbounded metrics (AIF) have no natural 0-1 scale.
+    if (m.key === "aif") return v <= 0.1 ? "good" : (v <= 0.5 ? "mid" : "bad");
+    return v <= 0.05 ? "good" : (v <= 0.25 ? "mid" : "bad");
+  }
+  return v >= 0.8 ? "good" : (v >= 0.5 ? "mid" : "bad");
+}
+
+function fmtMetric(v) {
+  if (typeof v === "boolean") return v ? "pass" : "FAIL";
+  if (typeof v === "number") return Number.isInteger(v) ? v.toFixed(2) : v.toFixed(3);
+  return String(v ?? "—");
+}
+
+const SUITE_TITLE = {
+  stage1: "Stage 1 · diagram code",
+  xml: "Stage 2 · structure XML",
+  sequence: "Stage 2 · animation sequence",
+  stage3: "Stage 3 · animation code",
+};
+
+function metricsBlock(metrics) {
+  if (!metrics || !metrics.available)
+    return `<div class="metrics"><div class="sub" style="margin:0">
+              no metrics yet &mdash; run <code>animatebench.run_eval</code></div></div>`;
+
+  return `<div class="metrics">${metrics.suites.map(s => `
+    <div class="msuite">
+      <div class="h">${esc(SUITE_TITLE[s.suite] || s.suite)}</div>
+      ${s.metrics.map(m => `
+        <div class="mrow">
+          <div class="metric">
+            <span class="q" title="${esc(m.what)}${m.caveat ? "\n\n" + esc(m.caveat) : ""}">?</span>
+            <span class="name">${esc(m.label)}
+              <span class="pill" style="margin-left:4px">${esc(m.doc || "")}</span></span>
+            <span class="val ${metricClass(m)}">${fmtMetric(m.value)}</span>
+          </div>
+          <div class="why">${esc(m.what)}
+            <span style="opacity:.7">(${esc(m.better)} is better${
+              m.range ? ", " + esc(m.range) : ""})</span></div>
+          ${m.caveat ? `<div class="caveat">${esc(m.caveat)}</div>` : ""}
+        </div>`).join("")}
+    </div>`).join("")}</div>`;
 }
 
 function toggleScript(id) {
@@ -187,7 +265,7 @@ async function load() {
         (p.frames ? `<span class="pill">${p.frames} frames</span>` : "") +
         (!p.video && p.code ? `<span class="pill warn">code, no render</span>` : ""),
       p.code ? "animation code exists but did not render" : "not generated yet",
-      `script-${i}`));
+      `script-${i}`, p.metrics));
   });
 
   $("#grid").innerHTML = cells.join("");

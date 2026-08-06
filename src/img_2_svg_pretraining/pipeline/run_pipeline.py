@@ -5,6 +5,7 @@ Three stages, each a set of agents:
   STAGE 1  DIAGRAM TRANSMUTER
     convert-code       image -> animation-aware diagram code
     integrate-rasters  locate raster regions with the VLM -> crop into the code
+    critique-diagram   render, compare against the source, repair what differs
 
   STAGE 2  ANIMATION PLANNER
     strategize         traversal strategy (OVERVIEW_FIRST | DETAIL_FIRST)
@@ -47,6 +48,7 @@ DEFAULT_CONFIG = Path(__file__).parent / "configs" / "default.yaml"
 STAGE_MODULES = {
     "convert-code": ("transmuter.code_converter", "code_converter"),
     "integrate-rasters": ("transmuter.raster_integrator", "raster_integrator"),
+    "critique-diagram": ("transmuter.critic", "diagram_critic"),
     "strategize": ("planner.strategizer", "strategizer"),
     "parse": ("planner.parser", "parser"),
     "sequence": ("planner.sequencer", "sequencer"),
@@ -58,7 +60,7 @@ STAGE_MODULES = {
 }
 
 STAGE_GROUPS = {
-    "stage1": ["convert-code", "integrate-rasters"],
+    "stage1": ["convert-code", "integrate-rasters", "critique-diagram"],
     "stage2": ["strategize", "parse", "sequence", "critique-sequence", "narrate"],
     "stage3": ["design", "critique-animation", "export"],
 }
