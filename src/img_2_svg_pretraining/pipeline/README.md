@@ -16,6 +16,7 @@ STAGE 2  ANIMATION PLANNER
   2b parse               diagram structure/hierarchy XML                     ┘
   2c sequence            animation sequence, conditioned on the style
   2d critique-sequence   review + repair, Set-of-Mark grounded
+  2e narrate             spoken narration written into the sequence
 
 STAGE 3  DIAGRAM ANIMATOR
   3a design              animation code from the sequence + style
@@ -69,6 +70,52 @@ python -m img_2_svg_pretraining.pipeline.inspector.app   # then open http://<hos
 Source figure beside the reconstruction, the animation sequence step by step, a frame
 scrubber over the exported animation, and every stage's file. See
 [inspector/README.md](inspector/README.md).
+
+## AnimateBench comparison
+
+The benchmark ships one zip per sample: the paper inputs, the reference pipeline's
+intermediates, its rendered animations (5 styles x 2 context tiers x tikz/svg), and human
+review metadata. Import turns that into a normal pipeline dataset, keeping the reference
+material under `reference/` where discovery ignores it:
+
+```bash
+python -m img_2_svg_pretraining.pipeline.import_bench \
+  --src /path/to/extracted --dest /code/data/animatebench
+```
+
+Three configs differ *only* in which model every agent uses, so a side-by-side isolates the
+model rather than the setup — `bench_gemini.yaml`, `bench_gemma4.yaml`, `bench_qwen.yaml`.
+All have both critics off. Style is a per-run flag, since artifacts are keyed by it:
+
+```bash
+python -m img_2_svg_pretraining.pipeline.run_pipeline all \
+  --config configs/bench_gemini.yaml --style colour_pop
+```
+
+Then the four-panel viewer — ground truth, the benchmark's own animation, and one panel per
+model, with synchronized playback:
+
+```bash
+python -m img_2_svg_pretraining.pipeline.inspector.compare --port 8601
+```
+
+**The bench dialect.** `tikz_sequencer.yaml` / `svg_sequencer.yaml` emit the benchmark's own
+schema rather than ours:
+
+```json
+{"metadata": {"traversal_order": ..., "animation_style": ...},
+ "sequence": [{"timestamp": 1, "narrative": ...,
+               "to_be_animated": {"blocks": [], "nodes": [], "text": [], "arrows": []}}]}
+```
+
+`schema.py` reads both and `to_bench_dict()` writes it back, verified lossless against 19 of
+the bundle's own narration files (the 20th is malformed in the bundle — an element missing its
+`"id"` key — and is skipped rather than fatal). The four element buckets are preserved
+separately in `SequenceNode.element_classes` rather than flattened into `focus`, because the
+bounding-box styles are defined partly by `text` and `arrows` being empty at every timestamp.
+
+These prompts carry no `{placeholders}`: they name their inputs in prose, so the sequencer
+appends them as a labelled suffix instead of interpolating. See `planner/sequencer.py`.
 
 ## Configuration
 
@@ -183,8 +230,22 @@ checkable against the parsed XML. `validate()` returns the same violations the b
 validity metrics report, so the critic and the scorer agree on what "invalid" means.
 
 **Animation styles** (`styles.py`) — defined once, shared by the sequencer (which plans within
-them), the designer (which realizes them), and the benchmark (which scores them):
-`progressive_reveal`, `sliding_bbox`, `highlight_dim`, `zoom_pan`.
+them), the designer (which realizes them), and the benchmark (which scores them).
+
+The five AnimateBench styles, with constraints taken from Ruleset 3 of the benchmark's own
+sequencer prompt so a run of ours is comparable with the reference:
+
+| Style | Mechanically checked |
+|---|---|
+| `progressive_reveal` | each element revealed exactly once, never re-revealed |
+| `colour_pop` | all element types, one logical step per timestamp |
+| `alpha_masking` | strict DAG — an element may never appear in two timestamps |
+| `hopping_bounding_box` | exactly ONE element per timestamp |
+| `sliding_bounding_box` | exactly ONE element per timestamp |
+
+Plus our own earlier three, kept so cached artifacts stay valid: `sliding_bbox`,
+`highlight_dim`, `zoom_pan`. Note `sliding_bbox` and `sliding_bounding_box` are different
+entries — the bench spelling is its own style with the stricter one-element rule.
 
 ## Open-weights roster
 

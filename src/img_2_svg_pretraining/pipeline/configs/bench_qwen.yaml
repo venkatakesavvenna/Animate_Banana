@@ -1,0 +1,163 @@
+# AnimateBench comparison run -- Qwen3.6 27B (local, 1 GPU, ~55.6GB), critics OFF.
+#
+# One of three configs that differ ONLY in which model every agent uses, so a
+# side-by-side of their outputs isolates the model rather than the setup:
+#   bench_gemini.yaml     gemini-3.6-flash
+#   bench_gemma4.yaml     gemma-4-31B-it     local, 1 GPU
+#   bench_qwen.yaml  <- this file  Qwen3.6-27B        local, 1 GPU
+#
+# Critics are disabled in all three, per the comparison brief. That is also
+# what makes the run affordable: each critic round echoes back the whole
+# sequence or animation, roughly doubling the calls per sample.
+#
+# THE BENCH DIALECT
+# -----------------
+# `sequencer.prompt` points at tikz_sequencer.yaml, which emits the benchmark's
+# own schema -- {metadata, sequence[{timestamp, to_be_animated{blocks, nodes,
+# text, arrows}}]} -- rather than our native node/traversal form. schema.py
+# reads both, so everything downstream is unchanged and our output stays
+# directly comparable with the reference animations shipped in the bundle.
+#
+# That prompt carries no {placeholders}: it names its inputs in prose and the
+# sequencer appends them as a labelled suffix. See planner/sequencer.py.
+#
+# STYLE
+# -----
+# `animation_style` is what the whole run is conditioned on, and the bench
+# ships five. Override per run rather than editing this file:
+#
+#   run_pipeline.py all --config configs/bench_gemini.yaml --style colour_pop
+
+#
+# LOCAL MODEL -- run under /environments/gemma4 (transformers 5.13.0; the main
+# venv lacks the gemma4 architecture) and pick free cards explicitly:
+#
+#   source /environments/gemma4/bin/activate
+#   python -u -m img_2_svg_pretraining.pipeline.run_pipeline all \
+#     --config src/img_2_svg_pretraining/pipeline/configs/bench_qwen.yaml \
+#     --gpu 4,5,6,7
+#
+# GPUs 0-3 belong to another job. The NVRTC/CUDA fix is applied in code by
+# backends/hf_local.py::_preload_nvrtc -- nothing to export.
+
+# STAGE 1 IS SHARED, NOT RE-GENERATED
+# ----------------------------------
+# `code_from` points this run at the diagram code the Gemini config already
+# produced, so stages 1a/1b are skipped entirely. Two reasons:
+#
+#   * It makes this a stage-2/3 comparison. With the diagram code held
+#     constant across all three models, any difference in the resulting
+#     animation comes from planning, sequencing, narration and design -- not
+#     from how each model happened to redraw the figure.
+#   * Stage 1a is by far the most expensive step locally: a ~16K-token TikZ
+#     document generated one token at a time under eager attention. Measured
+#     here at >20 min per sample without finishing, against ~30s for the API.
+#
+# The value is the stage-1 lineage directory name, i.e.
+# <converter-model>__<integrator-model>. Change it if the Gemini config's
+# stage-1 models change, or the artifacts stop resolving.
+code_from: gemini-3.6-flash__gemini-3.6-flash
+
+dataset:
+  root: /code/data/animatebench
+  limit: 0
+
+animation_style: progressive_reveal
+target: tikz
+
+backends:
+  qwen36_27b:
+    type: hf_local
+    hf_repo: Qwen/Qwen3.6-27B
+    model: qwen3.6-27b
+    attn_implementation: eager
+    # Sharded across the two visible GPUs, not pinned to one. The weights fit
+    # on a single 80GB card, but the strategizer's prompt (figure + abstract +
+    # full method section) then needs a ~6GB activation allocation with only
+    # ~14GB free, and OOMs on every sample. Two cards give activations room.
+    device: auto
+    max_memory:
+      0: 70GiB
+      1: 70GiB
+    batch_size: 1
+
+transmuter:
+  code_converter:
+    backend: qwen36_27b
+    prompt: diagram_transmuter/tikz_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  raster_integrator:
+    # Disabled: stage 1 comes from `code_from` above.
+    enabled: false
+    backend: qwen36_27b
+    params:
+      temperature: 0.0
+      # 4096 truncated the response mid-JSON on a 7-placeholder figure: these
+      # are thinking models, so reasoning tokens come out of the same budget
+      # before any JSON is emitted. The failure looks like "detection response
+      # was not a JSON object", not like a length error.
+      max_tokens: 16384
+
+planner:
+  strategizer:
+    backend: qwen36_27b
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+    params:
+      temperature: 0.3
+
+  parser:
+    backend: qwen36_27b
+    prompt: animation_planner/tikz_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  sequencer:
+    backend: qwen36_27b
+    prompt: animation_planner/tikz_sequencer.yaml#seq_with_narration
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    enabled: false
+    backend: qwen36_27b
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  narrative_writer:
+    backend: qwen36_27b
+    prompt: animation_planner/narrative_writer.yaml
+    context_tier: full
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+animator:
+  designer:
+    backend: qwen36_27b
+    prompt: animation_designer/designer.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  critic:
+    enabled: false
+    backend: qwen36_27b
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+
+  exporter:
+    outputs: [pdf, mp4, gif]
+    fps: 2
+    dpi: 300

@@ -1,0 +1,58 @@
+# Diagram Component Score -- are the semantic class tags correct?
+#
+# Judged on the CODE rather than the induced XML, because the tags originate
+# at the diagram-to-code step: scoring the XML would blame the parser for a
+# mistake made upstream of it.
+
+prompt: |
+  You are auditing the semantic class tags in generated diagram code.
+
+  The code reconstructs the figure shown to you. Every element it draws carries an `xml class`
+  tag naming what that element IS. Your job is to check each tag against the figure and the
+  code, and say whether it is right.
+
+  ### THE EIGHT CLASSES
+
+  - `block` -- a parent container, bounded region, or grouping box that ENCLOSES other elements.
+  - `standalone_node` -- an independent node NOT inside any block. Includes a text entity that
+    functions as a node in its own right (it has arrows pointing to or from it).
+  - `child_node` -- a standard node visually contained within a block. Also includes text
+    entities that function as nodes.
+  - `raster_node` -- a placeholder standing in for complex imagery: a photograph, a rendered 3D
+    object, a screenshot, a heatmap, an icon or logo. NOT line art that was actually drawn.
+  - `text_node` -- pure text: an annotation, a block title, a label. It has NO structural arrows
+    pointing to or from it.
+  - `composite_whole` -- the invisible bounding box that anchors a multi-part drawn element.
+  - `composite_part` -- one path or shape making up a composite graphic.
+  - `edge` -- a connecting line or arrow.
+
+  ### THE TWO DISTINCTIONS THAT MATTER MOST
+
+  1. **text_node vs child_node.** The test is structural, not visual. If arrows connect to it,
+     it is a node even when it renders as bare text. If nothing connects to it, it is a
+     text_node even when it sits inside a box.
+  2. **raster_node over-triggering.** A `raster_node` is only correct when the content genuinely
+     cannot be drawn with lines and shapes. A neural-network block, a cube, a labelled box or an
+     arrow drawn in code is NOT a raster node, even if the original figure rendered it richly.
+
+  ### THE TAGS TO CHECK
+  {tagged_elements}
+
+  ### THE CODE
+  {diagram_code}
+
+  ### OUTPUT
+
+  Judge EVERY id listed above, once each. Respond with ONLY a single JSON object -- no markdown
+  fences, no commentary.
+
+  {
+    "elements": [
+      {"id": "block_input", "correct": true, "should_be": "", "reason": "encloses three images"},
+      {"id": "lbl_title", "correct": false, "should_be": "text_node",
+       "reason": "no arrows connect to it; it is the block's title"}
+    ]
+  }
+
+  Set `correct` to true when the declared class is right, and leave `should_be` empty in that
+  case. When it is wrong, name the class it should have had.

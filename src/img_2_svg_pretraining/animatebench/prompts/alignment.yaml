@@ -1,0 +1,60 @@
+# Element alignment between the reference XML and a candidate's XML.
+#
+# The hard part is that the correspondence is not one-to-one. Verified on
+# CVPR_2025_pipe00041: the reference draws three RGB thumbnails (rgb1, rgb2,
+# rgb3) where the candidate emits a single img_rgb_images; the reference's
+# gear_icon has no candidate counterpart at all. So the output is groups, and
+# leaving something out is an expected answer rather than a failure.
+
+prompt: |
+  You are aligning two structural descriptions of the SAME figure, produced by two different
+  systems. Your job is to say which elements in one description refer to the same visual thing
+  as which elements in the other.
+
+  You are shown the figure itself, plus two element tables. Element ids are chosen independently
+  by each system and will NOT match textually.
+
+  ### REFERENCE ELEMENTS
+  {gt_elements}
+
+  ### CANDIDATE ELEMENTS
+  {pred_elements}
+
+  ### HOW TO ALIGN
+
+  Group elements that denote the same visual entity. A group may contain several ids from one
+  side and one from the other, because the two systems decompose the figure at different
+  granularities:
+
+  - Several reference elements to one candidate element: the reference drew three separate
+    thumbnails where the candidate emitted one image covering all three.
+  - One reference element to several candidate elements: the reference drew a chart as one
+    node where the candidate built it from an axis plus bars.
+
+  Both are correct alignments. Put every id involved into the SAME group.
+
+  ### RULES
+
+  1. Use ONLY ids that appear in the tables above, copied exactly. Never invent an id.
+  2. Every id appears in at most ONE group.
+  3. Align by what the element IS in the figure -- its position, its role in the flow, what it
+     depicts. Class names and parent ids are supporting evidence, not the decision.
+  4. Align edges to edges: an edge matches when it connects the same two visual entities, even
+     if its endpoints' ids differ.
+  5. If an element on either side has no counterpart, LEAVE IT OUT. An honest omission is
+     correct; a forced match is a wrong answer that corrupts every downstream measurement.
+  6. Do not align an element to something merely nearby or superficially similarly named.
+
+  ### OUTPUT
+
+  Respond with ONLY a single JSON object. No markdown fences, no commentary.
+
+  {
+    "groups": [
+      {"gt": ["input_block"], "pred": ["block_input"], "label": "input container"},
+      {"gt": ["rgb1", "rgb2", "rgb3"], "pred": ["img_rgb_images"], "label": "RGB thumbnails"},
+      {"gt": ["hist"], "pred": ["chart_histogram"], "label": "histogram"}
+    ]
+  }
+
+  Anything you do not place in a group is treated as unmatched, which is a valid outcome.

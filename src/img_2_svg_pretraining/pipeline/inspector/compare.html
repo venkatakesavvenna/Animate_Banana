@@ -1,0 +1,237 @@
+<title>AnimateBench — side by side</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --panel2: #23272f; --line: #2f343d;
+    --fg: #e6e8ec; --dim: #949aa6; --accent: #6ea8fe; --ok: #4ec9a0;
+    --warn: #e0af68; --bad: #f07178;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px; }
+
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+           position: sticky; top: 0; z-index: 10; }
+  h1 { margin: 0 0 10px; font-size: 15px; font-weight: 600; letter-spacing: .2px; }
+  .controls { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  label { color: var(--dim); font-size: 11px; text-transform: uppercase;
+          letter-spacing: .6px; margin-right: 6px; }
+  select, button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+                   border-radius: 4px; padding: 6px 10px; font-size: 12.5px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #10131a; border-color: var(--accent);
+                   font-weight: 600; }
+
+  main { padding: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 16px; margin-bottom: 20px; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+
+  .cell { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+          padding: 12px; min-width: 0; }
+  .cell h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase;
+             letter-spacing: .7px; color: var(--dim); font-weight: 600;
+             display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .cell h3 .tag { text-transform: none; letter-spacing: 0; color: var(--accent);
+                  font-family: ui-monospace, monospace; font-size: 11px; }
+  video, .cell img { width: 100%; border-radius: 4px; background: #fff; display: block; }
+  .missing { padding: 40px 12px; text-align: center; color: var(--dim);
+             background: var(--panel2); border-radius: 4px; font-size: 12px; }
+  .stats { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10.5px;
+          background: var(--panel2); border: 1px solid var(--line); color: var(--dim); }
+  .pill.ok { color: var(--ok); border-color: #2c5c4c; }
+  .pill.bad { color: var(--bad); border-color: #5c2f36; }
+  .pill.warn { color: var(--warn); border-color: #5c4a2c; }
+  .sub { color: var(--dim); font-size: 11px; margin-top: 6px; word-break: break-all; }
+  .reviews { margin-top: 8px; font-size: 11px; color: var(--warn); }
+
+  /* narration script, per panel */
+  .script { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px;
+            max-height: 260px; overflow-y: auto; }
+  .script.collapsed { max-height: 0; padding-top: 0; border-top: none; overflow: hidden; }
+  .step { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid #23272f; }
+  .step:last-child { border-bottom: none; }
+  .step .t { flex: 0 0 22px; color: var(--accent); font-family: ui-monospace, monospace;
+             font-size: 10.5px; padding-top: 1px; }
+  .step .txt { flex: 1; font-size: 12px; line-height: 1.45; }
+  .step .txt.silent { color: var(--dim); font-style: italic; }
+  .step .ids { color: var(--dim); font-size: 10px; font-family: ui-monospace, monospace;
+               margin-top: 2px; word-break: break-all; }
+  .toggle { background: none; border: none; color: var(--accent); cursor: pointer;
+            font-size: 11px; padding: 4px 0; text-align: left; }
+</style>
+
+<header>
+  <h1>AnimateBench &mdash; reference vs pipeline</h1>
+  <div class="controls">
+    <span><label>Sample</label><select id="sample" onchange="load()"></select></span>
+    <span><label>Style</label><select id="style" onchange="load()"></select></span>
+    <button class="primary" onclick="playAll()">&#9654; play all</button>
+    <button onclick="pauseAll()">&#10073;&#10073; pause</button>
+    <button onclick="restartAll()">&#8635; restart</button>
+    <span id="status" class="sub" style="margin:0"></span>
+  </div>
+</header>
+
+<main><div id="grid" class="grid"></div></main>
+
+<script>
+const $ = s => document.querySelector(s);
+let INDEX = null;
+
+async function boot() {
+  INDEX = await (await fetch("/api/index")).json();
+  $("#sample").innerHTML = INDEX.samples
+    .map(s => `<option value="${s.id}">${s.id}${s.has_reference ? "" : " (no reference)"}</option>`)
+    .join("");
+  $("#style").innerHTML = INDEX.styles.map(s => `<option value="${s}">${s}</option>`).join("");
+  load();
+}
+
+function panelCell(title, tag, videoUrl, stats, note, scriptId) {
+  return `
+    <div class="cell">
+      <h3><span>${title}</span><span class="tag">${tag || ""}</span></h3>
+      ${videoUrl
+        ? `<video controls preload="metadata" loop src="${videoUrl}"></video>`
+        : `<div class="missing">${note || "not generated yet"}</div>`}
+      <div class="stats">${stats || ""}</div>
+      ${scriptId ? `<button class="toggle" onclick="toggleScript('${scriptId}')"
+                      id="btn-${scriptId}">&#9662; narration</button>
+                    <div class="script" id="${scriptId}">loading…</div>` : ""}
+    </div>`;
+}
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+/* Render a narration script from a sequence in the *bench* dialect, which is
+   what both our output and the reference use once converted -- one entry per
+   timestamp, with the elements it animates. */
+function renderScript(el, seq, err) {
+  if (err) { el.innerHTML = `<div class="sub">${esc(err)}</div>`; return; }
+  const steps = (seq && seq.sequence) || [];
+  if (!steps.length) { el.innerHTML = `<div class="sub">no narration</div>`; return; }
+  el.innerHTML = steps.map(s => {
+    const ta = s.to_be_animated || {};
+    const ids = ["blocks", "nodes", "text", "arrows"]
+      .flatMap(b => (ta[b] || []).map(e => e.id || e))
+      .filter(Boolean);
+    const txt = s.narrative
+      ? `<div class="txt">${esc(s.narrative)}</div>`
+      : `<div class="txt silent">(no narration for this step)</div>`;
+    return `<div class="step"><div class="t">${s.timestamp}</div>
+      <div style="flex:1;min-width:0">${txt}
+        <div class="ids">${esc(ids.join(", "))}</div></div></div>`;
+  }).join("");
+}
+
+function toggleScript(id) {
+  const el = document.getElementById(id), btn = document.getElementById("btn-" + id);
+  const hidden = el.classList.toggle("collapsed");
+  if (btn) btn.innerHTML = (hidden ? "&#9656;" : "&#9662;") + " narration";
+}
+
+function seqPills(seq) {
+  if (!seq) return `<span class="pill bad">no sequence</span>`;
+  if (seq.error) return `<span class="pill bad">${seq.error}</span>`;
+  return [
+    `<span class="pill">${seq.steps} steps</span>`,
+    `<span class="pill">${seq.elements} elements</span>`,
+    seq.narrated
+      ? `<span class="pill ok">${seq.narrated} narrated</span>`
+      : `<span class="pill warn">no narration</span>`,
+    seq.traversal_style ? `<span class="pill">${seq.traversal_style}</span>` : "",
+    seq.bench_schema ? `<span class="pill ok">bench schema</span>` : "",
+  ].join("");
+}
+
+async function load() {
+  const id = $("#sample").value, style = $("#style").value;
+  if (!id || !style) return;
+  $("#status").textContent = "loading…";
+  const d = await (await fetch(`/api/compare/${id}/${style}`)).json();
+
+  const cells = [];
+
+  // 1. Ground truth: the source figure the whole pipeline starts from.
+  cells.push(`
+    <div class="cell">
+      <h3><span>Ground truth &mdash; source figure</span><span class="tag">input</span></h3>
+      <img src="${d.figure}">
+      <div class="sub">${d.title || ""}</div>
+    </div>`);
+
+  // 2. The benchmark's own animation for this style.
+  const revs = (d.reference.reviews || [])
+    .filter(r => (r.questionnaire || []).length)
+    .map(r => `v${r.version}: ${r.questionnaire.join(", ")}`).join(" · ");
+  cells.push(panelCell(
+    "Reference (AnimateBench)", "tikz · full context",
+    d.reference.video,
+    revs ? `<span class="pill warn">human review: ${revs}</span>` : "",
+    d.reference.available_keys.length
+      ? "no tikz/full-context video for this style"
+      : "no reference videos imported",
+    "script-ref"));
+
+  // 3-5. One per model.
+  d.panels.forEach((p, i) => {
+    cells.push(panelCell(
+      p.label, p.model, p.video,
+      seqPills(p.sequence) +
+        (p.frames ? `<span class="pill">${p.frames} frames</span>` : "") +
+        (!p.video && p.code ? `<span class="pill warn">code, no render</span>` : ""),
+      p.code ? "animation code exists but did not render" : "not generated yet",
+      `script-${i}`));
+  });
+
+  $("#grid").innerHTML = cells.join("");
+  const done = d.panels.filter(p => p.video).length;
+  $("#status").textContent = `${done}/${d.panels.length} model outputs ready`;
+
+  // Narration is fetched per panel after the grid renders, so a slow or
+  // missing script never delays the videos appearing.
+  loadScript("script-ref", `/api/reference-sequence/${id}/${style}`, j => j);
+  d.panels.forEach((p, i) => {
+    if (!p.sequence) {
+      renderScript(document.getElementById(`script-${i}`), null, "no sequence generated");
+      return;
+    }
+    loadScript(`script-${i}`,
+      `/api/sequence/${encodeURIComponent(p.label)}/${id}/${style}`, j => j.bench);
+  });
+}
+
+async function loadScript(elId, url, pick) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) { renderScript(el, null, `not available (HTTP ${r.status})`); return; }
+    const j = await r.json();
+    if (j.error) { renderScript(el, null, j.error); return; }
+    renderScript(el, pick(j));
+  } catch (e) {
+    renderScript(el, null, String(e));
+  }
+}
+
+const vids = () => Array.from(document.querySelectorAll("video"));
+function playAll()    { vids().forEach(v => v.play().catch(() => {})); }
+function pauseAll()   { vids().forEach(v => v.pause()); }
+function restartAll() { vids().forEach(v => { v.currentTime = 0; v.play().catch(() => {}); }); }
+
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT") return;
+  if (e.code === "Space") { e.preventDefault();
+    vids().some(v => !v.paused) ? pauseAll() : playAll(); }
+  if (e.key === "r") restartAll();
+});
+
+boot();
+</script>

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from ..backends import Message
 from ..extract import extract_json, looks_truncated
-from ..prompts import load_and_render
+from ..prompts import has_placeholders, load_prompt, render
 from ..runner import AgentContext, StageReport, run_agent
 from ..samples import PaperSample
 from ..schema import AnimationSequence
@@ -54,14 +54,36 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
     outline = "\n".join(f"{i}. {step}"
                         for i, step in enumerate(strategy.get("sequence", []), 1))
 
-    text = load_and_render(ctx.agent.prompt, {
+    context = {
         "max_depth": str(max_depth),
         "style_block": style.prompt_block(),
         "traversal_style": strategy.get("traversal_style", "OVERVIEW_FIRST"),
         "strategy_reasoning": strategy.get("reasoning", ""),
         "strategy_sequence": outline,
         "structure_xml": structure_xml,
-    })
+    }
+
+    template = load_prompt(ctx.agent.prompt)
+    if has_placeholders(template):
+        text = render(template, context)
+    else:
+        # The AnimateBench prompts (tikz_sequencer / svg_sequencer) are written
+        # as standalone instructions with no {placeholders} -- they name their
+        # inputs in prose and expect them appended. Substitution would silently
+        # supply nothing, so the same context is laid out as a labelled suffix
+        # instead. They also read the diagram code directly, since text_node
+        # elements are deliberately absent from the structure XML.
+        code = Path(ctx.paths.resolve_code(sample.id)).read_text(encoding="utf-8")
+        text = "\n\n".join([
+            template,
+            "### ORIGINAL DIAGRAM CODE\n" + code,
+            "### HIERARCHICAL GRAPH (STRUCTURE XML)\n" + structure_xml,
+            f"### ANIMATION STYLE\n{ctx.cfg.style}\n\n{style.prompt_block()}",
+            f"### SUGGESTED TRAVERSAL\n{context['traversal_style']}\n"
+            f"{context['strategy_reasoning']}",
+            f"### MAXIMUM DEPTH\n{max_depth}",
+        ])
+
     return [Message.user(text, images=[sample.image_path])]
 
 

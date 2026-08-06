@@ -58,7 +58,21 @@ class CachePaths:
     def code_lineage(self) -> str:
         """Stage-1 lineage. The integrator's model is included only when the
         integrator is enabled, so disabling it doesn't invalidate Stage-1
-        artifacts that never involved it."""
+        artifacts that never involved it.
+
+        `code_from` in the config overrides this entirely, pointing the run at
+        diagram code some *other* config produced. That is what makes a
+        stage-2/3-only comparison possible: hold stage 1 constant across
+        models, and any difference in the animation is attributable to
+        planning and design rather than to how each model chose to redraw the
+        figure. It is also the practical route when stage 1a is the expensive
+        part -- a 16K-token TikZ document is far slower to generate locally
+        than the planning stages that follow it.
+        """
+        shared = self.cfg.raw.get("code_from")
+        if shared:
+            return _slug(str(shared))
+
         parts = [self._model_for("code_converter")]
         integrator = self.cfg.agents.get("raster_integrator")
         if integrator and integrator.option("enabled", False):
@@ -108,7 +122,13 @@ class CachePaths:
         return CODE_SUFFIX[self.cfg.target]
 
     def code(self, sample_id: str) -> Path:
-        return self.root / "code" / self._model_for("code_converter") / f"{sample_id}{self._ext}"
+        # `code_from` names a full stage-1 lineage (converter, or
+        # converter__integrator). Its first component is the converter, which
+        # is what this directory is keyed by.
+        shared = self.cfg.raw.get("code_from")
+        converter = (_slug(str(shared)).split("__")[0] if shared
+                     else self._model_for("code_converter"))
+        return self.root / "code" / converter / f"{sample_id}{self._ext}"
 
     def raw_output(self, agent: str, sample_id: str) -> Path:
         """Unparsed model output, kept for debugging extraction failures."""

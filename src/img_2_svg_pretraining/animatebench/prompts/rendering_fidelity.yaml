@@ -1,0 +1,50 @@
+# Rendering Fidelity: does the compiled reconstruction match the source figure?
+#
+# Rubric is the Source Fidelity Score of the design document (SS2.2.1), which
+# explicitly weights geometric and logical layout above surface styling: a
+# recolored but structurally faithful diagram is a better reconstruction than
+# a pixel-matched one whose containment is wrong.
+
+prompt: |
+  You are comparing two images of the same technical figure.
+
+  **Image 1** is the original figure. **Image 2** is a reconstruction of it, compiled from
+  generated drawing code. Rate how faithfully the reconstruction reproduces the original.
+
+  ### RATE ON FIVE AXES
+
+  1. **Semantic fidelity** -- is every element of the original present, undistorted, and drawn
+     as the right kind of thing (a box is a box, an arrow is an arrow, a label is a label)?
+  2. **Logical layout fidelity** -- is containment right? Does everything that sits inside a
+     block in the original sit inside the corresponding block here?
+  3. **Geometric layout fidelity** -- are relative positions and alignment preserved? Does the
+     flow read in the same direction?
+  4. **Style and colour fidelity** -- do colours, fonts and line styles match? Distinguish a
+     harmless palette difference from one that changes meaning (e.g. two groups that were
+     colour-coded distinctly now sharing a colour).
+  5. **Proportion and scale fidelity** -- are element sizes and aspect ratios consistent with
+     the original?
+
+  ### WEIGHTING
+
+  Weight **logical layout** and **geometric layout** most heavily. A reconstruction that gets
+  the structure right and the colours wrong is a good reconstruction. One that looks similar
+  but nests elements incorrectly is not.
+
+  Judge only what the reconstruction was trying to reproduce. Placeholder imagery replaced by a
+  cropped photograph of the original region is faithful, not a defect.
+
+  ### OUTPUT
+
+  Respond with ONLY a single JSON object -- no markdown fences, no commentary. `score` is the
+  overall fidelity from 0.0 (unrecognisable) to 1.0 (indistinguishable), reflecting the
+  weighting above.
+
+  {
+    "score": 0.82,
+    "breakdown": {
+      "semantic": 0.9, "logical_layout": 0.85, "geometric_layout": 0.8,
+      "style_colour": 0.7, "proportion_scale": 0.75
+    },
+    "notes": "All seven stages present and correctly ordered; the histogram is drawn with four bars instead of five."
+  }

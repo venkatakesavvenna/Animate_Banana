@@ -16,6 +16,40 @@ import re
 _DOCCLASS_OPTS_RE = re.compile(r"\\documentclass\[(.*?)\]\{standalone\}")
 _MULTIFRAME_RE = re.compile(r"\\multiframe\{(\d+)\}\{\s*iFrame\s*=\s*(\d+)\+1\s*\}\{")
 
+# `\opT1`, `\op2` -- a control sequence whose name ends in digits.
+_DIGIT_MACRO_RE = re.compile(r"\\([a-zA-Z]+)(\d+)\b")
+
+# Digits map to letters so the rewritten name stays a legal control sequence.
+_DIGIT_LETTERS = str.maketrans("0123456789", "abcdefghij")
+
+
+def fix_digit_macro_names(tikz_code: str) -> str:
+    """Rename macros whose names end in digits, e.g. `\\opT1` -> `\\opTb`.
+
+    A TeX control sequence is letters only, so `\\pgfmathsetmacro{\\opT1}{...}`
+    does not define `\\opT1` -- it defines `\\opT` and leaves a literal `1`.
+    Eight such lines therefore redefine one macro eight times, and the first
+    use fails with:
+
+        ! Use of \\opT doesn't match its definition.
+
+    Gemma 4 produced exactly this in both of its animations while Gemini (16)
+    and Qwen (4) produced none, so it is a per-model habit rather than a
+    prompt-wide problem, and cheap to repair at the source level.
+
+    The rename is applied uniformly to definitions and uses alike, so the
+    mapping stays consistent. `\\opT1` and `\\opTb` colliding would require the
+    source to already use both spellings, which would be broken anyway.
+    """
+    if not _DIGIT_MACRO_RE.search(tikz_code):
+        return tikz_code
+
+    def rename(match: re.Match) -> str:
+        name, digits = match.group(1), match.group(2)
+        return "\\" + name + digits.translate(_DIGIT_LETTERS)
+
+    return _DIGIT_MACRO_RE.sub(rename, tikz_code)
+
 
 def frame_count(tikz_code: str) -> int | None:
     """Number of frames declared by `\\multiframe`, if present."""
@@ -36,6 +70,21 @@ def to_multipage_pdf_source(tikz_code: str) -> str:
         tikz_code = tikz_code.replace(
             r"\documentclass{standalone}",
             r"\documentclass[multi=tikzpicture]{standalone}")
+
+    # 1b. `\usetikzlibrary` is defined by the tikz package, so a preamble that
+    # calls it without loading tikz first dies with "Undefined control
+    # sequence" and produces no PDF at all. Observed once in 14 generated
+    # animations -- a rare model slip, but one that costs the whole render, so
+    # it is cheaper to repair here than to lose the sample. Only ever *adds* a
+    # missing package; a preamble that already loads tikz is untouched.
+    if "usetikzlibrary" in tikz_code and not re.search(
+            r"\\usepackage(\[[^]]*\])?\{tikz\}", tikz_code):
+        tikz_code = re.sub(r"(\\documentclass[^\n]*\n)",
+                           r"\1\\usepackage{tikz}\n", tikz_code, count=1)
+
+    # 1c. Repair control sequences whose names end in digits, which TeX cannot
+    # define. See fix_digit_macro_names.
+    tikz_code = fix_digit_macro_names(tikz_code)
 
     # 2. Drop the animate machinery -- pages replace it.
     tikz_code = re.sub(r"\\usepackage\{animate\}\n?", "", tikz_code)

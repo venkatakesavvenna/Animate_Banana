@@ -120,6 +120,9 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="recompute even when the artifact is cached")
         p.add_argument("--gpu", default=None,
                        help="CUDA_VISIBLE_DEVICES for local backends")
+        p.add_argument("--style", default=None,
+                       help="override animation_style (artifacts are keyed by "
+                            "style, so runs of different styles never collide)")
         p.add_argument("--from", dest="from_stage", default=None, metavar="STAGE",
                        help="start at this stage, skipping earlier ones (inclusive)")
         p.add_argument("--to", dest="to_stage", default=None, metavar="STAGE",
@@ -199,6 +202,19 @@ def main() -> None:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
     cfg = _load(args.config)
+
+    if getattr(args, "style", None):
+        from .styles import STYLES
+        if args.style not in STYLES:
+            print(f"--style: unknown animation style '{args.style}'. "
+                  f"Known: {sorted(STYLES)}", file=sys.stderr)
+            raise SystemExit(2)
+        # The style is part of the sequence lineage, so overriding it sends
+        # this run to its own cache paths rather than overwriting another
+        # style's artifacts. `raw` is updated too, since the config
+        # fingerprint recorded in provenance is computed from it.
+        cfg.style = args.style
+        cfg.raw["animation_style"] = args.style
 
     if args.stage == "paths":
         from .cache import CachePaths

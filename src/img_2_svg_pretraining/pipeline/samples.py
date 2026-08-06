@@ -202,7 +202,11 @@ def load_sample(directory: Path) -> PaperSample | None:
         caption=_read_first(directory, "caption"),
         abstract=_read_first(directory, "abstract"),
         methods=_read_first(directory, "methods"),
-        title=_extract_title(arxiv_src) if arxiv_src else None,
+        # A plain title.txt wins over parsing the paper source: it is what the
+        # AnimateBench bundles ship (they carry no arxiv_src at all), and where
+        # both exist the explicit file is the more reliable of the two.
+        title=(_read_first(directory, "title")
+               or (_extract_title(arxiv_src) if arxiv_src else None)),
         arxiv_src=arxiv_src,
         extras=extras,
     )

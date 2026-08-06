@@ -42,6 +42,18 @@ def _load_file(path: Path) -> dict[str, str]:
     return {k: v for k, v in data.items() if isinstance(v, str)}
 
 
+def has_placeholders(template: str) -> bool:
+    """Whether a template expects `{name}` substitution at all.
+
+    Some prompts -- the AnimateBench sequencers among them -- are written as
+    standalone instructions that name their inputs in prose and expect them
+    appended rather than interpolated. Callers use this to tell the two
+    conventions apart, since rendering a placeholder-free template silently
+    supplies nothing.
+    """
+    return bool(_PLACEHOLDER_RE.search(template))
+
+
 def parse_ref(ref: str) -> tuple[str, str | None]:
     """Split `file.yaml#key` into (file, key). Key is optional."""
     if "#" in ref:

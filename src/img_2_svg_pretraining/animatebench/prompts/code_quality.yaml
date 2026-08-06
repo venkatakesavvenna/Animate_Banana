@@ -1,0 +1,71 @@
+# Code Quality review (design doc SS2.3.3), one variant per artifact.
+#
+# Two separate prompts rather than one parameterised prompt: the diagram
+# judges construction quality, the animation judges how the animation layer
+# was built on top, and the idioms that count as good differ between them.
+
+diagram: |
+  You are a code reviewer scoring generated TikZ diagram code for quality. Correctness is being
+  measured elsewhere -- judge how well the code is WRITTEN, not whether it draws the right thing.
+
+  ### CRITERIA
+
+  1. **Readability and conciseness** -- are element names meaningful? Is the structure clear?
+     Would another engineer find the thing they wanted to change?
+  2. **Idiomatic usage** -- does it use relative anchoring and positioning (`below=of foo`,
+     `fit`) rather than hand-computed absolute coordinates everywhere? Does it use `\foreach`
+     for repetition instead of copy-pasted near-identical lines? Are styles factored into
+     reusable definitions rather than repeated inline?
+  3. **Composite complexity** -- where a multi-part shape was drawn, was it built from a
+     reasonable number of sub-paths, or laboriously assembled where a simpler construction
+     would give the same visual result?
+
+  Absolute coordinates are not automatically bad: a diagram reconstructing a fixed source
+  layout has a legitimate reason to place things exactly. Penalise them when relative
+  positioning would have been clearer AND equally accurate.
+
+  ### THE CODE
+  {code}
+
+  ### OUTPUT
+
+  Respond with ONLY a single JSON object -- no markdown fences, no commentary. `score` runs from
+  0.0 (unmaintainable) to 1.0 (exemplary).
+
+  {
+    "score": 0.7,
+    "breakdown": {"readability": 0.8, "idiomatic": 0.6, "composite_complexity": 0.7},
+    "findings": ["seven near-identical node definitions that a \\foreach would collapse",
+                 "style options repeated inline on every node instead of a named style"]
+  }
+
+animation: |
+  You are a code reviewer scoring generated TikZ animation code for quality. Correctness and
+  whether it compiles are measured elsewhere -- judge how well the animation is WRITTEN.
+
+  ### CRITERIA
+
+  1. **Readability and conciseness** -- is the frame logic followable? Can a reader tell what
+     appears when?
+  2. **Simplest correct implementation** -- is the intended effect achieved directly, or through
+     workarounds? Flag redundant animation blocks, per-frame duplication of content that could
+     be gated once, and manual repetition where a loop over the frame counter would do.
+  3. **Overall complexity** -- is the animation layer proportionate to the effect it produces?
+
+  Gating element opacity on a frame counter is the idiomatic approach here and is not itself a
+  defect. Judge how cleanly that idiom is applied.
+
+  ### THE CODE
+  {code}
+
+  ### OUTPUT
+
+  Respond with ONLY a single JSON object -- no markdown fences, no commentary. `score` runs from
+  0.0 (unmaintainable) to 1.0 (exemplary).
+
+  {
+    "score": 0.65,
+    "breakdown": {"readability": 0.7, "simplicity": 0.6, "complexity": 0.65},
+    "findings": ["the full diagram body is repeated inside every frame rather than gated once",
+                 "opacity macros defined per frame instead of computed from the counter"]
+  }

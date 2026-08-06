@@ -123,6 +123,72 @@ def _zoom_pan(seq) -> list[str]:
     return violations
 
 
+# -- benchmark styles ------------------------------------------------------
+# The AnimateBench set names four styles ours did not have, with constraints
+# taken from Ruleset 3 of `prompts/animation_planner/tikz_sequencer.yaml`.
+# `sliding_bounding_box` and `hopping_bounding_box` are the bench's names for
+# what we called `sliding_bbox`; both are kept, because the bench's own
+# outputs and file names use its spelling and renaming ours would invalidate
+# every cached artifact.
+
+
+def _colour_pop(seq) -> list[str]:
+    # Same shape as progressive_reveal in the bench prompt (Rule A): all
+    # element types participate, paced one logical step at a time.
+    violations = _check_actions(seq, STYLES["colour_pop"].actions)
+    violations += _check_has_focus(seq)
+    return violations
+
+
+def _alpha_masking(seq) -> list[str]:
+    """Rule C: every element is animated exactly once -- the DAG constraint.
+
+    The bench prompt is explicit that a parent container is animated once when
+    first encountered and never re-listed while its children animate, because
+    the renderer persists the mask. Re-listing an element is therefore not a
+    stylistic wobble but a broken sequence.
+    """
+    violations = _check_actions(seq, STYLES["alpha_masking"].actions)
+    violations += _check_has_focus(seq)
+    seen: set[str] = set()
+    for nid, node in _steps(seq):
+        repeated = sorted(set(node.focus) & seen)
+        if repeated:
+            violations.append(
+                f"step '{nid}' re-animates element(s) already masked in: {repeated} "
+                f"(alpha_masking requires a strict DAG -- animate each element once)"
+            )
+        seen.update(node.focus)
+    return violations
+
+
+def _bounding_box(seq, style_name: str) -> list[str]:
+    """Rule B, shared by the hopping and sliding box styles.
+
+    Two hard constraints from the prompt: exactly one target per timestamp,
+    and no text or edges at all. We can only check the first mechanically --
+    the text/arrow buckets exist in the bench schema, not in ours -- so the
+    element-count rule is where this earns its keep.
+    """
+    violations = _check_actions(seq, STYLES[style_name].actions)
+    violations += _check_has_focus(seq)
+    for nid, node in _steps(seq):
+        if len(node.focus) > 1:
+            violations.append(
+                f"step '{nid}' focuses {len(node.focus)} elements; {style_name} "
+                f"animates exactly ONE block or node per timestamp"
+            )
+    return violations
+
+
+def _hopping_bounding_box(seq) -> list[str]:
+    return _bounding_box(seq, "hopping_bounding_box")
+
+
+def _sliding_bounding_box(seq) -> list[str]:
+    return _bounding_box(seq, "sliding_bounding_box")
+
+
 STYLES: dict[str, Style] = {
     "progressive_reveal": Style(
         name="progressive_reveal",
@@ -191,6 +257,78 @@ STYLES: dict[str, Style] = {
         actions=("zoom", "pan", "focus"),
         single_pass=False,
         check=_zoom_pan,
+    ),
+
+    # -- AnimateBench styles ----------------------------------------------
+    # Names and constraints follow the benchmark's own sequencer prompt
+    # (`prompts/animation_planner/tikz_sequencer.yaml`, Ruleset 3), so a run
+    # of ours is directly comparable with the reference outputs.
+    "colour_pop": Style(
+        name="colour_pop",
+        description=(
+            "The figure is present throughout in a muted state. Each step brings "
+            "its elements to full colour while the rest stay desaturated."
+        ),
+        directive=(
+            "- Include ALL element types: blocks, nodes, text labels and arrows.\n"
+            "- Reveal sequentially, one logical step at a time. Do not group many "
+            "elements into a single timestamp.\n"
+            "- A step is typically one major node or block, its label, and its "
+            "outgoing arrow."
+        ),
+        actions=("highlight", "emphasize", "focus", "reveal"),
+        single_pass=False,
+        check=_colour_pop,
+    ),
+    "alpha_masking": Style(
+        name="alpha_masking",
+        description=(
+            "An opacity mask lifts progressively. The renderer persists the mask, "
+            "so each element is unmasked exactly once and stays visible."
+        ),
+        directive=(
+            "- Include ALL element types, paced one logical step per timestamp.\n"
+            "- STRICT DAG: never list an element in more than one timestamp. A "
+            "parent block is animated ONCE, when first encountered.\n"
+            "- Do not re-include a parent container while animating its children; "
+            "the mask already persists. Its title text may still appear."
+        ),
+        actions=("reveal", "emphasize", "focus"),
+        single_pass=True,
+        check=_alpha_masking,
+    ),
+    "hopping_bounding_box": Style(
+        name="hopping_bounding_box",
+        description=(
+            "The figure stays fully visible. A single attention box jumps from one "
+            "element to the next, one element per step."
+        ),
+        directive=(
+            "- Animate ONLY main diagram nodes and blocks.\n"
+            "- The arrows and text arrays MUST stay empty for every timestamp.\n"
+            "- EXACTLY ONE element (one block or one node) per timestamp. Never "
+            "group several targets into one step."
+        ),
+        actions=("focus", "highlight"),
+        single_pass=False,
+        check=_hopping_bounding_box,
+    ),
+    "sliding_bounding_box": Style(
+        name="sliding_bounding_box",
+        description=(
+            "The figure stays fully visible. A single attention box travels smoothly "
+            "between elements, one element per step."
+        ),
+        directive=(
+            "- Animate ONLY main diagram nodes and blocks.\n"
+            "- The arrows and text arrays MUST stay empty for every timestamp.\n"
+            "- EXACTLY ONE element (one block or one node) per timestamp.\n"
+            "- Order steps so the box travels smoothly between neighbours rather "
+            "than jumping across the figure."
+        ),
+        actions=("focus", "highlight"),
+        single_pass=False,
+        check=_sliding_bounding_box,
     ),
 }
 

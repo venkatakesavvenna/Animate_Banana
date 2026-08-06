@@ -137,7 +137,16 @@ def detect_regions(backend: ChatBackend, image_path: Path, placeholders: list,
 
     data = extract_json(result.text)
     if not isinstance(data, dict):
-        return [], {"error": "detection response was not a JSON object"}
+        # Say *why* it could not be parsed, and keep the text. A truncated
+        # response and a genuinely malformed one need different fixes -- the
+        # first is a max_tokens problem (thinking models spend the budget
+        # before emitting any JSON), the second a prompt problem -- and
+        # without this the report said only "not a JSON object" for both.
+        from ..extract import looks_truncated
+        reason = ("response was truncated mid-JSON -- raise this agent's "
+                  "params.max_tokens" if looks_truncated(result.text or "")
+                  else "detection response was not a JSON object")
+        return [], {"error": reason, "raw": (result.text or "")[:2000]}
 
     image_size = Image.open(image_path).size
     known = {p.xml_id for p in placeholders}

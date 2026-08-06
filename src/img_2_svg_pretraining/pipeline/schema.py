@@ -40,6 +40,14 @@ class SequenceNode:
     # and so the benchmark can tell a planned step apart from a narrated one.
     narrative: str | None = None
 
+    # AnimateBench dialect only. `focus` flattens the four element buckets,
+    # which is what most consumers want; these keep the split so a sequence
+    # read from the bench schema can be written back to it unchanged. The
+    # bounding-box styles are defined partly by `text`/`arrows` being empty,
+    # so the distinction is load-bearing and cannot be recomputed from `focus`.
+    element_classes: dict[str, list[str]] = field(default_factory=dict)
+    timestamp: int | None = None
+
 
 @dataclass
 class AnimationSequence:
@@ -67,6 +75,11 @@ class AnimationSequence:
     def from_dict(cls, data: dict) -> "AnimationSequence":
         if not isinstance(data, dict):
             raise ValueError("animation sequence must be a JSON object")
+
+        # AnimateBench dialect, which the tikz_/svg_sequencer prompts emit.
+        if "sequence" in data and "nodes" not in data:
+            return cls._from_bench(data)
+
         nodes = []
         for raw in data.get("nodes") or []:
             if not isinstance(raw, dict) or "id" not in raw:
@@ -83,6 +96,13 @@ class AnimationSequence:
                 narration=raw.get("narration"),
                 duration=raw.get("duration"),
                 narrative=raw.get("narrative"),
+                # Present when this sequence originated in the bench dialect
+                # and was written back out in ours. Without reading them here,
+                # a save/load cycle silently drops the bucket split and the
+                # sequence stops being convertible back to bench format.
+                element_classes={k: [str(i) for i in v]
+                                 for k, v in (raw.get("element_classes") or {}).items()},
+                timestamp=raw.get("timestamp"),
             ))
         return cls(
             style=data.get("style") or "",
@@ -91,6 +111,115 @@ class AnimationSequence:
             traversal=[str(t) for t in (data.get("traversal") or [])],
             provenance=data.get("provenance") or {},
         )
+
+    # -- AnimateBench dialect --------------------------------------------
+    #
+    # The benchmark (and the tikz_/svg_sequencer prompts) express a sequence as
+    # a flat, time-indexed list:
+    #
+    #   {"metadata": {"traversal_order": ..., "animation_style": ...},
+    #    "sequence": [{"timestamp": 1, "narrative": ...,
+    #                  "to_be_animated": {"blocks": [], "nodes": [],
+    #                                     "text": [], "arrows": []}}]}
+    #
+    # Ours is a hierarchy plus a traversal order. The two carry the same
+    # information for our purposes: one timestamp becomes one node, and the
+    # union of its four element buckets becomes that node's `focus`. The
+    # buckets are kept verbatim in `element_classes` so converting back is
+    # lossless -- which matters because the bench's bounding-box styles are
+    # defined partly in terms of the text/arrows buckets being empty, and
+    # collapsing them to a flat focus list would erase that distinction.
+
+    _BUCKETS = ("blocks", "nodes", "text", "arrows")
+
+    @classmethod
+    def _from_bench(cls, data: dict) -> "AnimationSequence":
+        meta = data.get("metadata") or {}
+        traversal_style = meta.get("traversal_order")
+        if isinstance(traversal_style, str):
+            traversal_style = traversal_style.upper()
+
+        nodes: list[SequenceNode] = []
+        for index, step in enumerate(data.get("sequence") or [], 1):
+            if not isinstance(step, dict):
+                continue
+            timestamp = step.get("timestamp", index)
+            animated = step.get("to_be_animated") or {}
+
+            focus: list[str] = []
+            classes: dict[str, list[str]] = {}
+            depths: list[int] = []
+            for bucket in cls._BUCKETS:
+                ids = []
+                for entry in animated.get(bucket) or []:
+                    if isinstance(entry, dict) and entry.get("id") is not None:
+                        ids.append(str(entry["id"]))
+                        if isinstance(entry.get("depth"), int):
+                            depths.append(entry["depth"])
+                    elif isinstance(entry, str):
+                        ids.append(entry)
+                classes[bucket] = ids
+                focus.extend(ids)
+
+            nodes.append(SequenceNode(
+                id=f"t{timestamp}",
+                parent=None,
+                # The bench carries depth per element, not per step; the
+                # shallowest element is the step's own level.
+                depth=min(depths) if depths else 1,
+                focus=focus,
+                action="reveal",
+                narrative=step.get("narrative"),
+                duration=step.get("duration"),
+                element_classes=classes,
+                timestamp=timestamp,
+            ))
+
+        return cls(
+            style=meta.get("animation_style") or data.get("style") or "",
+            traversal_style=traversal_style,
+            nodes=nodes,
+            traversal=[n.id for n in nodes],
+            provenance=data.get("provenance") or {},
+        )
+
+    def to_bench_dict(self) -> dict:
+        """Serialize in the AnimateBench dialect, for direct comparison.
+
+        Steps come out in traversal order, which is playback order -- the same
+        thing the bench's `timestamp` means.
+        """
+        by_id = {n.id: n for n in self.nodes}
+        sequence = []
+        for index, node_id in enumerate(self.traversal, 1):
+            node = by_id.get(node_id)
+            if node is None:
+                continue
+            classes = node.element_classes or {}
+            if not classes:
+                # A sequence authored in our own dialect has no bucket
+                # information; everything it focuses is reported as a node,
+                # which is the bucket the renderer treats most generally.
+                classes = {"blocks": [], "nodes": list(node.focus),
+                           "text": [], "arrows": []}
+            sequence.append({
+                "timestamp": node.timestamp if node.timestamp is not None else index,
+                "narrative": node.narrative,
+                "to_be_animated": {
+                    bucket: [{"id": i} for i in classes.get(bucket, [])]
+                    for bucket in self._BUCKETS
+                },
+            })
+        return {
+            "metadata": {
+                "traversal_order": (self.traversal_style or "").lower() or None,
+                "animation_style": self.style,
+            },
+            "sequence": sequence,
+        }
+
+    def to_bench_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_bench_dict(), indent=indent)
 
     @classmethod
     def from_json(cls, text: str) -> "AnimationSequence":

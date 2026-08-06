@@ -119,3 +119,38 @@ def test_splice_ignores_unknown_ids():
     new, replaced = splice(code, {"nonexistent": "/a.png"})
     assert replaced == []
     assert new == code                     # nothing touched, not even graphicx
+
+
+# -- digit-suffixed macro names -------------------------------------------
+
+def test_fix_digit_macro_names_renames_definitions_and_uses():
+    """`\\opT1` is not a control sequence; TeX reads it as `\\opT` then `1`.
+
+    Gemma 4 emitted eight such definitions per animation, which all collapse
+    onto one macro and then fail with "Use of \\opT doesn't match its
+    definition". The rename must hit uses as well as definitions, or the two
+    stop referring to the same macro.
+    """
+    from img_2_svg_pretraining.pipeline.export.tikz_source import fix_digit_macro_names
+
+    src = (r"\pgfmathsetmacro{\opT1}{1}" "\n"
+           r"\pgfmathsetmacro{\opT2}{0}" "\n"
+           r"\node[opacity=\opT1] {a}; \node[opacity=\opT2] {b};")
+    out = fix_digit_macro_names(src)
+    assert r"\opT1" not in out and r"\opT2" not in out
+    assert out.count(r"\opTb") == 2      # 1 -> b, definition + use
+    assert out.count(r"\opTc") == 2      # 2 -> c
+
+
+def test_fix_digit_macro_names_handles_multi_digit():
+    from img_2_svg_pretraining.pipeline.export.tikz_source import fix_digit_macro_names
+
+    out = fix_digit_macro_names(r"\opT17")
+    assert out == r"\opTbh"              # 1 -> b, 7 -> h
+
+
+def test_fix_digit_macro_names_leaves_clean_source_alone():
+    from img_2_svg_pretraining.pipeline.export.tikz_source import fix_digit_macro_names
+
+    src = r"\node[opacity=\opacityA] {x}; \draw (0,0) -- (1,1);"
+    assert fix_digit_macro_names(src) == src
