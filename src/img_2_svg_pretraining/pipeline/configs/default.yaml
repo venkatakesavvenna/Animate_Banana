@@ -54,7 +54,11 @@ transmuter:
       # Detection should be reproducible; this is a localisation task, not a
       # generative one.
       temperature: 0.0
-      max_tokens: 4096
+      # One JSON entry per placeholder, and a thinking model spends budget on
+      # reasoning before emitting any of it. 4096 truncated mid-array on a
+      # 25-placeholder diagram (pipe00011), which yields zero regions rather
+      # than a partial answer -- the whole response fails to parse.
+      max_tokens: 16384
 
   # Stage 1c. Renders the code, compares it with the source figure, and
   # repairs what differs. Gated on rendering fidelity: code already scoring
@@ -65,7 +69,7 @@ transmuter:
   # where every `fit` block painted over its own children).
   diagram_critic:
     enabled: true
-    backend: gemini_pro
+    backend: gemini_flash
     prompt: diagram_transmuter/critic.yaml
     fidelity_threshold: 0.7
     max_rounds: 3

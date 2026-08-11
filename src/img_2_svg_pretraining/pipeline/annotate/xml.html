@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotate — Structure XML</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --panel2: #23272f; --line: #2f343d;
+    --fg: #e6e8ec; --dim: #949aa6; --accent: #6ea8fe; --ok: #4ec9a0;
+    --warn: #e0af68; --bad: #f07178;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  code, pre, textarea { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+           border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 13px; margin: 0; color: var(--dim);
+              text-transform: uppercase; letter-spacing: .04em; }
+  header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+
+  #wrap { display: flex; gap: 16px; padding: 16px 20px 60px; align-items: flex-start; }
+  /* The figure stays put while the XML pane scrolls -- reading the tree
+     against the picture is the whole task. */
+  #figcol { width: 380px; flex: none; position: sticky; top: 16px; }
+  #midcol { flex: 1; min-width: 320px; }
+  #editcol { flex: 1.2; min-width: 380px; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+          padding: 12px; margin-bottom: 12px; }
+  .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+             color: var(--dim); margin: 0 0 10px; font-weight: 600;
+             display: flex; justify-content: space-between; align-items: center; }
+  .card img { width: 100%; height: auto; border-radius: 4px; background: #fff; display: block; }
+
+  button, a.linkbtn { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+           border-radius: 5px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+           text-decoration: none; display: inline-block; }
+  button:hover, a.linkbtn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0c1118; border-color: var(--accent); font-weight: 600; }
+  button.promote { background: var(--ok); color: #0c1118; border-color: var(--ok); font-weight: 600; }
+  button:disabled { opacity: .4; cursor: default; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  pre.code, textarea.code { background: #101216; border: 1px solid var(--line);
+             border-radius: 6px; padding: 10px; overflow: auto; font-size: 11.5px;
+             white-space: pre; margin: 0; width: 100%; color: var(--fg); }
+  pre.code { max-height: 340px; }
+  textarea.code { min-height: 420px; resize: vertical; }
+
+  .hint { color: var(--dim); font-size: 11.5px; }
+  .banner { padding: 6px 10px; border-radius: 5px; font-size: 11.5px; margin-bottom: 10px; }
+  .banner.ok { background: rgba(78,201,160,.12); color: var(--ok); border: 1px solid rgba(78,201,160,.3); }
+  .banner.err { background: rgba(240,113,120,.12); color: var(--bad); border: 1px solid rgba(240,113,120,.3); }
+  .banner.warn { background: rgba(224,175,104,.12); color: var(--warn); border: 1px solid rgba(224,175,104,.3); }
+
+  /* tree */
+  .node { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+  .node select, .node input { background: #101216; color: var(--fg); border: 1px solid var(--line);
+            border-radius: 4px; padding: 3px 6px; font-size: 11.5px;
+            font-family: ui-monospace, monospace; }
+  .node select { color: var(--accent); }
+  .node input.id { width: 190px; }
+  .node input.ref { width: 130px; }
+  .node .del { color: var(--bad); border-color: transparent; background: none;
+               padding: 2px 6px; font-size: 14px; line-height: 1; }
+  .kids { margin-left: 18px; border-left: 1px solid var(--line); padding-left: 10px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tab { background: var(--panel2); border: 1px solid var(--line); border-radius: 5px;
+         padding: 4px 10px; font-size: 11.5px; cursor: pointer; color: var(--dim); }
+  .tab.active { color: var(--fg); border-color: var(--accent); }
+  .view { display: none; }
+  .view.active { display: block; }
+  .chip { display: inline-block; background: var(--panel2); border: 1px solid var(--line);
+          border-radius: 3px; padding: 1px 6px; margin: 2px 3px 0 0;
+          font-family: ui-monospace, monospace; font-size: 10.5px; }
+  .chip.add { color: var(--ok); border-color: var(--ok); }
+  .chip.rm { color: var(--bad); border-color: var(--bad); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="sampleId"></h1>
+  <a href="/">&larr; samples</a>
+  <a id="rastersLink" href="#">rasters</a>
+  <a id="seqLink" href="#">sequence &rarr;</a>
+  <span class="hint" id="lineage"></span>
+</header>
+
+<div id="wrap">
+  <div id="figcol">
+    <div class="card">
+      <h3>Source figure</h3>
+      <img id="figImg">
+    </div>
+    <div class="card">
+      <h3>Marked <span class="hint">critic overlay</span></h3>
+      <img id="markedImg">
+      <p class="hint" id="markedNote">Element ids drawn on the figure, from the last critic
+        round. Only exists once the sequence critic has run.</p>
+    </div>
+  </div>
+
+  <div id="midcol">
+    <div class="card">
+      <h3>Diagram code <span class="hint" id="codePath"></span></h3>
+      <pre class="code" id="codePane">loading…</pre>
+    </div>
+    <div class="card">
+      <h3>Copy prompt, to try a stronger model</h3>
+      <div class="hint" style="margin-bottom:8px">
+        The parser's exact request: prompt plus the code above. Paste it into another
+        model, then paste the XML it returns into the Raw tab.
+      </div>
+      <textarea class="code" id="promptBox" readonly style="min-height:120px"></textarea>
+      <div class="toolbar" style="margin-top:8px">
+        <button onclick="copyPrompt()">Copy prompt</button>
+        <a class="linkbtn" id="dlImg" download>Download image</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="editcol">
+    <div id="banner"></div>
+    <div class="card">
+      <h3>
+        <span>Structure XML <span class="hint" id="origin"></span></span>
+        <span class="toolbar">
+          <button class="primary" onclick="saveXml()">Save</button>
+          <button class="promote" id="promoteBtn" onclick="promoteXml()">Promote &rarr; xml</button>
+        </span>
+      </h3>
+      <div class="tabs">
+        <div class="tab active" id="tab-tree" onclick="showView('tree')">Tree</div>
+        <div class="tab" id="tab-raw" onclick="showView('raw')">Raw XML</div>
+      </div>
+      <div class="view active" id="view-tree">
+        <div id="tree"></div>
+        <div class="toolbar" style="margin-top:10px">
+          <button onclick="addRoot()">+ element at root</button>
+        </div>
+      </div>
+      <div class="view" id="view-raw">
+        <textarea class="code" id="rawBox" spellcheck="false"></textarea>
+      </div>
+      <div id="diff" style="margin-top:10px"></div>
+    </div>
+    <div id="renderPanel"></div>
+  </div>
+</div>
+
+<script src="/render_panel.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const SAMPLE = decodeURIComponent(location.pathname.split("/").pop());
+const SAMPLE_ID = SAMPLE;          // render_panel.js reads this
+let TREE = [];
+let CLASSES = [];
+let MODE = "tree";
+
+function esc(s) {
+  return (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+function banner(msg, kind) {
+  $("#banner").innerHTML = msg ? `<div class="banner ${kind || 'ok'}">${esc(msg)}</div>` : "";
+}
+
+async function boot() {
+  $("#sampleId").textContent = SAMPLE;
+  $("#figImg").src = `/api/image/${SAMPLE}`;
+  $("#dlImg").href = `/api/image/${SAMPLE}`;
+  $("#dlImg").setAttribute("download", SAMPLE + ".png");
+  $("#rastersLink").href = `/rasters/${SAMPLE}`;
+  $("#seqLink").href = `/sequence/${SAMPLE}`;
+  $("#renderPanel").innerHTML = renderPanelMarkup("diagram");
+
+  const m = new Image();
+  m.onload = () => { $("#markedImg").src = m.src; $("#markedNote").style.display = "none"; };
+  m.onerror = () => { $("#markedImg").style.display = "none"; };
+  m.src = `/api/marked/${SAMPLE}`;
+
+  const d = await (await fetch(`/api/xml/${SAMPLE}`)).json();
+  CLASSES = d.classes;
+  $("#lineage").textContent = d.xml_lineage;
+  $("#codePane").textContent = d.code || "(no diagram code — run Stage 1 first)";
+  $("#codePath").textContent = d.code_path ? d.code_path.split("/").slice(-2).join("/") : "";
+  $("#origin").textContent = d.from_human ? "(your edit)" : (d.has_machine_xml ? "(from parser)" : "(none yet)");
+  $("#promoteBtn").disabled = !d.annotation.stage2b.human_xml_path;
+
+  if (d.parse_error) {
+    banner(`stored XML is not well-formed: ${d.parse_error}`, "err");
+  } else if (!d.xml) {
+    banner("no structure XML yet — run 2b (parse) from the sequence screen", "warn");
+  }
+  TREE = d.tree || [];
+  $("#rawBox").value = d.xml || "";
+  renderTree();
+
+  const block = await (await fetch(`/api/copy-block/${SAMPLE}?agent=parser`)).json();
+  $("#promptBox").value = block.prompt || "";
+}
+
+async function showView(name) {
+  // Raw -> tree has to re-parse, and a malformed document must block the
+  // switch rather than being silently discarded. Parsing happens server-side
+  // so the tree is built by the same ElementTree the pipeline uses.
+  if (name === "tree" && MODE === "raw") {
+    const r = await fetch(`/api/parse-xml/${SAMPLE}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text: $("#rawBox").value}),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      banner(d.error || "cannot switch: raw XML is not well-formed", "err");
+      return;
+    }
+    TREE = d.tree;
+    renderTree();
+    banner("", "ok");
+  }
+  if (name === "raw" && MODE === "tree") {
+    // Serialize server-side too, so the textarea shows exactly what a save
+    // would write -- including recomputed depths and the parser's own layout.
+    const r = await fetch(`/api/serialize-xml/${SAMPLE}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tree: TREE}),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) $("#rawBox").value = d.text;
+  }
+  MODE = name;
+  ["tree", "raw"].forEach(v => {
+    $(`#view-${v}`).classList.toggle("active", v === name);
+    $(`#tab-${v}`).classList.toggle("active", v === name);
+  });
+}
+
+function renderTree() {
+  $("#tree").innerHTML = TREE.map((n, i) => nodeHtml(n, [i])).join("")
+    || '<div class="hint">No elements.</div>';
+}
+
+function nodeHtml(node, path) {
+  const p = path.join(",");
+  const opts = CLASSES.map(c =>
+    `<option value="${c}" ${c === node.tag ? "selected" : ""}>${c}</option>`).join("");
+  const refs = node.tag === "edge"
+    ? `<input class="ref" placeholder="source" value="${esc(node.source || "")}"
+              oninput="setField('${p}','source',this.value)">
+       <input class="ref" placeholder="target" value="${esc(node.target || "")}"
+              oninput="setField('${p}','target',this.value)">`
+    : "";
+  const kids = (node.children || []).map((c, i) => nodeHtml(c, path.concat(i))).join("");
+  return `
+    <div class="node">
+      <select onchange="setField('${p}','tag',this.value)">${opts}</select>
+      <input class="id" placeholder="id" value="${esc(node.id || "")}"
+             oninput="setField('${p}','id',this.value)">
+      ${refs}
+      <button class="del" title="add child" onclick="addChild('${p}')"
+              style="color:var(--accent)">+</button>
+      <button class="del" title="delete" onclick="delNode('${p}')">&times;</button>
+    </div>
+    ${kids ? `<div class="kids">${kids}</div>` : ""}`;
+}
+
+function at(path) {
+  let list = TREE, node = null;
+  for (const i of path) { node = list[i]; list = node.children || (node.children = []); }
+  return node;
+}
+function setField(p, key, value) { at(p.split(",").map(Number))[key] = value; }
+function addChild(p) {
+  const node = at(p.split(",").map(Number));
+  (node.children || (node.children = [])).push({tag: "child_node", id: "", children: []});
+  renderTree();
+}
+function addRoot() { TREE.push({tag: "block", id: "", children: []}); renderTree(); }
+function delNode(p) {
+  const path = p.split(",").map(Number), i = path.pop();
+  let list = TREE;
+  for (const j of path) list = list[j].children;
+  list.splice(i, 1);
+  renderTree();
+}
+
+async function saveXml() {
+  const body = MODE === "raw" ? {text: $("#rawBox").value, source: "pasted"}
+                              : {tree: TREE, source: "tree_edit"};
+  const r = await fetch(`/api/human-xml/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (!r.ok || !d.ok) { banner(d.error || `save failed (${r.status})`, "err"); return; }
+
+  const bits = [];
+  if (d.ids_added.length) bits.push(`${d.ids_added.length} id(s) added`);
+  if (d.ids_removed.length) bits.push(`${d.ids_removed.length} removed`);
+  banner(`saved${bits.length ? " — " + bits.join(", ") : ""}`, d.focus_conflicts.length ? "warn" : "ok");
+
+  $("#diff").innerHTML = [
+    d.ids_added.map(i => `<span class="chip add">+${esc(i)}</span>`).join(""),
+    d.ids_removed.map(i => `<span class="chip rm">&minus;${esc(i)}</span>`).join(""),
+    d.focus_conflicts.length
+      ? `<div class="banner warn" style="margin-top:8px">
+           ${d.focus_conflicts.length} removed id(s) are still focused by the current
+           sequence: ${d.focus_conflicts.map(esc).join(", ")} — those steps will fail
+           validation until the sequence is re-run or edited.</div>`
+      : "",
+  ].join("");
+  $("#promoteBtn").disabled = false;
+  boot();
+}
+
+async function promoteXml() {
+  if (!confirm("Promote your XML to paths.xml()? The pipeline will read it from there.")) return;
+  const r = await fetch(`/api/promote/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stage: "stage2b", author: "me"}),
+  });
+  const d = await r.json();
+  banner(r.ok && d.ok ? "promoted to xml" : `promote failed: ${d.error || r.status}`,
+         r.ok && d.ok ? "ok" : "err");
+}
+
+function copyPrompt() {
+  navigator.clipboard.writeText($("#promptBox").value).then(
+    () => banner("prompt copied", "ok"),
+    () => banner("clipboard blocked — select and copy manually", "err"));
+}
+
+boot();
+</script>
+</body>
+</html>

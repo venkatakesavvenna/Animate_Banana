@@ -33,7 +33,8 @@ from ..cache import write_text
 from ..runner import AgentContext, SampleOutcome, StageReport
 from ..samples import PaperSample
 from ..vision.gemini_boxes import detect_regions, dump, write_overlay
-from .tikz_rasters import RasterPlaceholder, find_placeholders, splice
+from .rasters import find_placeholders, splice
+from .tikz_rasters import RasterPlaceholder
 
 AGENT = "raster_integrator"
 
@@ -141,7 +142,7 @@ def _integrate(ctx: AgentContext, sample: PaperSample, code: str,
             # /code is the same tree on both.
             replacements[region.xml_id] = crop_path.resolve().as_posix()
 
-    new_code, replaced = splice(code, replacements)
+    new_code, replaced = splice(code, replacements, ctx.cfg.target)
     write_text(out, new_code)
 
     write_text(work_dir / "detections.json", json.dumps({
@@ -179,7 +180,7 @@ def run(cfg, samples: list[PaperSample], force: bool = False) -> StageReport:
                 sample.id, "failed", None, "no diagram code; run convert-code first"))
             continue
         code = code_path.read_text(encoding="utf-8")
-        placeholders = find_placeholders(code)
+        placeholders = find_placeholders(code, ctx.cfg.target)
         if not placeholders:
             # Nothing to integrate: copy through so downstream stages can
             # always read code_final without caring whether 1b applied.

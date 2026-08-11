@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotate — Rasters</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --panel2: #23272f; --line: #2f343d;
+    --fg: #e6e8ec; --dim: #949aa6; --accent: #6ea8fe; --ok: #4ec9a0;
+    --warn: #e0af68; --bad: #f07178;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+           border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 13px; margin: 0; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+  header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+  #wrap { padding: 20px; display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+  #renderWrap { padding: 0 20px 40px; }
+  #renderWrap img { width: 100%; height: auto; }
+
+  /* The stage leaves room around the figure so a box sitting slightly off the
+     image is still reachable -- clipping it at the image edge would make it
+     impossible to drag back into place. */
+  #stage { flex: 1; min-width: 420px; padding: 40px; background: var(--panel);
+           border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
+  #canvasHolder { position: relative; display: block; background: #fff;
+                  width: min(900px, 100%); margin: 0 auto; border-radius: 4px;
+                  overflow: visible; user-select: none; touch-action: none; }
+  #canvasHolder img { display: block; width: 100%; height: auto; border-radius: 4px; }
+
+  .box { position: absolute; border: 2px solid var(--accent); background: rgba(110,168,254,.08);
+         cursor: move; }
+  .box.dirty { border-color: var(--warn); background: rgba(224,175,104,.1); }
+  .box .tag { position: absolute; top: -18px; left: -2px; background: var(--accent); color: #0c1118;
+              font-size: 10px; padding: 1px 5px; border-radius: 3px 3px 0 0; white-space: nowrap;
+              font-family: ui-monospace, monospace; }
+  .box.dirty .tag { background: var(--warn); }
+  .handle { position: absolute; width: 10px; height: 10px; background: var(--accent);
+            border: 1px solid #0c1118; border-radius: 2px; }
+  .box.dirty .handle { background: var(--warn); }
+  .h-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+  .h-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+  .h-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+  .h-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+
+  #panel { width: 320px; flex: none; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+          padding: 12px; margin-bottom: 12px; }
+  .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+             color: var(--dim); margin: 0 0 10px; font-weight: 600; }
+  .rowitem { display: flex; justify-content: space-between; align-items: center;
+             padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .rowitem:last-child { border-bottom: none; }
+  .rowitem .id { font-family: ui-monospace, monospace; }
+  .rowitem.dirty .id { color: var(--warn); }
+  button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+           border-radius: 5px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0c1118; border-color: var(--accent); font-weight: 600; }
+  button.promote { background: var(--ok); color: #0c1118; border-color: var(--ok); font-weight: 600; }
+  button:disabled { opacity: .4; cursor: default; }
+  .banner { padding: 6px 10px; border-radius: 5px; font-size: 11.5px; margin-bottom: 10px; }
+  .banner.ok { background: rgba(78,201,160,.12); color: var(--ok); border: 1px solid rgba(78,201,160,.3); }
+  .banner.err { background: rgba(240,113,120,.12); color: var(--bad); border: 1px solid rgba(240,113,120,.3); }
+  .hint { color: var(--dim); font-size: 11.5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="sampleId"></h1>
+  <a href="/">&larr; back to samples</a>
+  <a href="#" id="reviewLink">D2C review &rarr;</a>
+  <a href="#" id="xmlLink">Structure XML &rarr;</a>
+</header>
+
+<div id="wrap">
+  <div id="stage"><div id="canvasHolder"><img id="figImg"></div></div>
+
+  <div id="panel">
+    <div id="banner"></div>
+    <div class="card">
+      <h3>Detection</h3>
+      <button id="runRasterizerBtn" onclick="runRasterizer(false)" style="width:100%">
+        Run 1b &rarr; 1c
+      </button>
+      <button id="rerunRasterizerBtn" onclick="runRasterizer(true)" style="width:100%;margin-top:6px;display:none">
+        Re-run (force)
+      </button>
+      <p class="hint">Detects each raster placeholder's region via one VLM call, then re-runs the
+        critic over the spliced result &mdash; 1b rewrites code_final from the raw converter output,
+        so a critique from before the splice no longer applies.</p>
+    </div>
+    <div class="card">
+      <h3>Raster placeholders</h3>
+      <div id="boxList"></div>
+      <p class="hint">Drag a box's body to move it, drag a corner to resize. Amber = adjusted from
+        the auto-detected box.</p>
+    </div>
+    <div class="card">
+      <button class="primary" id="insertAllBtn" onclick="insertAll()">Insert all boxes</button>
+      <button class="promote" id="promoteBtn" onclick="promote()" disabled style="margin-top:8px;width:100%">
+        Promote 1b &rarr; code_final
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Full width, below the editing row: the spliced render is the thing being
+     judged, and judging it against the figure needs the whole screen. -->
+<div id="renderWrap"><div id="renderPanel"></div></div>
+
+<script src="/render_panel.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const SAMPLE = location.pathname.split("/").pop();
+const SAMPLE_ID = SAMPLE;   // render_panel.js reads this
+$("#renderPanel").innerHTML = renderPanelMarkup("rasters");
+let BOXES = [];       // [{xml_id, label, auto_bbox, human_bbox, dirty}]
+let UNPLACED = [];    // xml_ids present in the code but never located
+let SCALE = 1;         // rendered px per image px
+let NATURAL = {w: 1, h: 1};
+
+function esc(s) {
+  return (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+function banner(msg, ok) {
+  $("#banner").innerHTML = `<div class="banner ${ok ? 'ok' : 'err'}">${esc(msg)}</div>`;
+}
+
+async function boot() {
+  $("#sampleId").textContent = SAMPLE;
+  $("#reviewLink").href = "/#" + SAMPLE;
+  $("#xmlLink").href = `/xml/${SAMPLE}`;
+  $("#figImg").src = `/api/image/${SAMPLE}`;
+
+  const d = await (await fetch(`/api/rasters/${SAMPLE}`)).json();
+  if (!d.available) {
+    $("#runRasterizerBtn").disabled = true;
+    $("#rerunRasterizerBtn").disabled = true;
+    banner(d.reason || "no raster data", false);
+    return;
+  }
+  BOXES = d.boxes.filter(b => b.human_bbox).map(b => ({
+    ...b,
+    dirty: JSON.stringify(b.auto_bbox) !== JSON.stringify(b.human_bbox),
+  }));
+  UNPLACED = d.boxes.filter(b => !b.human_bbox).map(b => b.xml_id);
+  $("#promoteBtn").disabled = !d.has_code_final_human;
+  $("#runRasterizerBtn").disabled = false;
+  $("#rerunRasterizerBtn").disabled = false;
+  $("#rerunRasterizerBtn").style.display = BOXES.length ? "" : "none";
+
+  const notes = [];
+  if (d.from_human_1a) notes.push("boxes parsed from your edited 1a");
+  if (d.undetected) notes.push(`${d.undetected} placeholder(s) not located — run 1b to place them`);
+  if (d.detection_error) notes.push(`detection error: ${d.detection_error}`);
+  if (notes.length) banner(notes.join(" · "), !d.detection_error);
+
+  $("#figImg").onload = layout;
+  if ($("#figImg").complete) layout();
+  window.addEventListener("resize", layout);
+}
+
+async function runRasterizer(force) {
+  banner(force ? "re-running rasterizer…" : "running rasterizer…", true);
+  $("#runRasterizerBtn").disabled = true;
+  $("#rerunRasterizerBtn").disabled = true;
+  const r = await fetch(`/api/run-rasterizer/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({force}),
+  });
+  const d = await r.json();
+  const done = (d.results || []).map(x => `${x.stage} ${x.status}: ${x.detail}`).join(" | ");
+  if (!r.ok || !d.ok) {
+    banner(`failed after [${done || "nothing"}] — ${d.error || r.status}`, false);
+    $("#runRasterizerBtn").disabled = false;
+    $("#rerunRasterizerBtn").disabled = false;
+    return;
+  }
+  banner(done, true);
+  await boot();
+}
+
+function layout() {
+  const img = $("#figImg");
+  NATURAL = {w: img.naturalWidth, h: img.naturalHeight};
+  const rect = img.getBoundingClientRect();
+  SCALE = rect.width / NATURAL.w;
+  renderBoxes();
+  renderList();
+}
+
+function renderBoxes() {
+  const holder = $("#canvasHolder");
+  [...holder.querySelectorAll(".box")].forEach(el => el.remove());
+  for (const b of BOXES) {
+    const el = document.createElement("div");
+    el.className = "box" + (b.dirty ? " dirty" : "");
+    el.dataset.xmlId = b.xml_id;
+    el.innerHTML = `<div class="tag">${esc(b.xml_id)}</div>
+      <div class="handle h-nw"></div><div class="handle h-ne"></div>
+      <div class="handle h-sw"></div><div class="handle h-se"></div>`;
+    holder.appendChild(el);
+    positionBox(el, b.human_bbox);
+    wireDrag(el, b);
+  }
+}
+
+function positionBox(el, bbox) {
+  const [x0, y0, x1, y1] = bbox;
+  el.style.left = (x0 * SCALE) + "px";
+  el.style.top = (y0 * SCALE) + "px";
+  el.style.width = ((x1 - x0) * SCALE) + "px";
+  el.style.height = ((y1 - y0) * SCALE) + "px";
+}
+
+function wireDrag(el, box) {
+  let mode = null, start = null, startBbox = null;
+
+  function begin(e, m) {
+    mode = m;
+    start = {x: e.clientX, y: e.clientY};
+    startBbox = [...box.human_bbox];
+    e.target.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+  }
+
+  el.addEventListener("pointerdown", e => {
+    if (e.target.classList.contains("handle")) return;
+    begin(e, "move");
+  });
+  el.querySelectorAll(".handle").forEach(h => {
+    h.addEventListener("pointerdown", e => {
+      const corner = [...h.classList].find(c => c.startsWith("h-")).slice(2);
+      begin(e, "resize-" + corner);
+    });
+  });
+
+  el.addEventListener("pointermove", e => {
+    if (!mode) return;
+    const dx = (e.clientX - start.x) / SCALE;
+    const dy = (e.clientY - start.y) / SCALE;
+    let [x0, y0, x1, y1] = startBbox;
+
+    if (mode === "move") {
+      const w = x1 - x0, h = y1 - y0;
+      x0 += dx; x1 += dx; y0 += dy; y1 += dy;
+      x0 = Math.max(0, Math.min(x0, NATURAL.w - w));
+      y0 = Math.max(0, Math.min(y0, NATURAL.h - h));
+      x1 = x0 + w; y1 = y0 + h;
+    } else {
+      if (mode.includes("w")) x0 = Math.min(x0 + dx, x1 - 4);
+      if (mode.includes("e")) x1 = Math.max(x1 + dx, x0 + 4);
+      if (mode.includes("n")) y0 = Math.min(y0 + dy, y1 - 4);
+      if (mode.includes("s")) y1 = Math.max(y1 + dy, y0 + 4);
+      x0 = Math.max(0, x0); y0 = Math.max(0, y0);
+      x1 = Math.min(NATURAL.w, x1); y1 = Math.min(NATURAL.h, y1);
+    }
+
+    box.human_bbox = [x0, y0, x1, y1];
+    positionBox(el, box.human_bbox);
+  });
+
+  function commit(e) {
+    if (!mode) return;
+    mode = null;
+    box.dirty = JSON.stringify(box.auto_bbox) !== JSON.stringify(box.human_bbox);
+    el.classList.toggle("dirty", box.dirty);
+    renderList();
+  }
+  el.addEventListener("pointerup", commit);
+  el.addEventListener("pointercancel", commit);
+}
+
+function renderList() {
+  const placed = BOXES.map(b => `
+    <div class="rowitem ${b.dirty ? 'dirty' : ''}">
+      <span class="id">${esc(b.xml_id)}</span>
+      <span>
+        <button onclick="insertOne('${esc(b.xml_id)}')">Insert</button>
+        ${b.dirty ? `<button onclick="resetOne('${esc(b.xml_id)}')">Reset</button>`
+                  : '<span class="hint" style="margin-left:6px">as detected</span>'}
+      </span>
+    </div>`).join("");
+
+  // Undetected placeholders are listed rather than dropped: they exist in the
+  // code and still need a box, and an unexplained gap between the placeholder
+  // count and the box count is what made a truncated detection look like a
+  // rendering bug.
+  const missing = UNPLACED.map(id => `
+    <div class="rowitem">
+      <span class="id" style="color:var(--dim)">${esc(id)}</span>
+      <span class="hint">not located</span>
+    </div>`).join("");
+
+  $("#boxList").innerHTML = (placed + missing)
+    || '<div class="hint">No raster placeholders in this sample.</div>';
+}
+
+function resetOne(xmlId) {
+  const b = BOXES.find(x => x.xml_id === xmlId);
+  b.human_bbox = [...b.auto_bbox];
+  b.dirty = false;
+  renderBoxes();
+  renderList();
+}
+
+async function insertOne(xmlId) {
+  const b = BOXES.find(x => x.xml_id === xmlId);
+  await doInsert({[xmlId]: b.human_bbox});
+}
+
+async function insertAll() {
+  // Every box, not just the edited ones: leaving a box alone is a judgement
+  // that the detection was already right, so it should be spliced too.
+  const edits = {};
+  for (const b of BOXES) edits[b.xml_id] = b.human_bbox;
+  if (Object.keys(edits).length === 0) { banner("no boxes to insert", false); return; }
+  await doInsert(edits);
+}
+
+async function doInsert(boxes) {
+  banner("inserting…", true);
+  const r = await fetch(`/api/insert-raster/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({boxes, author: "me"}),
+  });
+  const d = await r.json();
+  if (!r.ok || !d.ok) { banner(`insert failed: ${d.error || r.status}`, false); return; }
+  banner(`inserted into ${d.base}: ${d.replaced.join(", ")}`, true);
+  $("#promoteBtn").disabled = false;
+  doRender("rasters");   // the splice just changed; don't leave a stale render
+}
+
+async function promote() {
+  if (!confirm("Promote code_final_human into code_final? Stage 2 onward will use it.")) return;
+  const r = await fetch(`/api/promote/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stage: "stage1b", author: "me"}),
+  });
+  const d = await r.json();
+  if (!r.ok || !d.ok) { banner(`promote failed: ${d.error || r.status}`, false); return; }
+  banner("promoted stage1b to code_final", true);
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+# SVG pipeline configuration -- the first config to set `target: svg`.
+#
+# Everything downstream of `target` already routes on it: `extract_code`
+# dispatches to the SVG extractor, and `CachePaths._ext` writes `.svg` instead
+# of `.tex`, so SVG and TikZ artifacts coexist under the same lineage without
+# colliding.
+#
+# What this file exists to fix is prompt selection: no agent reads `cfg.target`
+# to choose a prompt, so the `svg_*` prompts were unreachable from any config
+# and had never been executed. Each agent below is pointed at its SVG variant.
+#
+# The pairs are NOT drop-in -- the keys differ per file:
+#   svg_diagram_to_code.yaml  -> `prompt`          (same shape as tikz)
+#   svg_parser.yaml           -> `prompt`          (same shape as tikz)
+#   svg_sequencer.yaml        -> `new_prompt` / `old_prompt`
+#   svg_designer.yaml         -> keyed by STYLE NAME, not `prompt`
+# which is why the designer's ref below carries a style key and has to be kept
+# in step with `animation_style`.
+
+dataset:
+  root: /code/data/test_benchmark
+  limit: 0                      # 0 = all samples
+
+animation_style: progressive_reveal
+target: svg                           # tikz | svg
+
+backends:
+  gemini_pro:
+    type: gemini
+    model: gemini-3-pro-preview
+    max_concurrency: 2
+
+  gemini_flash:
+    type: gemini
+    model: gemini-3.6-flash
+    max_concurrency: 4
+
+transmuter:
+  code_converter:
+    backend: gemini_flash
+    prompt: diagram_transmuter/svg_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  # Stage 1b. SVG raster placeholders are `<g data-class="raster_node">`
+  # wrapping a dashed `<rect>` plus a centred `<text>` label, so detection and
+  # splicing go through `transmuter/svg_rasters.py` rather than the TikZ regex.
+  raster_integrator:
+    enabled: true
+    backend: gemini_flash
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  # Stage 1c. Renders via cairosvg rather than latexmk; the critic prompt is
+  # target-neutral (it compares a render against the source figure), but the
+  # compile-repair path needed a target branch since its log scraping was
+  # LaTeX-shaped.
+  diagram_critic:
+    enabled: true
+    backend: gemini_flash
+    prompt: diagram_transmuter/critic.yaml
+    fidelity_threshold: 0.7
+    max_rounds: 3
+    params:
+      temperature: 0.1
+      max_tokens: 32768
+
+planner:
+  # Style- and target-independent: it plans from the figure and paper text,
+  # not from the code, so the TikZ prompt is the right one here.
+  strategizer:
+    backend: gemini_flash
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+    params:
+      temperature: 0.3
+
+  parser:
+    backend: gemini_flash
+    prompt: animation_planner/svg_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  # The native sequencer prompt is target-neutral -- it plans over the
+  # structure XML, which is the same schema either way. `svg_sequencer.yaml`
+  # is the AnimateBench dialect variant, kept for bench-comparable runs.
+  sequencer:
+    backend: gemini_flash
+    prompt: animation_planner/sequencer.yaml#prompt
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    backend: gemini_flash
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    # Set-of-Mark needs element pixel positions, which are extracted with a
+    # TikZ-specific regex. It degrades to "no overlay" rather than failing,
+    # but there is no point paying for the call, so it is off for SVG.
+    use_set_of_mark: false
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  narrative_writer:
+    backend: gemini_flash
+    prompt: animation_planner/narrative_writer.yaml
+    context_tier: full
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+animator:
+  # Keyed by style name, so this ref must track `animation_style` above.
+  # svg_designer.yaml offers: alpha_masking, progressive_reveal, colour_pop,
+  # elastic_pop, hopping_box, sliding_box.
+  designer:
+    backend: gemini_flash
+    prompt: animation_designer/svg_designer.yaml#progressive_reveal
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  critic:
+    backend: gemini_flash
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    # Already gated on `target == "tikz"` inside the agent, so this is a no-op
+    # for SVG; left true so flipping target back needs no edit here.
+    compile_check: true
+    params:
+      temperature: 0.2
+
+  # mp4 only to start: frames fall out of the mp4 path anyway, and pdf/pptx
+  # go through the TikZ-specific PDF chain that has no SVG counterpart yet.
+  exporter:
+    outputs: [mp4]
+    fps: 2
+    dpi: 300

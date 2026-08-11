@@ -86,21 +86,68 @@
   .mrow { border-bottom: 1px solid #23272f; padding: 5px 0; }
   .mrow:last-child { border-bottom: none; }
   .caveat { color: var(--warn); font-size: 10.5px; margin-top: 2px; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 4px; margin-left: auto; }
+  .tab { background: none; border: 1px solid var(--line); border-radius: 4px 4px 0 0;
+         color: var(--dim); padding: 6px 14px; cursor: pointer; font-size: 12.5px; }
+  .tab.active { background: var(--bg); color: var(--fg); border-bottom-color: var(--bg);
+                position: relative; top: 1px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* scoreboard table */
+  .tblwrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line);
+             border-radius: 6px; }
+  table.score { border-collapse: collapse; width: 100%; font-size: 12px; white-space: nowrap; }
+  table.score th, table.score td { padding: 5px 9px; border-bottom: 1px solid var(--line);
+                                    border-right: 1px solid #23272f; text-align: right; }
+  table.score th:first-child, table.score td:first-child { text-align: left;
+    position: sticky; left: 0; background: var(--panel); z-index: 1; }
+  table.score thead tr.grp th { text-align: center; color: var(--accent);
+    background: var(--panel2); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  table.score thead tr.grp th:first-child { background: var(--panel2); }
+  table.score thead tr.cols th { color: var(--dim); font-weight: 500; font-size: 10.5px; }
+  table.score td.val { font-family: ui-monospace, monospace; }
+  table.score td.val.good { color: var(--ok); }
+  table.score td.val.mid  { color: var(--warn); }
+  table.score td.val.bad  { color: var(--bad); }
+  table.score td.err { color: var(--bad); font-style: italic; text-align: left; }
+  table.score tbody tr:hover td { background: #20242c; }
+
+  /* presentation panel */
+  .talk .meta { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  .talk .meta a { color: var(--accent); }
+  .talk .transcript { margin-top: 8px; max-height: 160px; overflow-y: auto;
+    font-size: 11.5px; color: var(--dim); border-top: 1px solid var(--line); padding-top: 6px; }
 </style>
 
 <header>
   <h1>AnimateBench &mdash; reference vs pipeline</h1>
   <div class="controls">
-    <span><label>Sample</label><select id="sample" onchange="load()"></select></span>
-    <span><label>Style</label><select id="style" onchange="load()"></select></span>
+    <span><label>Sample</label><select id="sample" onchange="onSampleOrStyleChange()"></select></span>
+    <span><label>Style</label><select id="style" onchange="onSampleOrStyleChange()"></select></span>
     <button class="primary" onclick="playAll()">&#9654; play all</button>
     <button onclick="pauseAll()">&#10073;&#10073; pause</button>
     <button onclick="restartAll()">&#8635; restart</button>
     <span id="status" class="sub" style="margin:0"></span>
+    <div class="tabs">
+      <button class="tab active" id="tab-panels" onclick="showView('panels')">Panels</button>
+      <button class="tab" id="tab-table" onclick="showView('table')">Scoreboard</button>
+    </div>
   </div>
 </header>
 
-<main><div id="grid" class="grid"></div></main>
+<main>
+  <div id="view-panels" class="view active"><div id="grid" class="grid"></div></div>
+  <div id="view-table" class="view">
+    <div class="controls" style="margin-bottom:12px">
+      <span><label>Model</label><select id="tbl-model" onchange="loadTable()"></select></span>
+      <span id="tbl-status" class="sub" style="margin:0"></span>
+    </div>
+    <div class="tblwrap"><table class="score" id="scoreboard"></table></div>
+  </div>
+</main>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -112,7 +159,22 @@ async function boot() {
     .map(s => `<option value="${s.id}">${s.id}${s.has_reference ? "" : " (no reference)"}</option>`)
     .join("");
   $("#style").innerHTML = INDEX.styles.map(s => `<option value="${s}">${s}</option>`).join("");
+  $("#tbl-model").innerHTML = INDEX.models
+    .map(m => `<option value="${esc(m.label)}">${esc(m.label)}</option>`).join("");
   load();
+}
+
+function onSampleOrStyleChange() {
+  load();
+  if ($("#view-table").classList.contains("active")) loadTable();
+}
+
+function showView(name) {
+  ["panels", "table"].forEach(v => {
+    $(`#view-${v}`).classList.toggle("active", v === name);
+    $(`#tab-${v}`).classList.toggle("active", v === name);
+  });
+  if (name === "table") loadTable();
 }
 
 function panelCell(title, tag, videoUrl, stats, note, scriptId, metrics) {
@@ -192,6 +254,7 @@ function metricsBlock(metrics) {
   return `<div class="metrics">${metrics.suites.map(s => `
     <div class="msuite">
       <div class="h">${esc(SUITE_TITLE[s.suite] || s.suite)}</div>
+      ${s.error ? `<div class="caveat">${esc(s.error)}</div>` : ""}
       ${s.metrics.map(m => `
         <div class="mrow">
           <div class="metric">
@@ -228,6 +291,41 @@ function seqPills(seq) {
   ].join("");
 }
 
+async function loadTable() {
+  const model = $("#tbl-model").value, style = $("#style").value;
+  if (!model || !style) return;
+  $("#tbl-status").textContent = "loading…";
+  const d = await (await fetch(`/api/table/${encodeURIComponent(model)}/${style}`)).json();
+
+  const groups = d.groups;
+  const grpRow = ['<th rowspan="2">sample</th>'].concat(
+    groups.map(g => `<th colspan="${g.columns.length || 1}">${esc(g.label)}</th>`)).join("");
+  const colRow = groups.flatMap(g =>
+    g.columns.length
+      ? g.columns.map(c => `<th title="${esc(c.what || "")}">${esc(c.label || c.key)}</th>`)
+      : [`<th>&mdash;</th>`]).join("");
+
+  const bodyRows = d.rows.map(r => {
+    const cells = groups.map(g => {
+      const cell = r.cells[g.suite] || { error: null, values: {} };
+      if (cell.error)
+        return `<td class="err" colspan="${g.columns.length || 1}">${esc(cell.error)}</td>`;
+      if (!g.columns.length) return `<td>&mdash;</td>`;
+      return g.columns.map(c => {
+        const v = cell.values[c.key];
+        if (v === undefined) return `<td class="val">&mdash;</td>`;
+        return `<td class="val ${metricClass({ key: c.key, value: v, better: c.better })}">${fmtMetric(v)}</td>`;
+      }).join("");
+    }).join("");
+    return `<tr><td title="${esc(r.title || "")}">${esc(r.id)}</td>${cells}</tr>`;
+  }).join("");
+
+  $("#scoreboard").innerHTML =
+    `<thead><tr class="grp">${grpRow}</tr><tr class="cols">${colRow}</tr></thead>
+     <tbody>${bodyRows}</tbody>`;
+  $("#tbl-status").textContent = `${d.rows.length} sample(s) &middot; ${model} &middot; ${style}`;
+}
+
 async function load() {
   const id = $("#sample").value, style = $("#style").value;
   if (!id || !style) return;
@@ -244,7 +342,25 @@ async function load() {
       <div class="sub">${d.title || ""}</div>
     </div>`);
 
-  // 2. The benchmark's own animation for this style.
+  // 2. The author's real conference talk, when the bundle shipped one.
+  if (d.presentation) {
+    const p = d.presentation;
+    cells.push(`
+      <div class="cell talk">
+        <h3><span>Original presentation</span><span class="tag">author talk</span></h3>
+        ${p.video
+          ? `<video controls preload="metadata" src="${p.video}"></video>`
+          : `<div class="missing">no video in bundle</div>`}
+        <div class="meta">
+          ${esc(p.title || "")}<br>
+          ${p.uploader ? esc(p.uploader) + " &middot; " : ""}${p.duration ? Math.round(p.duration / 60) + " min" : ""}
+          ${p.url ? ` &middot; <a href="${p.url}" target="_blank" rel="noopener">source</a>` : ""}
+        </div>
+        ${p.transcript ? `<div class="transcript">${esc(p.transcript)}</div>` : ""}
+      </div>`);
+  }
+
+  // 3. The benchmark's own animation for this style.
   const revs = (d.reference.reviews || [])
     .filter(r => (r.questionnaire || []).length)
     .map(r => `v${r.version}: ${r.questionnaire.join(", ")}`).join(" · ");

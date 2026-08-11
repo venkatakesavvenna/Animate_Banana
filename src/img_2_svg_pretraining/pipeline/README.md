@@ -29,6 +29,16 @@ Stages 2a and 2b are independent — neither consumes the other — so their cac
 other's model and re-running one leaves the other's artifacts valid. The two lineages merge at
 the sequencer.
 
+Around the pipeline sit three things worth knowing about up front:
+
+- **[animatebench/](../animatebench/README.md)** scores a run against the reference bundle —
+  14 metrics, Gemini as judge where the property is not mechanical. See *Scoring a run*.
+- **Three viewers** (7860 / 8601 / 8602) browse a run, compare models with their metrics, and
+  show the Stage-1 critic before and after. See *Inspecting a run*.
+- **[docs/critic_evidence/](docs/critic_evidence/README.md)** records what the Stage-1 critic
+  actually fixed, with before/after renders. Three of five bench samples produced nothing at
+  all before that stage existed.
+
 ## Running
 
 Everything runs inside the container:
@@ -62,14 +72,27 @@ Common flags: `--config`, `--limit N`, `--only ID...`, `--force` (ignore cache),
 
 ## Inspecting a run
 
-Every intermediate artifact is on disk, so a finished run can be browsed after the fact:
+Every intermediate artifact is on disk, so a finished run can be browsed after the fact.
+Three viewers, on the three ports the container publishes:
+
+| Port | Viewer | Shows |
+|---|---|---|
+| 7860 | `inspector.app` | one run end to end: figure, reconstruction, sequence, frame scrubber, every stage's file |
+| 8601 | `inspector.compare` | ground truth + reference animation + one panel per model, **with that panel's AnimateBench metrics underneath** |
+| 8602 | `inspector.critic_ab` | Stage-1 critic before/after, with a swipe slider and the findings it diagnosed |
 
 ```bash
-python -m img_2_svg_pretraining.pipeline.inspector.app   # then open http://<host>:7860
+python -m img_2_svg_pretraining.pipeline.inspector.app        --port 7860
+python -m img_2_svg_pretraining.pipeline.inspector.compare    --port 8601
+python -m img_2_svg_pretraining.pipeline.inspector.critic_ab  --port 8602
 ```
 
-Source figure beside the reconstruction, the animation sequence step by step, a frame
-scrubber over the exported animation, and every stage's file. See
+All three cache config and sample discovery at startup, so **restart a viewer after adding
+samples or writing new eval records** — it will not pick them up live.
+
+On 8601 every metric carries its plain-English meaning, its direction (higher or lower is
+better), the design-doc section it comes from, and its caveats; the wording lives in
+`animatebench/descriptions.py`, beside the code that computes it. See
 [inspector/README.md](inspector/README.md).
 
 ## AnimateBench comparison
@@ -117,6 +140,27 @@ bounding-box styles are defined partly by `text` and `arrows` being empty at eve
 
 These prompts carry no `{placeholders}`: they name their inputs in prose, so the sequencer
 appends them as a labelled suffix instead of interpolating. See `planner/sequencer.py`.
+
+## Scoring a run
+
+`animatebench/` scores a run's artifacts against the reference bundle — 14 metrics across the
+four suites, Gemini as judge where the property is not mechanical:
+
+```bash
+python -m img_2_svg_pretraining.animatebench.run_eval all \
+  --config configs/bench_gemini.yaml --style progressive_reveal
+python -m img_2_svg_pretraining.animatebench.run_eval report --config ...   # aggregate table
+```
+
+`--no-judge` runs the programmatic half with no API key at all, which is most of the suite:
+compilation, depth consistency, DOVR, SSCR, TOF and AIF need no model.
+
+The hard part is that ground-truth and predicted element ids never match textually, and the
+correspondence is not 1:1 — the reference draws three RGB thumbnails where our pipeline emits
+one image. A judged, mechanically validated **alignment** (one call per sample, style
+independent) maps between them, and every GT-dependent metric contracts through that one
+artifact so PAA, edge P/R and coverage cannot disagree about element identity. Full design:
+[animatebench/README.md](../animatebench/README.md).
 
 ## Configuration
 
@@ -272,8 +316,7 @@ rediscovered, but they will OOM at bf16:
 | MiniMax-M3 | `MiniMaxAI/MiniMax-M3` | 854.2 GB | ~12 H100 |
 
 **Not wired** — no verified vision-capable repo id, and far past budget regardless: Kimi K2.5
-(~1T), Qwen3.5-397B-A17B (~800GB), DeepSeek-V4 Pro, Llama4-Scout. **Mistral-Large** is excluded
-on a second ground: it is text-only, and every stage of this pipeline sends an image.
+(~1T), Qwen3.5-397B-A17B (~800GB), DeepSeek-V4 Pro, Llama4-Scout.
 
 Run under `/environments/gemma4` (transformers 5.13.0), which was verified to carry all four
 runnable architectures — `glm4v_moe`, `qwen3_5_moe`, `qwen3_5`, `gemma4`. The main venv (5.3.0)
@@ -297,16 +340,34 @@ above one GPU. The cost is throughput: no continuous batching, so requests seria
 Under `cache/<dataset>/`, with paths encoding the producing models so configs never collide:
 
 ```
-code/<converter>/<id>.tex
+code/<converter>/<id>.tex                    1a
+rasters/<code-lineage>/<id>/{crop_*.png,detections.json}   1b
+code_final/<code-lineage>/<id>.tex           1b output
+code_reviewed/<code-lineage>/<id>.tex        1c output  + <id>.critic.json (what it fixed)
+
 strategy/<code-lineage>__<strategizer>__<tier>/<id>.json
 xml/<code-lineage>__<parser>/<id>.xml
 sequence/<merged-lineage>/<id>.json          + <id>.roundN.json per critic round
 sequence_final/<merged-lineage>/<id>.json
-animation_final/<...>/<id>.tex
-exports/<...>/<id>/{animation.pdf,.mp4,.gif,.pptx, frames/}
+sequence_narrated/<...>__<writer>__<tier>/<id>.json        2e
+narration/<...>/<id>.jsonl                   timestamp-indexed script, TTS input
+audio/<...>/<id>/audio_ts_N.wav              synthesized narration
+
+animation/<...>/<id>.tex                     3a
+animation_final/<...>/<id>.tex               3c
+exports/<...>/<id>/{animation.pdf,.mp4,.gif,.pptx, animation_narrated.mp4, frames/}
+
+evals/alignment/<config>/<id>.json           GT<->pred element alignment (style independent)
+evals/<config>/<style>/<id>/{stage1,xml,sequence,stage3}.json
+evals/report.{json,md}                       aggregate table
 raw/<agent>/<model>/<id>.txt                 unparsed output, for debugging extraction
 marked/<...>/<id>.roundN.png                 Set-of-Mark overlays
+renders/<hash>.png                           content-addressed compile cache
 ```
+
+`resolve_code` reads the newest usable version — `code_reviewed`, else `code_final`, else
+`code` — so enabling or disabling a Stage-1 agent changes what every later stage plans against
+without any of them knowing about it.
 
 ## Notes
 
@@ -406,21 +467,54 @@ Full findings, the LaTeX errors, and before/after renders:
 [docs/critic_evidence/](docs/critic_evidence/README.md). Interactive swipe comparison:
 `inspector/critic_ab.py` on port 8602.
 
-## Verified against live models (2026-07-29, gemini-3.6-flash)
+## Full run: 5 samples x 5 styles (2026-08-06, gemini-3.6-flash)
 
-**4 of 11 samples ran end to end**; the other 7 are blocked on API quota, not on pipeline
-defects. Stage 1a succeeded on all 11. For the 4 that completed: Stage 2 12/12 agent-runs,
-Stage 3 designer 3/3 and exporter 3/3, and every `animation_final` compiles.
+`bench_gemini.yaml` over the five AnimateBench samples, all five animation styles, with the
+Stage-1 critic on and both other critics off. 25 animations, 100 eval records.
 
-The block is the free tier's 20 requests/day/model. One sample through all stages costs ~7
-calls, so 11 samples need roughly 77 — well past the cap even pooled across keys. Finishing
-the set needs a paid tier, or local weights via the `hf_local` backend. Re-running is
-cheap: completed samples are cached and skipped, so a later run only pays for what is missing.
+**Stage 1 and Stage-2 XML are identical across all five styles**, because those artifacts are
+style-independent and produced once. That they come out identical is a consistency check on
+the cache lineage, not a coincidence:
 
-Both critics did real work on real output: the planner critic caught the sequencer inventing
-`traversal_style: "STEP_BY_STEP"` and corrected it to a schema-valid value; the animation
-critic repaired two non-compiling animations to compiling in one round each, driven by the
-latexmk log.
+| | 00002 | 00010 | 00041 | 00045 | 00137 |
+|---|---|---|---|---|---|
+| Diagram CSR | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Rendering fidelity | 0.580 | 0.850 | 0.760 | 0.820 | 0.770 |
+| Component accuracy | 1.000 | 0.976 | 1.000 | 0.937 | 0.986 |
+| PAA | 1.000 | 0.886 | 0.842 | 1.000 | 1.000 |
+| Match coverage | 1.000 | 0.921 | 1.000 | 0.900 | 0.808 |
+| Edge F1 | 1.000 | 0.833 | 0.938 | 0.757 | 0.826 |
 
-Frame counts track sequence length (8-node plan -> 8 frames; a denser figure -> 41), and the
-rendered frames show correct cumulative progressive reveal.
+**Per style**, where the differences actually live:
+
+| style | TOF | worst DOVR | animation CSR | mean AIF |
+|---|---|---|---|---|
+| `sliding_bounding_box` | **1.000** | — | **5/5** | 0.065 |
+| `hopping_bounding_box` | **1.000** | — | **5/5** | **0.036** |
+| `alpha_masking` | 0.815 | 0.143 | 2/5 | 0.95 |
+| `progressive_reveal` | 0.771 | 0.000 | 3/5 | 1.16 |
+| `colour_pop` | 0.770 | **0.857** | 2/5 | 1.98 |
+
+Element coverage recall is 1.000 nearly everywhere and SSCR passes 25/25.
+
+Three things this run establishes:
+
+- **The bounding-box styles dominate on every axis.** Their one-element-per-timestamp contract
+  leaves no room to violate traversal order (TOF 1.000 on all ten runs), and the box is a
+  genuinely additive overlay — AIF ~0.03-0.07 against 1.0-2.0 for the reveal styles, which
+  rewrite the diagram body to gate opacity per frame. Every one of their animations compiles.
+- **7 of 25 animations fail to compile**, all with the same Stage-3 designer defect (`! File
+  ended while scanning use of \pgffor@collectargument` — an unclosed `\foreach`), and all
+  concentrated in the reveal styles whose AIF is highest. This is what the *animation* critic
+  repairs, and it is disabled in this config. The Stage-1 critic demonstrates the pattern
+  works.
+- **Worst single planning result:** `colour_pop` on pipe00002, DOVR 0.857 — six of seven
+  arrows revealed before the elements they connect. The same sample scores 0.000 under
+  `progressive_reveal`, so this is the style interacting badly with the sequencer, not a bad
+  sample.
+
+DOVR is reported as `—` for the bounding-box styles rather than 0: those styles animate no
+arrows at all, so there is nothing to order-check, and a 0 would read as a passing grade for
+something never tested.
+
+Aggregate table: `cache/<dataset>/evals/report.md`.

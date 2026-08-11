@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotate — Sequence</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --panel2: #23272f; --line: #2f343d;
+    --fg: #e6e8ec; --dim: #949aa6; --accent: #6ea8fe; --ok: #4ec9a0;
+    --warn: #e0af68; --bad: #f07178;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  code, pre, textarea { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+           border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 13px; margin: 0; color: var(--dim);
+              text-transform: uppercase; letter-spacing: .04em; }
+  header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+  select { background: #101216; color: var(--fg); border: 1px solid var(--line);
+           border-radius: 5px; padding: 5px 8px; font: inherit; font-size: 12px; }
+
+  #wrap { display: flex; gap: 16px; padding: 16px 20px 60px; align-items: flex-start; }
+  #left { flex: 1.1; min-width: 380px; }
+  #right { flex: 1; min-width: 340px; position: sticky; top: 16px; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+          padding: 12px; margin-bottom: 12px; }
+  .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+             color: var(--dim); margin: 0 0 10px; font-weight: 600;
+             display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .card img, .card video { width: 100%; height: auto; border-radius: 4px;
+                           background: #fff; display: block; }
+
+  button, a.linkbtn { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+           border-radius: 5px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+           text-decoration: none; display: inline-block; }
+  button:hover, a.linkbtn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0c1118; border-color: var(--accent); font-weight: 600; }
+  button.promote { background: var(--ok); color: #0c1118; border-color: var(--ok); font-weight: 600; }
+  button:disabled { opacity: .4; cursor: default; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  textarea.code { background: #101216; border: 1px solid var(--line); border-radius: 6px;
+             padding: 10px; overflow: auto; font-size: 11.5px; white-space: pre;
+             margin: 0; width: 100%; color: var(--fg); min-height: 360px; resize: vertical; }
+
+  .hint { color: var(--dim); font-size: 11.5px; }
+  .banner { padding: 6px 10px; border-radius: 5px; font-size: 11.5px; margin-bottom: 10px; }
+  .banner.ok { background: rgba(78,201,160,.12); color: var(--ok); border: 1px solid rgba(78,201,160,.3); }
+  .banner.err { background: rgba(240,113,120,.12); color: var(--bad); border: 1px solid rgba(240,113,120,.3); }
+  .banner.warn { background: rgba(224,175,104,.12); color: var(--warn); border: 1px solid rgba(224,175,104,.3); }
+
+  .step { border-left: 2px solid var(--accent); padding: 5px 0 5px 10px; margin-bottom: 8px; }
+  .step .h { font-family: ui-monospace, monospace; font-size: 11.5px; }
+  .step .n { color: var(--dim); font-size: 12px; margin-top: 2px; font-style: italic; }
+  .chip { display: inline-block; background: var(--panel2); border: 1px solid var(--line);
+          border-radius: 3px; padding: 1px 6px; margin: 2px 3px 0 0;
+          font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--accent); }
+  .chip.bad { color: var(--bad); border-color: var(--bad); }
+  ul.problems { margin: 6px 0 0; padding-left: 18px; color: var(--warn); font-size: 11.5px; }
+  #scrub { width: 100%; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="sampleId"></h1>
+  <a href="/">&larr; samples</a>
+  <a id="xmlLink" href="#">&larr; xml</a>
+  <label class="hint">style
+    <select id="styleSel" onchange="setStyle(this.value)"></select>
+  </label>
+  <span class="hint" id="lineage"></span>
+</header>
+
+<div id="wrap">
+  <div id="left">
+    <div id="banner"></div>
+
+    <div class="card">
+      <h3>Run</h3>
+      <div class="toolbar">
+        <button onclick="runStages(['2a','2b','2c','2d'], true)">Plan (2a&rarr;2d)</button>
+        <button onclick="runStages(['2c','2d'], true)">Re-sequence (2c&rarr;2d)</button>
+        <button onclick="runStages(['2d'], true)">Re-critique (2d)</button>
+        <button class="primary" onclick="runStages(['3a','3b','3c'], true)">Render video (3a&rarr;3c)</button>
+      </div>
+      <p class="hint" id="runNote">Rendering compiles the animation and rasterizes every frame;
+        it can take minutes but makes no API calls of its own.</p>
+    </div>
+
+    <div class="card">
+      <h3>
+        <span>Sequence <span class="hint" id="origin"></span></span>
+        <span class="toolbar">
+          <button onclick="validateNow()">Validate</button>
+          <button class="primary" onclick="saveSeq()">Save</button>
+          <button class="promote" id="promoteBtn" onclick="promoteSeq()">Promote &rarr; final</button>
+        </span>
+      </h3>
+      <div id="validation"></div>
+      <textarea class="code" id="seqBox" spellcheck="false"
+                oninput="scheduleValidate()"></textarea>
+    </div>
+
+    <div class="card">
+      <h3>Steps <span class="hint" id="stepCount"></span></h3>
+      <div id="steps"><div class="hint">No sequence yet.</div></div>
+    </div>
+  </div>
+
+  <div id="right">
+    <div class="card">
+      <h3>Video <span class="hint" id="videoNote"></span></h3>
+      <video id="vid" controls preload="metadata"></video>
+      <div id="noVideo" class="hint">Not rendered yet.</div>
+    </div>
+    <div class="card" id="framesCard" style="display:none">
+      <h3>Frames <span class="hint" id="frameLabel"></span></h3>
+      <img id="frameImg">
+      <input type="range" id="scrub" min="0" value="0" oninput="showFrame(+this.value)">
+    </div>
+    <div class="card">
+      <h3>Marked <span class="hint">critic overlay</span></h3>
+      <img id="markedImg">
+      <div class="hint" id="markedNote">Appears once the sequence critic has run.</div>
+    </div>
+    <div class="card">
+      <h3>Source figure</h3>
+      <img src="" id="figImg">
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const SAMPLE = decodeURIComponent(location.pathname.split("/").pop());
+const SAMPLE_ID = SAMPLE;
+let FRAMES = 0, VALIDATE_TIMER = null;
+// Focus ids the validator reported as absent from the XML, so the step list
+// can mark exactly which chip is broken rather than just counting problems.
+let MISSING = new Set();
+
+function esc(s) {
+  return (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+function banner(msg, kind) {
+  $("#banner").innerHTML = msg ? `<div class="banner ${kind || 'ok'}">${esc(msg)}</div>` : "";
+}
+
+async function boot() {
+  $("#sampleId").textContent = SAMPLE;
+  $("#xmlLink").href = `/xml/${SAMPLE}`;
+  $("#figImg").src = `/api/image/${SAMPLE}`;
+
+  const d = await (await fetch(`/api/sequence-state/${SAMPLE}`)).json();
+  $("#styleSel").innerHTML = d.styles.map(s =>
+    `<option ${s === d.style ? "selected" : ""}>${esc(s)}</option>`).join("");
+  $("#lineage").textContent = d.sequence_lineage;
+  $("#origin").textContent = d.origin ? `(${d.origin})` : "(none yet)";
+  $("#seqBox").value = d.sequence || "";
+  $("#promoteBtn").disabled = !d.annotation.stage2d.human_sequence_path;
+
+  renderValidation(d.validation);
+  renderSteps(d.sequence);
+
+  // Video + frames
+  if (d.has_video) {
+    $("#vid").src = `/api/video/${SAMPLE}?t=${Date.now()}`;
+    $("#vid").style.display = "";
+    $("#noVideo").style.display = "none";
+  } else {
+    $("#vid").style.display = "none";
+    $("#noVideo").style.display = "";
+  }
+  FRAMES = d.frames;
+  $("#framesCard").style.display = FRAMES ? "" : "none";
+  if (FRAMES) { $("#scrub").max = FRAMES - 1; showFrame(0); }
+
+  const m = new Image();
+  m.onload = () => { $("#markedImg").src = m.src; $("#markedNote").style.display = "none"; };
+  m.onerror = () => { $("#markedImg").style.display = "none"; };
+  m.src = `/api/marked/${SAMPLE}?t=${Date.now()}`;
+
+  if (d.other_styles.length) {
+    banner(`This sample also has work under: ${d.other_styles.join(", ")} — `
+           + `switch style to see it. Nothing was lost; artifacts are per-style.`, "warn");
+  }
+}
+
+function showFrame(i) {
+  $("#frameImg").src = `/api/frame/${SAMPLE}/${i}`;
+  $("#frameLabel").textContent = `${i + 1} / ${FRAMES}`;
+}
+
+function renderSteps(text) {
+  let seq;
+  try { seq = JSON.parse(text); } catch (e) { $("#steps").innerHTML =
+    '<div class="hint">Sequence is not valid JSON.</div>'; return; }
+  const nodes = seq.nodes || [], byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const order = (seq.traversal && seq.traversal.length) ? seq.traversal : nodes.map(n => n.id);
+  $("#stepCount").textContent = `${order.length} step(s) · ${seq.style || ""}`;
+  $("#steps").innerHTML = order.map((id, i) => {
+    const n = byId[id];
+    if (!n) return `<div class="step"><div class="h">${i + 1}. ${esc(id)}
+                    <span class="chip bad">not in nodes</span></div></div>`;
+    const chips = (n.focus || []).map(f =>
+      `<span class="chip ${MISSING.has(f) ? "bad" : ""}">${esc(f)}</span>`).join("");
+    return `<div class="step">
+      <div class="h">${i + 1}. ${esc(n.id)} · ${esc(n.action || "")}
+           · d${n.depth ?? ""}${n.duration ? " · " + n.duration + "s" : ""}</div>
+      <div>${chips}</div>
+      ${n.narration ? `<div class="n">${esc(n.narration)}</div>` : ""}
+    </div>`;
+  }).join("") || '<div class="hint">No steps.</div>';
+}
+
+function renderValidation(v) {
+  if (!v) { $("#validation").innerHTML = ""; MISSING = new Set(); return; }
+  MISSING = new Set();
+  for (const p of v.problems || []) {
+    for (const m of p.matchAll(/'([\w:.\-]+)'/g)) MISSING.add(m[1]);
+  }
+  const dialect = v.dialect === "bench"
+    ? `<div class="banner warn">Read as the AnimateBench dialect — saving converts it to the
+         native form and drops parent links. Paste native JSON to keep them.</div>` : "";
+  if (v.ok) {
+    $("#validation").innerHTML = dialect +
+      `<div class="banner ok">valid · ${v.steps} step(s) · ${esc(v.style || "")}</div>`;
+    return;
+  }
+  $("#validation").innerHTML = dialect +
+    `<div class="banner err">${(v.problems || []).length} problem(s)</div>
+     <ul class="problems">${(v.problems || []).map(p => `<li>${esc(p)}</li>`).join("")}</ul>`;
+}
+
+function scheduleValidate() {
+  clearTimeout(VALIDATE_TIMER);
+  VALIDATE_TIMER = setTimeout(validateNow, 500);
+}
+
+async function validateNow() {
+  const r = await fetch(`/api/validate-sequence/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({text: $("#seqBox").value}),
+  });
+  const v = await r.json();
+  renderValidation(v);
+  renderSteps($("#seqBox").value);
+}
+
+async function saveSeq() {
+  const r = await fetch(`/api/human-sequence/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({text: $("#seqBox").value}),
+  });
+  const d = await r.json();
+  if (!r.ok || !d.ok) {
+    banner(`save failed: ${(d.problems || []).join("; ") || d.error || r.status}`, "err");
+    return;
+  }
+  const bad = (d.validation.problems || []).length;
+  banner(bad ? `saved with ${bad} outstanding problem(s)` : "saved", bad ? "warn" : "ok");
+  boot();
+}
+
+async function promoteSeq() {
+  if (!confirm("Promote your sequence to sequence_final? Stage 3 will animate it.")) return;
+  const r = await fetch(`/api/promote/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stage: "stage2d", author: "me"}),
+  });
+  const d = await r.json();
+  banner(r.ok && d.ok ? "promoted to sequence_final" : `promote failed: ${d.error || r.status}`,
+         r.ok && d.ok ? "ok" : "err");
+}
+
+async function setStyle(style) {
+  await fetch(`/api/style/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({style}),
+  });
+  banner(`style is now ${style}`, "ok");
+  boot();
+}
+
+async function runStages(stages, force) {
+  const buttons = [...document.querySelectorAll("button")];
+  buttons.forEach(b => b.disabled = true);
+  const started = Date.now();
+  const tick = setInterval(() => {
+    banner(`running ${stages.join(" → ")}… ${Math.round((Date.now() - started) / 1000)}s`, "ok");
+  }, 1000);
+  try {
+    const r = await fetch(`/api/run-stage2/${SAMPLE}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({stages, force}),
+    });
+    const d = await r.json();
+    const done = (d.results || []).map(x => `${x.stage} ${x.status}`).join(", ");
+    if (!r.ok || !d.ok) {
+      banner(`failed after [${done || "nothing"}] — ${d.error || r.status}`, "err");
+    } else if ((d.unresolved || []).length) {
+      // The critic wrote its best attempt without converging; that is a real
+      // outcome, not a success.
+      banner(`done: ${done} — unresolved: ${d.unresolved.join(", ")}`, "warn");
+    } else {
+      banner(`done: ${done}`, "ok");
+    }
+  } finally {
+    clearInterval(tick);
+    buttons.forEach(b => b.disabled = false);
+    boot();
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

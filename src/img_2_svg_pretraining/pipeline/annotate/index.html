@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotate — Stage 1</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --panel2: #23272f; --line: #2f343d;
+    --fg: #e6e8ec; --dim: #949aa6; --accent: #6ea8fe; --ok: #4ec9a0;
+    --warn: #e0af68; --bad: #f07178;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); display: flex; height: 100vh;
+         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  code, pre, textarea { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  #side { width: 260px; flex: none; background: var(--panel); border-right: 1px solid var(--line);
+          display: flex; flex-direction: column; }
+  #side h1 { font-size: 13px; margin: 0; padding: 14px 16px; border-bottom: 1px solid var(--line);
+             letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  #list { overflow-y: auto; flex: 1; }
+  .item { padding: 10px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:hover { background: var(--panel2); }
+  .item.active { background: var(--panel2); box-shadow: inset 3px 0 0 var(--accent); }
+  .item .id { font-family: ui-monospace, monospace; font-size: 12px; }
+  .item .sub { font-size: 11px; color: var(--dim); margin-top: 3px; display: flex; gap: 6px; }
+  .status { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px;
+            background: var(--panel2); border: 1px solid var(--line); color: var(--dim); }
+  .status.reviewed { color: var(--ok); border-color: var(--ok); }
+  .status.pending { color: var(--dim); }
+
+  #main { flex: 1; overflow-y: auto; padding: 20px 24px 60px; }
+  #empty { color: var(--dim); padding: 40px; text-align: center; }
+  h2 { font-size: 16px; margin: 0 0 4px; }
+  .sub2 { color: var(--dim); font-size: 12px; margin-bottom: 18px; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  a.linkbtn, button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+           border-radius: 5px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+           text-decoration: none; display: inline-block; }
+  button:hover, a.linkbtn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0c1118; border-color: var(--accent); font-weight: 600; }
+  button.promote { background: var(--ok); color: #0c1118; border-color: var(--ok); font-weight: 600; }
+  button:disabled { opacity: .4; cursor: default; }
+
+  .row { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 18px; flex-wrap: wrap; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+          padding: 12px; flex: 1; min-width: 320px; }
+  .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+             color: var(--dim); margin: 0 0 10px; font-weight: 600; display: flex;
+             justify-content: space-between; align-items: center; }
+  .card img { max-width: 100%; border-radius: 4px; background: #fff; display: block; }
+
+  pre.code, textarea.code { background: #101216; border: 1px solid var(--line); border-radius: 6px;
+             padding: 12px; overflow: auto; max-height: 440px; font-size: 11.5px;
+             white-space: pre; margin: 0; width: 100%; color: var(--fg); resize: vertical; }
+  textarea.code { min-height: 300px; }
+
+  .comments { margin-top: 10px; }
+  .comment { border-left: 2px solid var(--accent); padding: 6px 0 6px 10px; margin-bottom: 8px; font-size: 12px; }
+  .comment .meta { color: var(--dim); font-size: 10.5px; margin-bottom: 2px; }
+  #commentBox { width: 100%; min-height: 60px; background: #101216; color: var(--fg);
+                border: 1px solid var(--line); border-radius: 5px; padding: 8px; font-size: 12px;
+                font-family: inherit; }
+  .hint { color: var(--dim); font-size: 11.5px; }
+  #renderPanel img { width: 100%; height: auto; }
+  .banner { padding: 6px 10px; border-radius: 5px; font-size: 11.5px; margin-bottom: 10px; }
+  .banner.ok { background: rgba(78,201,160,.12); color: var(--ok); border: 1px solid rgba(78,201,160,.3); }
+  .banner.err { background: rgba(240,113,120,.12); color: var(--bad); border: 1px solid rgba(240,113,120,.3); }
+</style>
+</head>
+<body>
+
+<div id="side">
+  <h1>Stage 1 &middot; D2C review</h1>
+  <div id="list"></div>
+</div>
+
+<div id="main"><div id="empty">Pick a sample.</div></div>
+
+<script src="/render_panel.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+let CURRENT = null;
+let SAMPLE_ID = null;   // render_panel.js reads this
+let TEMP = "";          // temperature box survives render()'s rebuild of #main
+
+async function boot() {
+  const d = await (await fetch("/api/samples")).json();
+  $("#list").innerHTML = d.samples.map(s => `
+    <div class="item" data-id="${s.id}" onclick="open_('${s.id}')">
+      <div class="id">${esc(s.id)}</div>
+      <div class="sub">
+        <span class="status ${s.stage1a_status !== 'unreviewed' ? 'reviewed' : 'pending'}">1a: ${s.stage1a_status}</span>
+        <span class="status ${s.stage1b_status !== 'unreviewed' ? 'reviewed' : 'pending'}">1b: ${s.stage1b_status}</span>
+      </div>
+    </div>`).join("");
+}
+
+function esc(s) {
+  return (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+async function open_(id) {
+  CURRENT = id;
+  SAMPLE_ID = id;
+  [...document.querySelectorAll(".item")].forEach(el => el.classList.toggle("active", el.dataset.id === id));
+  await render();
+}
+
+async function render() {
+  const d = await (await fetch(`/api/sample/${CURRENT}`)).json();
+  const ann = d.annotation;
+  const bestCode = d.human_code || d.code;
+
+  $("#main").innerHTML = `
+    <h2>${esc(d.id)}</h2>
+    <div class="sub2">${esc(d.title || "")} &middot; lineage: ${esc(d.code_lineage)}</div>
+    <div class="toolbar">
+      <button onclick="runStages(['1a','1b','1c'], true)">Run full Stage 1 (1a&rarr;1b&rarr;1c)</button>
+      <button onclick="runStages(['1b','1c'], true)">Re-run 1b&rarr;1c</button>
+      <label class="hint" style="display:flex;align-items:center;gap:6px">
+        temp
+        <input id="tempBox" type="number" step="0.1" min="0" max="2" placeholder="config"
+               value="${TEMP}"
+               title="Sampling temperature for 1a/1c. Blank uses the config value. A different value is also a different cache key, which is what makes a re-run actually resample."
+               style="width:70px;background:#101216;color:var(--fg);border:1px solid var(--line);
+                      border-radius:5px;padding:5px 6px;font:inherit;font-size:12px">
+      </label>
+      <a class="linkbtn" href="/rasters/${CURRENT}">Rasters &rarr;</a>
+      <a class="linkbtn" href="/xml/${CURRENT}">Structure XML &rarr;</a>
+      <a class="linkbtn" href="/sequence/${CURRENT}">Sequence &rarr;</a>
+      <button class="promote" ${!ann.stage1a.human_code_path ? "disabled" : ""} onclick="promote('stage1a')">
+        Promote 1a &rarr; code_final
+      </button>
+    </div>
+    ${stageStrip(d.stages)}
+    <div id="banner"></div>
+
+    <!-- Stacked and full width rather than side by side: comparing the render
+         against the source is the whole judgement, and two 420px columns made
+         both too small to see what differs. -->
+    <div class="card" style="margin-bottom:16px">
+      <h3>Source figure</h3>
+      <img src="/api/image/${CURRENT}" style="width:100%;height:auto">
+    </div>
+    <div id="renderPanel" style="margin-bottom:16px"></div>
+
+    <div class="row">
+      <div class="card">
+        <h3>Generated code (Stage 1a, pre-critic) ${d.human_code ? '<span style="color:var(--ok);font-weight:400">(human override active)</span>' : ''}</h3>
+        <pre class="code">${esc(bestCode || "(none yet — click Generate)")}</pre>
+      </div>
+      <div class="card">
+        <h3>Copy prompt + image, to try a stronger model</h3>
+        <div style="font-size:11.5px;color:var(--dim);margin-bottom:8px">
+          1. Copy the prompt below. 2. Download the source image. 3. Paste both into another
+          model's chat (e.g. Gemini Pro). 4. Paste the improved code back on the right.
+        </div>
+        <textarea class="code" id="promptBox" readonly style="min-height:160px"></textarea>
+        <div class="toolbar" style="margin-top:8px">
+          <button onclick="copyPrompt()">Copy prompt</button>
+          <a class="linkbtn" href="/api/image/${CURRENT}" download="${CURRENT}.png">Download image</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="card">
+        <h3>Paste improved code back</h3>
+        <textarea class="code" id="humanCodeBox" placeholder="Paste corrected code here...">${esc(d.human_code || "")}</textarea>
+        <div class="toolbar" style="margin-top:8px">
+          <button class="primary" onclick="saveHumanCode()">Save as human_code</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Comments</h3>
+        <div class="comments" id="commentsList">
+          ${ann.stage1a.comments.map(c => `
+            <div class="comment">
+              <div class="meta">${esc(c.author)} &middot; ${esc(c.timestamp)} &middot; ${esc(c.target)}</div>
+              ${esc(c.text)}
+            </div>`).join("") || '<div style="color:var(--dim);font-size:12px">No comments yet.</div>'}
+        </div>
+        <textarea id="commentBox" placeholder="Leave a suggestion..."></textarea>
+        <div class="toolbar" style="margin-top:8px">
+          <button onclick="addComment()">Add comment</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Diagram source only: the raster splice belongs to the other screen, and
+  // showing it here would stop the render matching the code beside it.
+  $("#renderPanel").innerHTML = renderPanelMarkup("diagram");
+
+  const block = await (await fetch(`/api/copy-block/${CURRENT}`)).json();
+  $("#promptBox").value = block.prompt;
+}
+
+function banner(msg, ok) {
+  $("#banner").innerHTML = `<div class="banner ${ok ? 'ok' : 'err'}">${esc(msg)}</div>`;
+}
+
+const STAGE_NAMES = {"1a": "convert", "1b": "rasters", "1c": "critic"};
+
+function stageStrip(s) {
+  if (!s) return "";
+  const pill = (id, has, stale) => {
+    const colour = !has ? "var(--dim)" : stale ? "var(--warn)" : "var(--ok)";
+    const state = !has ? "missing" : stale ? "stale" : "current";
+    return `<span class="status" style="color:${colour};border-color:${colour}">
+              ${id} ${STAGE_NAMES[id]} &middot; ${state}</span>`;
+  };
+  const todo = s.needs.length
+    ? `<span class="hint" style="margin-left:8px">&rarr; run ${s.needs.join(" then ")}</span>`
+    : `<span class="hint" style="margin-left:8px">all current</span>`;
+  return `<div style="margin-bottom:12px">
+    ${pill("1a", s.has_1a, false)}
+    ${pill("1b", s.has_1b, s.stale_1b)}
+    ${pill("1c", s.has_1c, s.stale_1c)}${todo}</div>`;
+}
+
+async function runStages(stages, force) {
+  const raw = ($("#tempBox")?.value ?? "").trim();
+  const temperature = raw === "" ? null : Number(raw);
+  if (temperature !== null && (Number.isNaN(temperature) || temperature < 0 || temperature > 2)) {
+    banner("temperature must be a number between 0 and 2", false);
+    return;
+  }
+  TEMP = raw;   // survive the re-render below
+
+  const note = temperature === null ? "" : ` at temp ${temperature}`;
+  banner(`running ${stages.join(" → ")}${note}…`, true);
+  const r = await fetch(`/api/run-stages/${CURRENT}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stages, force, temperature}),
+  });
+  const d = await r.json();
+  const done = (d.results || []).map(x => `${x.stage} ${x.status}`).join(", ");
+  if (!r.ok || !d.ok) {
+    banner(`failed after [${done || "nothing"}] — ${d.error || r.status}`, false);
+    render();
+    return;
+  }
+  banner(`done: ${done}${note}`, true);
+  render();
+}
+
+function copyPrompt() {
+  $("#promptBox").select();
+  navigator.clipboard.writeText($("#promptBox").value).then(
+    () => banner("prompt copied to clipboard", true),
+    () => banner("clipboard write failed — select-all + copy manually", false));
+}
+
+async function saveHumanCode() {
+  const text = $("#humanCodeBox").value;
+  const r = await fetch(`/api/human-code/${CURRENT}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({text, source: "pasted"}),
+  });
+  const d = await r.json();
+  if (!r.ok || !d.ok) { banner("save failed", false); return; }
+  banner("human code saved", true);
+  // The splice and the critique were both built from the old 1a; offer to
+  // rebuild rather than leaving two artifacts that no longer describe it.
+  if (confirm("1a changed. Re-run 1b (rasters) then 1c (critic) so the "
+              + "downstream artifacts match?")) {
+    await runStages(["1b", "1c"], true);
+    return;
+  }
+  render();
+}
+
+async function addComment() {
+  const text = $("#commentBox").value.trim();
+  if (!text) return;
+  const r = await fetch(`/api/comment/${CURRENT}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({text, author: "me", target: "general"}),
+  });
+  if (!r.ok) { banner("comment failed", false); return; }
+  render();
+}
+
+async function promote(stage) {
+  if (!confirm(`Promote ${stage}'s human artifact into code_final? Stage 2 onward will use it.`)) return;
+  const r = await fetch(`/api/promote/${CURRENT}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stage, author: "me"}),
+  });
+  const d = await r.json();
+  if (!r.ok || !d.ok) { banner(`promote failed: ${d.error || r.status}`, false); return; }
+  banner(`promoted ${stage} to code_final`, true);
+  render();
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -79,6 +79,17 @@ class CachePaths:
             # Stage 1b detects raster regions with an ordinary chat backend, so
             # its lineage component is just that model.
             parts.append(self._model_for("raster_integrator"))
+        if self.cfg.target != "tikz":
+            # The target belongs in the lineage because it changes the artifact,
+            # not just its file extension: a TikZ document and an SVG one carry
+            # completely different element ids. Without this the two share every
+            # downstream path, so an SVG run reuses the TikZ XML as "cached" and
+            # every sequence `focus` then references ids the SVG does not have
+            # (observed: 0 of 14 ids in common).
+            #
+            # Appended only for non-tikz so every existing TikZ artifact keeps
+            # its current path and stays valid.
+            parts.append(_slug(self.cfg.target))
         return "__".join(parts)
 
     @property

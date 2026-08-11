@@ -63,11 +63,11 @@ class Attempt:
                 "notes": self.notes[:500], "findings": self.findings}
 
 
-def _render(code: str, cache_dir: Path):
-    # Imported lazily: compile_tikz shells out to latexmk, and keeping it out
+def _render(code: str, cache_dir: Path, target: str = "tikz"):
+    # Imported lazily: the TikZ path shells out to latexmk, and keeping it out
     # of module scope means `--help` and config validation never touch it.
-    from img_2_svg_pretraining.viewer.compile import compile_tikz
-    return compile_tikz(code, cache_dir)
+    from ..render import render_code
+    return render_code(code, target, cache_dir)
 
 
 def score_render(ctx: AgentContext, sample: PaperSample, render_path: Path,
@@ -147,9 +147,17 @@ def repair(ctx: AgentContext, sample: PaperSample, code: str, render_path: Path,
     return extract_code(result.text, ctx.cfg.target)
 
 
-def _ids(code: str) -> set[str]:
-    """`xml id` values declared in the code."""
+def _ids(code: str, target: str = "tikz") -> set[str]:
+    """Element ids declared in the code.
+
+    The two targets carry the same metadata under different syntax: TikZ uses
+    the no-op key `xml id=foo`, SVG uses the attribute `data-id="foo"`. This
+    set is what guards a repair against dropping elements, so reading the
+    wrong syntax would return an empty set and silently disable that guard.
+    """
     import re
+    if target == "svg":
+        return set(re.findall(r'data-id\s*=\s*"([^"]+)"', code))
     return set(re.findall(r"xml\s+id\s*=\s*\{?\"?([\w:.-]+)\"?\}?", code))
 
 
@@ -159,6 +167,10 @@ def _latex_errors(log: str, limit: int = 6) -> str:
     The full log is thousands of lines of package banners; the error lines and
     the few lines after each are what a repair needs, and keeping the prompt
     short leaves budget for the code itself.
+
+    Only meaningful for TikZ. The SVG renderer returns a single-line reason
+    (a parse error with a location, or the cairosvg exception), which needs no
+    extraction -- see `_render_errors`.
     """
     lines = log.splitlines()
     out: list[str] = []
@@ -171,11 +183,19 @@ def _latex_errors(log: str, limit: int = 6) -> str:
     return "\n".join(out) if out else log[-1500:]
 
 
+def _render_errors(log: str, target: str, limit: int = 6) -> str:
+    """The part of a render log a repair prompt should see."""
+    if target == "svg":
+        return log[-1500:]
+    return _latex_errors(log, limit)
+
+
 def fix_compile(ctx: AgentContext, sample: PaperSample, code: str, log: str,
                 params: dict) -> str | None:
-    """Repair a document that does not compile, from its LaTeX log."""
+    """Repair a document that does not render, from its renderer's log."""
     prompt = load_and_render("diagram_transmuter/critic.yaml#compile_fix",
-                             {"diagram_code": code, "compile_log": _latex_errors(log)})
+                             {"diagram_code": code,
+                              "compile_log": _render_errors(log, ctx.cfg.target)})
     result = ctx.backend.generate([Message.user(prompt)], **params)
     if not result.ok:
         return None
@@ -197,12 +217,13 @@ def make_compilable(ctx: AgentContext, sample: PaperSample, code: str,
     deleting the element that triggered it loses figure content, which is
     worse than the error.
     """
+    target = ctx.cfg.target
     history: list[dict] = []
-    rendered = _render(code, cache_dir)
+    rendered = _render(code, cache_dir, target)
     if rendered.ok:
         return code, rendered, history
 
-    original_ids = _ids(code)
+    original_ids = _ids(code, target)
     for round_index in range(1, max_rounds + 1):
         candidate = fix_compile(ctx, sample, code, rendered.log, params)
         if candidate is None:
@@ -210,17 +231,17 @@ def make_compilable(ctx: AgentContext, sample: PaperSample, code: str,
                             "notes": "repair produced no code"})
             break
 
-        lost = original_ids - _ids(candidate)
+        lost = original_ids - _ids(candidate, target)
         if lost:
             history.append({"round": round_index, "phase": "compile",
-                            "notes": f"rejected: dropped xml id(s) {sorted(lost)[:5]}"})
+                            "notes": f"rejected: dropped element id(s) {sorted(lost)[:5]}"})
             break
 
-        attempt = _render(candidate, cache_dir)
+        attempt = _render(candidate, cache_dir, target)
         history.append({
             "round": round_index, "phase": "compile", "compiles": bool(attempt.ok),
             "notes": ("now compiles" if attempt.ok
-                      else _latex_errors(attempt.log, limit=1)[:200]),
+                      else _render_errors(attempt.log, target, limit=1)[:200]),
         })
         code = candidate
         rendered = attempt
@@ -267,7 +288,7 @@ def refine(ctx: AgentContext, sample: PaperSample, code: str,
                       "baseline_score": score, "final_score": score,
                       "rounds": [best.summary()]}
 
-    original_ids = _ids(code)
+    original_ids = _ids(code, ctx.cfg.target)
 
     for round_index in range(1, max_rounds + 1):
         findings = diagnose(ctx, sample, best.code, best.render_path, params)
@@ -285,14 +306,14 @@ def refine(ctx: AgentContext, sample: PaperSample, code: str,
 
         # A repair that drops element ids breaks every later stage that
         # references them, so it is rejected however well it renders.
-        lost = original_ids - _ids(candidate)
+        lost = original_ids - _ids(candidate, ctx.cfg.target)
         if lost:
             history.append(Attempt(round_index, candidate, None, True,
-                                   notes=f"rejected: dropped xml id(s) {sorted(lost)[:5]}",
+                                   notes=f"rejected: dropped element id(s) {sorted(lost)[:5]}",
                                    findings=findings))
             break
 
-        rendered = _render(candidate, cache_dir)
+        rendered = _render(candidate, cache_dir, ctx.cfg.target)
         if not rendered.ok or rendered.png_path is None:
             history.append(Attempt(round_index, candidate, None, False,
                                    notes="rejected: repair does not compile",

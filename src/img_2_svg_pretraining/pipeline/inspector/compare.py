@@ -126,7 +126,7 @@ def _metrics(cfg, config_file: str, style: str, sample_id: str) -> dict:
                 continue
             entries.append({"key": key, "value": record[key],
                             **descriptions.describe(key)})
-        if entries:
+        if entries or record.get("error"):
             suites.append({"suite": suite, "metrics": entries,
                            "error": record.get("error")})
     return {"available": bool(suites), "suites": suites}
@@ -146,6 +146,53 @@ def _sequence_summary(path: Path) -> dict | None:
         "elements": len(seq.focus_ids()),
         "bench_schema": any(n.element_classes for n in seq.nodes),
     }
+
+
+# Suite -> column group label, matching the four pipeline stages.
+_TABLE_SUITES = [("stage1", "Code"), ("xml", "XML"),
+                  ("sequence", "Sequence"), ("stage3", "Animation")]
+
+
+@app.get("/api/table/<label>/<style>")
+def api_table(label, style):
+    """Paper-style scoreboard: rows = samples, columns = stage -> metrics.
+
+    One table per (model, style), since a style change is a different
+    pipeline run end to end. Reuses the same eval records _metrics() reads
+    for the per-panel view, just pivoted into one row per sample.
+    """
+    from img_2_svg_pretraining.animatebench import descriptions
+
+    if label not in STATE["models"] or style not in STYLES:
+        abort(404)
+    cfg = STATE["models"][label]["cfg"]
+    config_file = STATE["models"][label]["file"]
+
+    groups = []
+    for suite, suite_label in _TABLE_SUITES:
+        keys = descriptions.ordered(suite)
+        groups.append({
+            "suite": suite, "label": suite_label,
+            "columns": [{"key": k, **descriptions.describe(k)} for k in keys],
+        })
+
+    rows = []
+    for sample in STATE["samples"]:
+        m = _metrics(cfg, config_file, style, sample.id)
+        by_suite = {s["suite"]: s for s in m["suites"]}
+        cells = {}
+        for suite, _ in _TABLE_SUITES:
+            entry = by_suite.get(suite)
+            if entry is None:
+                cells[suite] = {"error": None, "values": {}}
+                continue
+            cells[suite] = {
+                "error": entry.get("error"),
+                "values": {e["key"]: e["value"] for e in entry["metrics"]},
+            }
+        rows.append({"id": sample.id, "title": sample.title, "cells": cells})
+
+    return jsonify({"style": style, "label": label, "groups": groups, "rows": rows})
 
 
 @app.get("/api/index")
@@ -197,6 +244,8 @@ def api_compare(sample_id, style):
     # The bundle ships one reference video per (target, style, tier); the
     # full-context TikZ one is the closest match to how we run.
     ref_key = f"tikz|{style}|full"
+    talk = reference.get("original_presentation")
+    talk_dir = Path(sample.directory) / "reference" / "original_presentation"
     return jsonify({
         "id": sample_id,
         "title": sample.title,
@@ -208,6 +257,16 @@ def api_compare(sample_id, style):
             "available_keys": sorted(ref_videos),
             "reviews": reference.get("reviews", []),
         },
+        "presentation": ({
+            "title": talk.get("title"),
+            "uploader": talk.get("uploader"),
+            "url": talk.get("webpage_url"),
+            "duration": talk.get("duration"),
+            "video": (f"/api/presentation/{sample_id}/video"
+                      if (talk_dir / "video.mp4").is_file() else None),
+            "transcript": ((talk_dir / "transcript.txt").read_text(encoding="utf-8")
+                           if (talk_dir / "transcript.txt").is_file() else None),
+        } if talk else None),
         "panels": panels,
     })
 
@@ -226,6 +285,18 @@ def api_reference(sample_id, name):
     if sample is None or ".." in name or "/" in name:
         abort(404)
     path = Path(sample.directory) / "reference" / "videos" / name
+    if not path.is_file():
+        abort(404)
+    return send_file(path, mimetype="video/mp4")
+
+
+@app.get("/api/presentation/<sample_id>/video")
+def api_presentation_video(sample_id):
+    """The author's real conference talk, shipped as reference/original_presentation."""
+    sample = STATE["by_id"].get(sample_id)
+    if sample is None:
+        abort(404)
+    path = Path(sample.directory) / "reference" / "original_presentation" / "video.mp4"
     if not path.is_file():
         abort(404)
     return send_file(path, mimetype="video/mp4")
@@ -285,9 +356,21 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--dataset", default=None,
                         help="override the dataset root from the configs")
+    parser.add_argument("--configs", default=None,
+                        help="comma-separated label=config_file.yaml pairs, "
+                             "replacing DEFAULT_CONFIGS (e.g. for a different bench)")
     args = parser.parse_args()
 
-    _init(DEFAULT_CONFIGS, args.dataset)
+    config_files = DEFAULT_CONFIGS
+    if args.configs:
+        config_files = {}
+        for pair in args.configs.split(","):
+            label, _, filename = pair.partition("=")
+            if not filename:
+                raise SystemExit(f"--configs: bad pair '{pair}', expected label=file.yaml")
+            config_files[label.strip()] = filename.strip()
+
+    _init(config_files, args.dataset)
     print(f"{len(STATE['models'])} model(s), {len(STATE['samples'])} sample(s)")
     print(f"open http://<host>:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)
