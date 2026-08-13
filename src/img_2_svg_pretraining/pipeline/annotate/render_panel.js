@@ -6,11 +6,21 @@
  * what differs: each screen renders the artifact it is actually editing.
  */
 
+// What each source is called on its own screen. A button labelled "render
+// diagram" on the animation screen would be describing the wrong artifact.
+const RENDER_LABELS = {
+  diagram: "Render diagram",
+  rasters: "Render diagram",
+  animation: "Render animation (first frame)",
+  best: "Render",
+};
+
 function renderPanelMarkup(source) {
   return `
     <div class="card">
       <h3>Render <span style="font-weight:400;color:var(--dim)" id="rp-src"></span></h3>
-      <button class="primary" style="width:100%" onclick="doRender('${source}')">Render diagram</button>
+      <button class="primary" style="width:100%" onclick="doRender('${source}')">${
+        RENDER_LABELS[source] || "Render"}</button>
       <div id="rp-out" style="margin-top:10px"></div>
     </div>
     <div class="card">

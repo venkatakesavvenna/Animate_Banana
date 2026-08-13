@@ -15,7 +15,27 @@ from pathlib import Path
 
 from filelock import FileLock
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+# Stages a reviewer signs off on. Narration (2e) is deliberately absent: it is
+# written into an already-valid sequence and only touches the `narrative`
+# field, so there is nothing to approve and nothing it can invalidate.
+APPROVABLE = ("stage1a", "stage1b", "stage2b", "stage2c", "stage2d", "stage3a")
+
+
+def _with_approval(record: dict) -> dict:
+    """Give every approvable stage its sign-off fields.
+
+    Kept out of `_empty` so the field set is defined once rather than repeated
+    in six blocks that would drift apart.
+    """
+    for stage in APPROVABLE:
+        block = record.get(stage)
+        if isinstance(block, dict):
+            block.setdefault("approved", False)
+            block.setdefault("approved_at", None)
+            block.setdefault("approved_by", None)
+    return record
 
 
 def annotations_dir(cache_root: Path) -> Path:
@@ -29,7 +49,7 @@ def record_path(cache_root: Path, sample_id: str) -> Path:
 
 
 def _empty(sample_id: str) -> dict:
-    return {
+    return _with_approval({
         "sample_id": sample_id,
         "schema_version": SCHEMA_VERSION,
         # Which animation style this sample is annotated against. Recorded
@@ -38,6 +58,17 @@ def _empty(sample_id: str) -> dict:
         "style": {
             "assigned": None,
             "source": None,          # "random" | "manual"
+            "assigned_at": None,
+            "history": [],
+        },
+        # tikz | svg. Unlike style there is nothing to randomise -- it defaults
+        # to whatever the config targets and only changes when a reviewer
+        # switches it. Recorded per sample so one instance can annotate both,
+        # and because the target decides the artifact suffix and therefore
+        # every path the human-edit swaps back up.
+        "target": {
+            "assigned": None,
+            "source": None,          # "config" | "manual"
             "assigned_at": None,
             "history": [],
         },
@@ -72,6 +103,21 @@ def _empty(sample_id: str) -> dict:
             "ids_removed": [],
             "promoted_to_xml": False,
         },
+        # Stage 2c -- the sequencer's own output, before the critic sees it.
+        # Distinct from 2d: this one swaps over `sequence()`, so the critic
+        # still runs on the correction. 2d swaps over `sequence_final()` and
+        # freezes it. A reviewer picks depending on whether they want the
+        # repair refined or taken verbatim.
+        "stage2c": {
+            "status": "unreviewed",
+            "sequence_lineage_at_review": None,
+            "style_at_review": None,
+            "comments": [],
+            "human_sequence_path": None,
+            "human_sequence_updated_at": None,
+            "validation_at_save": [],
+            "promoted_to_sequence": False,
+        },
         # Stage 2d -- the animation sequence.
         "stage2d": {
             "status": "unreviewed",
@@ -87,7 +133,27 @@ def _empty(sample_id: str) -> dict:
             "promoted_to_sequence_final": False,
             "video_rendered_at": None,
         },
-    }
+        # Stage 3a -- the animation code the designer wrote. The third and last
+        # human-code override point, after 1a and 2c.
+        "stage3a": {
+            "status": "unreviewed",
+            "animation_lineage_at_review": None,
+            # Load-bearing for discard: the promoted file lives under a
+            # style-keyed lineage, so removing it needs the style it was saved
+            # under, not whatever the sample is set to now.
+            "style_at_review": None,
+            "comments": [],
+            "human_animation_path": None,
+            "human_animation_updated_at": None,
+            # Whether the saved code compiled, recorded at save time. Saved
+            # even when it does not: a work-in-progress paste is still worth
+            # keeping, and the 3a gate is what refuses to advance on it.
+            "compiles_at_save": None,
+            "compile_log_at_save": None,
+            "promoted_to_animation_final": False,
+            "frames_rendered_at": None,
+        },
+    })
 
 
 def _migrate(record: dict, sample_id: str) -> dict:
@@ -95,7 +161,8 @@ def _migrate(record: dict, sample_id: str) -> dict:
 
     Additive merge rather than a version check: Stage-1 records already exist
     on disk from live annotation runs, and resetting them to defaults would
-    throw away real human work.
+    throw away real human work. This is what lets the 2c/3a blocks and the
+    approval fields land on existing records without a migration script.
     """
     template = _empty(sample_id)
     for key, default in template.items():
@@ -105,7 +172,7 @@ def _migrate(record: dict, sample_id: str) -> dict:
             for sub, sub_default in default.items():
                 record[key].setdefault(sub, sub_default)
     record["schema_version"] = SCHEMA_VERSION
-    return record
+    return _with_approval(record)
 
 
 def load(cache_root: Path, sample_id: str) -> dict:

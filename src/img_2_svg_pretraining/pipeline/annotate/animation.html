@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotate — Animation</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --panel2: #23272f; --line: #2f343d;
+    --fg: #e6e8ec; --dim: #949aa6; --accent: #6ea8fe; --ok: #4ec9a0;
+    --warn: #e0af68; --bad: #f07178;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  code, pre, textarea { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  header { display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+           border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 13px; margin: 0; color: var(--dim);
+              text-transform: uppercase; letter-spacing: .04em; }
+  header a { color: var(--accent); text-decoration: none; font-size: 12px; }
+
+  #wrap { display: flex; gap: 16px; padding: 16px 20px 60px; align-items: flex-start; }
+  #left { flex: 1.1; min-width: 380px; }
+  #right { flex: 1; min-width: 340px; position: sticky; top: 16px; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+          padding: 12px; margin-bottom: 12px; }
+  .card h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+             color: var(--dim); margin: 0 0 10px; font-weight: 600;
+             display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .card img { width: 100%; height: auto; border-radius: 4px;
+              background: #fff; display: block; }
+
+  button, a.linkbtn { background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+           border-radius: 5px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+           text-decoration: none; display: inline-block; }
+  button:hover, a.linkbtn:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0c1118; border-color: var(--accent); font-weight: 600; }
+  button.promote { background: var(--ok); color: #0c1118; border-color: var(--ok); font-weight: 600; }
+  button:disabled { opacity: .4; cursor: default; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  textarea.code { background: #101216; border: 1px solid var(--line); border-radius: 6px;
+             padding: 10px; overflow: auto; font-size: 11.5px; white-space: pre;
+             margin: 0; width: 100%; color: var(--fg); min-height: 360px; resize: vertical; }
+  pre.log { background: #101216; border: 1px solid var(--bad); border-radius: 6px;
+            padding: 10px; overflow: auto; font-size: 11px; max-height: 220px;
+            color: var(--bad); white-space: pre-wrap; }
+
+  .hint { color: var(--dim); font-size: 11.5px; }
+  .bad { color: var(--bad); }
+  .banner { padding: 6px 10px; border-radius: 5px; font-size: 11.5px; margin-bottom: 10px; }
+  .banner.ok { background: rgba(78,201,160,.12); color: var(--ok); border: 1px solid rgba(78,201,160,.3); }
+  .banner.err { background: rgba(240,113,120,.12); color: var(--bad); border: 1px solid rgba(240,113,120,.3); }
+  .banner.warn { background: rgba(224,175,104,.12); color: var(--warn); border: 1px solid rgba(224,175,104,.3); }
+  #scrub { width: 100%; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="sampleId"></h1>
+  <a href="/">&larr; samples</a>
+  <a id="seqLink" href="#">&larr; sequence</a>
+  <label class="hint">target
+    <select id="targetSel" onchange="setTarget(this.value)">
+      <option value="tikz">tikz</option>
+      <option value="svg">svg</option>
+    </select>
+  </label>
+  <span class="hint" id="lineage"></span>
+  <span class="hint" id="meta"></span>
+</header>
+
+<div id="wrap">
+  <div id="left">
+    <div id="banner"></div>
+
+    <div class="card" id="gateCard">
+      <h3>Stage 3a &mdash; animation <span class="hint" id="gateSummary"></span></h3>
+      <div id="gateChecks"></div>
+      <div class="toolbar" style="margin-top:8px">
+        <button id="approveBtn" onclick="toggleApprove()">Approve stage</button>
+        <button class="primary" id="nextBtn" onclick="nextSample()">Next sample &rarr;</button>
+      </div>
+      <p class="hint" id="gateNote"></p>
+    </div>
+
+    <div class="card">
+      <h3>Run</h3>
+      <div class="toolbar">
+        <button onclick="runStages(['3a','3b'], true)">Re-design (3a&rarr;3b)</button>
+        <button onclick="runStages(['3a'], true, true)">Re-design, no critic</button>
+        <button onclick="runStages(['3b'], true)">Critique only (3b)</button>
+        <button class="primary" onclick="compile()">Compile &rarr; slides + video</button>
+      </div>
+      <p class="hint">Compiling renders the frame deck and an mp4 &mdash; stills for
+        checking one moment, video for judging the motion. No API calls.</p>
+      <div id="runProgress"></div>
+    </div>
+
+    <div class="card">
+      <h3>Copy prompt, to try a stronger model</h3>
+      <div class="hint" style="margin-bottom:8px">
+        Exactly what the designer would send: it already contains the diagram code, the
+        stage-2 sequence and the style block.
+      </div>
+      <textarea class="code" id="promptBox" readonly style="min-height:120px"></textarea>
+      <div class="toolbar" style="margin-top:8px">
+        <button onclick="copyText('#promptBox','prompt')">Copy prompt</button>
+        <button onclick="copySequence()">Copy stage-2 sequence</button>
+        <button onclick="copyText('#codeBox','animation code')">Copy animation code</button>
+        <a class="linkbtn" id="imgDl" href="#" download>Download image</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>
+        <span>Animation code <span class="hint" id="origin"></span></span>
+        <span class="toolbar">
+          <button onclick="save()">Save</button>
+          <button class="promote" id="promoteBtn" onclick="promote()">Promote &rarr; final</button>
+        </span>
+      </h3>
+      <div id="compileState"></div>
+      <textarea class="code" id="codeBox" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <div id="right">
+    <!-- Render before compiling: one page of the animation, seconds rather
+         than the full frame sweep, so an edit can be sanity-checked cheaply. -->
+    <div id="renderPanel"></div>
+    <div class="card" id="videoCard" style="display:none">
+      <h3>Video <span class="hint" id="videoNote"></span></h3>
+      <video id="vid" controls preload="metadata" style="width:100%;border-radius:4px;background:#000"></video>
+    </div>
+    <div class="card" id="framesCard" style="display:none">
+      <h3>Slides <span class="hint" id="frameLabel"></span></h3>
+      <img id="frameImg">
+      <input type="range" id="scrub" min="0" value="0" oninput="showFrame(+this.value)">
+      <div class="toolbar" style="margin-top:6px">
+        <button onclick="step(-1)">&larr; prev</button>
+        <button onclick="step(1)">next &rarr;</button>
+      </div>
+    </div>
+    <div class="card" id="noFrames">
+      <h3>Slides</h3>
+      <div class="hint">Not compiled yet. Use &ldquo;Compile &rarr; slides&rdquo;.</div>
+    </div>
+    <div class="card">
+      <h3>Source figure</h3>
+      <img id="figImg">
+    </div>
+  </div>
+</div>
+
+<script src="/render_panel.js"></script>
+<script src="/gate_panel.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const SAMPLE = decodeURIComponent(location.pathname.split("/").pop());
+const SAMPLE_ID = SAMPLE;          // render_panel.js reads this
+const esc = s => String(s ?? "").replace(/[&<>"]/g,
+  c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+let FRAMES = 0, CUR = 0, GATE = null, STATE = null;
+// Bumped whenever the deck is rebuilt, so the browser cannot serve the
+// previous compile's PNGs from the same URLs.
+let FRAME_TAG = Date.now();
+
+function banner(msg, kind) {
+  $("#banner").innerHTML = `<div class="banner ${kind}">${esc(msg)}</div>`;
+}
+
+async function setTarget(target) {
+  await fetch(`/api/target/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({target}),
+  });
+  // Artifacts are per-target under different lineages; switching back
+  // re-exposes whatever was there.
+  banner(`target is now ${target} — artifacts are per-target, nothing was lost`, "ok");
+  boot();
+}
+
+async function boot() {
+  $("#sampleId").textContent = SAMPLE;
+  $("#seqLink").href = `/sequence/${SAMPLE}`;
+  $("#figImg").src = `/api/image/${SAMPLE}`;
+  $("#renderPanel").innerHTML = renderPanelMarkup("animation");
+  $("#imgDl").href = `/api/image/${SAMPLE}`;
+  $("#imgDl").setAttribute("download", `${SAMPLE}.png`);
+
+  const d = await (await fetch(`/api/animation-state/${SAMPLE}`)).json();
+  STATE = d;
+  $("#lineage").textContent = d.animation_lineage || "";
+  $("#meta").textContent = `${d.target} · ${d.style}`;
+  $("#targetSel").value = d.target || "tikz";
+  $("#origin").textContent = d.origin ? `(${d.origin})` : "(none yet)";
+  $("#codeBox").value = d.code || "";
+  $("#promoteBtn").disabled = !d.annotation.stage3a.human_animation_path;
+
+  const s3 = d.annotation.stage3a;
+  if (s3.compiles_at_save === false) {
+    $("#compileState").innerHTML =
+      `<pre class="log">${esc(s3.compile_log_at_save || "does not compile")}</pre>`;
+  } else {
+    $("#compileState").innerHTML = "";
+  }
+
+  // Video alongside the deck: stills for checking one moment, video for
+  // judging whether the motion reads.
+  if (d.has_video) {
+    $("#videoCard").style.display = "";
+    $("#vid").src = `/api/video/${SAMPLE}?t=${FRAME_TAG}`;
+  } else {
+    $("#videoCard").style.display = "none";
+    $("#vid").removeAttribute("src");
+  }
+  FRAMES = d.frames;
+  $("#framesCard").style.display = FRAMES ? "" : "none";
+  $("#noFrames").style.display = FRAMES ? "none" : "";
+  if (FRAMES) { $("#scrub").max = FRAMES - 1; showFrame(0); }
+
+  loadPrompt();
+  loadGates();
+}
+
+function showFrame(i) {
+  CUR = Math.max(0, Math.min(FRAMES - 1, i));
+  $("#scrub").value = CUR;
+  $("#frameImg").src = `/api/frame/${SAMPLE}/${CUR}?t=${FRAME_TAG}`;
+  $("#frameLabel").textContent = `${CUR + 1} / ${FRAMES}`;
+}
+
+function step(delta) { if (FRAMES) showFrame(CUR + delta); }
+
+// -- copy block ----------------------------------------------------------
+
+async function loadPrompt() {
+  const r = await fetch(`/api/copy-block/${SAMPLE}?agent=designer`);
+  const d = await r.json();
+  $("#promptBox").value = r.ok ? d.prompt : `(unavailable) ${d.error || r.status}`;
+}
+
+function copyText(sel, what) {
+  const el = $(sel);
+  navigator.clipboard.writeText(el.value ?? el.textContent).then(
+    () => banner(`${what} copied to clipboard`, "ok"),
+    () => banner("clipboard blocked — select and copy manually", "err"));
+}
+
+function copySequence() {
+  if (!STATE?.sequence) { banner("no stage-2 sequence yet", "err"); return; }
+  navigator.clipboard.writeText(STATE.sequence).then(
+    () => banner("stage-2 sequence copied to clipboard", "ok"),
+    () => banner("clipboard blocked", "err"));
+}
+
+// -- gates ---------------------------------------------------------------
+
+async function loadGates() {
+  const d = await (await fetch(`/api/workflow-state/${SAMPLE}`)).json();
+  GATE = d.gates.stage3a;
+  $("#gateSummary").textContent = GATE.passed ? "— complete" : "— incomplete";
+  $("#gateChecks").innerHTML = GATE.checks.map(c =>
+    `<div class="${c.passed ? "" : "bad"}" style="font-size:12px;margin:2px 0">
+       ${c.passed ? "&#10003;" : "&#10007;"} ${esc(c.name)}
+       ${c.detail ? `<span class="hint">— ${esc(c.detail)}</span>` : ""}
+     </div>`).join("");
+  const approved = GATE.checks.find(c => c.name === "reviewer approved")?.passed;
+  $("#approveBtn").textContent = approved ? "Un-approve stage" : "Approve stage";
+  $("#nextBtn").disabled = !d.complete;
+  $("#gateNote").textContent = d.complete
+    ? "Every stage is complete for this sample."
+    : (GATE.passed
+        ? `Stage 3a is done; still open elsewhere: ${d.next_stage}.`
+        : `Blocked on: ${GATE.blocking.join(", ")}.`);
+}
+
+async function toggleApprove() {
+  const approved = GATE?.checks.find(c => c.name === "reviewer approved")?.passed;
+  const r = await fetch(`/api/approve/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stage: "stage3a", approved: !approved}),
+  });
+  if (!r.ok) { banner(`approve failed: ${r.status}`, "err"); return; }
+  await loadGates();
+  banner(approved ? "approval withdrawn" : "stage approved", "ok");
+}
+
+async function nextSample() {
+  const d = await (await fetch(`/api/next-sample?after=${encodeURIComponent(SAMPLE)}`)).json();
+  if (!d.id) { banner("every sample is complete", "ok"); return; }
+  location.href = `/animation/${d.id}`;
+}
+
+// -- edit / compile ------------------------------------------------------
+
+async function save() {
+  const text = $("#codeBox").value.trim();
+  if (!text) { banner("nothing to save", "err"); return; }
+  const r = await fetch(`/api/human-animation/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({text}),
+  });
+  const d = await r.json();
+  if (!r.ok) { banner(`save failed: ${d.error || r.status}`, "err"); return; }
+  // Saved either way; the gate is what declines to advance on code that does
+  // not compile, so a work-in-progress paste is never rejected outright.
+  banner(d.compiles ? "saved — compiles" : "saved — does NOT compile", d.compiles ? "ok" : "warn");
+  boot();
+}
+
+async function promote() {
+  if (!confirm("Copy your animation code over the pipeline's animation_final?")) return;
+  const r = await fetch(`/api/promote/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stage: "stage3a"}),
+  });
+  if (!r.ok) { banner(`promote failed: ${r.status}`, "err"); return; }
+  banner("promoted to animation_final", "ok");
+  boot();
+}
+
+async function compile() {
+  const buttons = [...document.querySelectorAll("button")];
+  buttons.forEach(b => b.disabled = true);
+  const started = Date.now();
+  const tick = setInterval(() => {
+    banner(`compiling frames… ${Math.round((Date.now() - started) / 1000)}s`, "ok");
+  }, 1000);
+  try {
+    const r = await fetch(`/api/compile-animation/${SAMPLE}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({force: true}),
+    });
+    const d = await r.json();
+    if (!r.ok) { banner(`compile failed — ${d.error || r.status}`, "err"); return; }
+    FRAME_TAG = Date.now();
+    banner(`compiled: ${d.detail}`, "ok");
+  } finally {
+    clearInterval(tick);
+    buttons.forEach(b => b.disabled = false);
+    boot();
+  }
+}
+
+async function runStages(stages, force, override) {
+  const buttons = [...document.querySelectorAll("button")];
+  buttons.forEach(b => b.disabled = true);
+  runProgressStart("#runProgress");
+  try {
+    const r = await fetch(`/api/run-stage2/${SAMPLE}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({stages, force, override: !!override}),
+    });
+    const d = await r.json();
+    const done = (d.results || []).map(x => `${x.stage} ${x.status}`).join(", ");
+    if (r.status === 409) {
+      banner(`${d.error} — unmet: ${(d.gate?.blocking || []).join(", ")}`, "err");
+    } else if (!r.ok || !d.ok) {
+      banner(`failed after [${done || "nothing"}] — ${d.error || r.status}`, "err");
+    } else {
+      banner(`done: ${done}`, "ok");
+    }
+  } finally {
+    await runProgressStop("#runProgress");
+    buttons.forEach(b => b.disabled = false);
+    // A new 3a means the deck on screen is of the previous animation. Drop it
+    // rather than leaving stale slides that look current.
+    FRAMES = 0;
+    FRAME_TAG = Date.now();
+    boot();
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

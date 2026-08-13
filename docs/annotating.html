@@ -1,0 +1,323 @@
+<title>Annotating AnimateBanana</title>
+<style>
+  :root {
+    --ground: #f7f8fa;
+    --surface: #ffffff;
+    --surface-2: #eef0f4;
+    --ink: #1a1d24;
+    --ink-dim: #5c6473;
+    --line: #d8dce4;
+    --accent: #2f6fd0;
+    --accent-soft: rgba(47,111,208,.10);
+    --pass: #1a8f6d;
+    --wait: #a2711b;
+    --block: #c14550;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #12151b; --surface: #1a1e26; --surface-2: #222732;
+      --ink: #e8eaef; --ink-dim: #8b93a3; --line: #2c323d;
+      --accent: #6ea8fe; --accent-soft: rgba(110,168,254,.12);
+      --pass: #4ec9a0; --wait: #e0af68; --block: #f07178;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #12151b; --surface: #1a1e26; --surface-2: #222732;
+    --ink: #e8eaef; --ink-dim: #8b93a3; --line: #2c323d;
+    --accent: #6ea8fe; --accent-soft: rgba(110,168,254,.12);
+    --pass: #4ec9a0; --wait: #e0af68; --block: #f07178;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 78ch; margin: 0 auto; padding: 56px 24px 96px; }
+
+  header { border-bottom: 1px solid var(--line); padding-bottom: 26px; margin-bottom: 38px; }
+  .eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: .14em;
+             text-transform: uppercase; color: var(--ink-dim); margin: 0 0 12px; }
+  h1 { font-size: 34px; line-height: 1.15; margin: 0 0 14px; letter-spacing: -.02em; text-wrap: balance; }
+  .lede { font-size: 17px; color: var(--ink-dim); margin: 0; max-width: 64ch; }
+
+  h2 { font-size: 13px; font-family: var(--mono); letter-spacing: .12em;
+       text-transform: uppercase; color: var(--ink-dim);
+       margin: 52px 0 18px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 18px; margin: 0 0 6px; letter-spacing: -.01em; }
+  p { margin: 0 0 14px; }
+  a { color: var(--accent); }
+  ul { margin: 0 0 14px; padding-left: 20px; }
+  li { margin-bottom: 6px; }
+
+  code { font-family: var(--mono); font-size: .875em;
+         background: var(--surface-2); border-radius: 3px; padding: 1.5px 5px; }
+  /* Button names are set as they appear on screen, so they are findable. */
+  .btn { font-family: var(--mono); font-size: .84em; font-weight: 600;
+         background: var(--accent-soft); color: var(--accent);
+         border: 1px solid var(--accent); border-radius: 4px; padding: 1px 7px;
+         white-space: nowrap; }
+
+  .stage { display: grid; grid-template-columns: 64px 1fr; gap: 0 20px;
+           padding: 22px 0; border-top: 1px solid var(--line); }
+  .stage:first-of-type { border-top: none; }
+  .stage .id { font-family: var(--mono); font-size: 19px; font-weight: 600;
+               color: var(--accent); letter-spacing: -.02em; }
+  .stage .id small { display: block; font-size: 10.5px; font-weight: 400;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-dim); margin-top: 3px; }
+  .stage .body > :last-child { margin-bottom: 0; }
+
+  .steps { list-style: none; padding: 0; margin: 12px 0 0; counter-reset: s; }
+  .steps li { counter-increment: s; padding-left: 26px; position: relative; margin-bottom: 7px; }
+  .steps li::before {
+    content: counter(s); position: absolute; left: 0; top: .15em;
+    font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim);
+    border: 1px solid var(--line); border-radius: 50%;
+    width: 17px; height: 17px; display: grid; place-items: center;
+  }
+
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 14.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
+       text-transform: uppercase; color: var(--ink-dim); font-weight: 600; }
+  td.m, th.m { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+
+  .note { background: var(--surface); border: 1px solid var(--line);
+          border-left: 3px solid var(--wait); border-radius: 6px;
+          padding: 15px 17px; margin: 20px 0; }
+  .note.key { border-left-color: var(--accent); }
+  .note.stop { border-left-color: var(--block); }
+  .note p { margin: 0 0 10px; font-size: 15px; }
+  .note p:last-child { margin: 0; }
+  .note .t { font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+             text-transform: uppercase; color: var(--ink-dim); display: block; margin-bottom: 7px; }
+
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+        padding: 14px 16px; overflow-x: auto; font-family: var(--mono);
+        font-size: 13px; line-height: 1.55; margin: 0 0 16px; }
+
+  footer { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line);
+           color: var(--ink-dim); font-size: 14px; }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">AnimateBanana · reviewer handbook</p>
+  <h1>Annotating AnimateBanana</h1>
+  <p class="lede">Six stages, each with a gate. You move on when the gate opens — not when
+    the screen looks finished. Every button named here is the label you'll see.</p>
+</header>
+
+<div class="note key">
+  <span class="t">The one rule</span>
+  <p>A stage is done when <strong>both</strong> halves pass: the machine check (does it
+    render / validate / export) and your sign-off. Approving something broken does not open
+    the gate, and approving something does not freeze it — if a later edit breaks the
+    sequence, the gate closes again on its own.</p>
+  <p>The server enforces this, not just the button. Skipping ahead returns <code>409</code>
+    naming the stage that blocks you.</p>
+</div>
+
+<h2>Approve vs Promote</h2>
+
+<p>Two buttons that sound similar and do different things. This is the single most common
+  confusion, so it's worth reading once:</p>
+
+<div class="scroll">
+<table>
+  <tr><th>Button</th><th>What it does</th><th>When</th></tr>
+  <tr>
+    <td class="m">Approve stage</td>
+    <td>Records that <em>you</em> judged this correct. Opens the gate.</td>
+    <td>Every stage, once you're satisfied</td>
+  </tr>
+  <tr>
+    <td class="m">Promote</td>
+    <td>Copies <em>your edit</em> over the pipeline's own file. Changes what downstream stages read.</td>
+    <td>Only after you've pasted in a replacement</td>
+  </tr>
+</table>
+</div>
+
+<p>Promoting does not approve, and approving does not promote. If a gate stays shut after
+  you've promoted, you still need to approve.</p>
+
+<h2>The six stages</h2>
+
+<div class="stage">
+  <div class="id">1a<small>D2C</small></div>
+  <div class="body">
+    <h3>Diagram code</h3>
+    <p>The figure redrawn as TikZ or SVG. This is the landing screen — pick a sample from
+      the left.</p>
+    <ol class="steps">
+      <li>Click <span class="btn">Render diagram</span> and compare it against the source
+        figure beside it.</li>
+      <li>Wrong or missing content? Click <span class="btn">Copy prompt</span>, then
+        <span class="btn">Download image</span>, paste both into a stronger model.</li>
+      <li>Paste its answer into the code box and click <span class="btn">Save as human_code</span>.</li>
+      <li>Render again. When it's right, <span class="btn">Approve stage</span>.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="id">1b<small>rasters</small></div>
+  <div class="body">
+    <h3>Raster placement</h3>
+    <p>Photographs and screenshots can't be drawn, so they're cropped from the source and
+      spliced in. Boxes sit over the figure.</p>
+    <ol class="steps">
+      <li>Drag a box's body to move it; drag a corner to resize. Amber means you've adjusted it.</li>
+      <li>Click <span class="btn">Insert all boxes</span>.</li>
+      <li><span class="btn">Render diagram</span> to check the crops landed where you meant.</li>
+      <li><span class="btn">Approve stage</span>.</li>
+    </ol>
+    <p>If a warning says your diagram code changed after these were spliced, click
+      <span class="btn">Re-run (force)</span> first — the splice is a snapshot and is out of date.</p>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="id">2b<small>XML</small></div>
+  <div class="body">
+    <h3>Structure</h3>
+    <p>The diagram's hierarchy: what contains what. Edit as a tree or as raw XML — the two
+      stay in sync.</p>
+    <p>Element ids here are load-bearing. Every <code>focus</code> entry in the sequence is
+      checked against them, so deleting a node breaks steps later.</p>
+    <p>Text labels are <em>deliberately absent</em> from this XML. That's by design, not a
+      defect — don't add them.</p>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="id">2c<small>sequence</small></div>
+  <div class="body">
+    <h3>Animation sequence</h3>
+    <p>The order things appear and what each step focuses on. Validation runs as you type.</p>
+    <ol class="steps">
+      <li>Read the step list. To rebuild it, click
+        <span class="btn">Sequence (2c→2d + narrate)</span>.</li>
+      <li>To improve it by hand: <span class="btn">Copy prompt</span> — it already contains
+        the code, the XML and the style. Paste the result back and
+        <span class="btn">Save</span>.</li>
+      <li>Fix until validation reports zero problems, then <span class="btn">Approve stage</span>.</li>
+    </ol>
+    <p><span class="btn">Sequence, no critic</span> skips the repair pass — useful to see
+      what the model produces unaided. Expect violations; that's the point.</p>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="id">2e<small>narration</small></div>
+  <div class="body">
+    <h3>Narration — not reviewed</h3>
+    <p>Written into an already-valid sequence, touching only the spoken script. No gate, no
+      approval, nothing to click. It runs as part of every sequence build.</p>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="id">3a<small>animation</small></div>
+  <div class="body">
+    <h3>Animation</h3>
+    <p>The last place you can edit code. Reached from the sequence screen's
+      <span class="btn">Next: animation →</span>.</p>
+    <ol class="steps">
+      <li><span class="btn">Compile → slides + video</span> builds the frame deck and an mp4.
+        Watch the video for motion; step the frames to check one moment.</li>
+      <li>Wrong? <span class="btn">Copy prompt</span> carries everything the designer got —
+        sequence with narration, diagram code, style block.</li>
+      <li>Paste a fix into the code box, <span class="btn">Save</span>, compile again.</li>
+      <li><span class="btn">Approve stage</span>.</li>
+    </ol>
+    <p><span class="btn">Render animation (first frame)</span> is the quick check — seconds
+      rather than a full deck.</p>
+  </div>
+</div>
+
+<h2>A normal pass</h2>
+
+<div class="scroll">
+<table>
+  <tr><th class="m">#</th><th>Do</th><th>Then</th></tr>
+  <tr><td class="m">1</td><td>Pick a sample from the left</td><td>The header says which stage is next and what blocks it</td></tr>
+  <tr><td class="m">2</td><td>Render 1a, compare to the figure</td><td>Fix or approve</td></tr>
+  <tr><td class="m">3</td><td>Place rasters (1b)</td><td>Insert, render, approve</td></tr>
+  <tr><td class="m">4</td><td>Check the XML (2b)</td><td>Approve</td></tr>
+  <tr><td class="m">5</td><td>Read the sequence (2c)</td><td>Fix to zero violations, approve</td></tr>
+  <tr><td class="m">6</td><td>Compile the animation (3a)</td><td>Watch it, approve</td></tr>
+  <tr><td class="m">7</td><td>Sample turns green in the list</td><td>Move to the next one</td></tr>
+</table>
+</div>
+
+<h2>Editing code: the three places</h2>
+
+<p>These are the only points where your text replaces the model's. Each saves beside the
+  pipeline's own file — nothing is overwritten until you promote.</p>
+
+<div class="scroll">
+<table>
+  <tr><th>Stage</th><th class="m">Saved to</th><th class="m">Stands in for</th></tr>
+  <tr><td>1a diagram</td><td class="m">code_human/</td><td class="m">code()</td></tr>
+  <tr><td>2c sequence</td><td class="m">sequence_raw_human/</td><td class="m">sequence()</td></tr>
+  <tr><td>3a animation</td><td class="m">animation_human/</td><td class="m">animation_final()</td></tr>
+</table>
+</div>
+
+<div class="note">
+  <span class="t">2c or 2d — which sequence slot</span>
+  <p>Saving at <strong>2c</strong> puts your correction where the critic still refines it.
+    Saving at <strong>2d</strong> takes your version as final. Improving a draft → 2c. Want
+    exactly what you wrote → 2d.</p>
+</div>
+
+<h2>Reading a gate</h2>
+
+<pre>1a diagram code    <span style="color:var(--pass)">✓ code renders</span>          <span style="color:var(--block)">✗ reviewer approved</span>
+2c sequence        <span style="color:var(--block)">✗ sequence validates</span>    <span style="color:var(--block)">✗ reviewer approved</span>
+                     └ 3 violation(s): root node 't2' has depth 2</pre>
+
+<p>A tick passes; a cross blocks, and the detail says why. The
+  <span class="btn">Next</span> button stays disabled until every check on the current stage
+  passes.</p>
+
+<div class="note stop">
+  <span class="t">When you're stuck</span>
+  <p><strong>It won't compile and you can't fix it.</strong> Use
+    <span class="btn">Discard this annotation</span>. It deletes your edits, reverts any
+    promotion, and marks the sample written off — with your reason kept, so nobody repeats
+    the work. That's a real outcome, not a failure.</p>
+  <p><strong>The screen looks empty.</strong> Usually the style or target was switched:
+    artifacts are stored per style and per target, so the other one still has your work.
+    Switch back and it reappears.</p>
+  <p><strong>You got a 409.</strong> An earlier stage isn't finished; the message names it.
+    Re-running an <em>earlier</em> stage is always allowed — that's how you unblock yourself.</p>
+  <p><strong>Frames look like the old animation.</strong> Compiling rebuilds them, but
+    re-running 3a doesn't. Compile after any re-design.</p>
+</div>
+
+<h2>Colours in the sample list</h2>
+
+<div class="scroll">
+<table>
+  <tr><th>Look</th><th>Means</th></tr>
+  <tr><td style="color:var(--pass)">Green, <code>done</code> badge</td><td>All six gates approved — nothing left to do</td></tr>
+  <tr><td>Plain</td><td>In progress or not started</td></tr>
+  <tr><td style="color:var(--block)">Red rail, struck through</td><td>Discarded — written off deliberately</td></tr>
+</table>
+</div>
+
+<p>The counter under the header reads <em>N of 11 complete</em>, so you can see progress
+  without opening anything.</p>
+
+<footer>
+  Six gates per sample. Narration is exempt. The server refuses what the buttons grey out.
+</footer>
+
+</div>

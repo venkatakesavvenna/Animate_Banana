@@ -87,6 +87,12 @@
   <a href="/">&larr; samples</a>
   <a id="rastersLink" href="#">rasters</a>
   <a id="seqLink" href="#">sequence &rarr;</a>
+  <label class="hint">target
+    <select id="targetSel" onchange="setTarget(this.value)">
+      <option value="tikz">tikz</option>
+      <option value="svg">svg</option>
+    </select>
+  </label>
   <span class="hint" id="lineage"></span>
 </header>
 
@@ -148,11 +154,13 @@
       </div>
       <div id="diff" style="margin-top:10px"></div>
     </div>
+    <div id="gatePanel"></div>
     <div id="renderPanel"></div>
   </div>
 </div>
 
 <script src="/render_panel.js"></script>
+<script src="/gate_panel.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const SAMPLE = decodeURIComponent(location.pathname.split("/").pop());
@@ -168,6 +176,17 @@ function banner(msg, kind) {
   $("#banner").innerHTML = msg ? `<div class="banner ${kind || 'ok'}">${esc(msg)}</div>` : "";
 }
 
+async function setTarget(target) {
+  await fetch(`/api/target/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({target}),
+  });
+  // Artifacts are per-target under different lineages; switching back
+  // re-exposes whatever was there.
+  banner(`target is now ${target} — artifacts are per-target, nothing was lost`, "ok");
+  boot();
+}
+
 async function boot() {
   $("#sampleId").textContent = SAMPLE;
   $("#figImg").src = `/api/image/${SAMPLE}`;
@@ -176,6 +195,10 @@ async function boot() {
   $("#rastersLink").href = `/rasters/${SAMPLE}`;
   $("#seqLink").href = `/sequence/${SAMPLE}`;
   $("#renderPanel").innerHTML = renderPanelMarkup("diagram");
+  $("#gatePanel").innerHTML = gatePanelMarkup("stage2b",
+    {title: "Stage 2b — structure XML", nextHref: `/sequence/${SAMPLE}`,
+     nextLabel: "Next: sequence"});
+  loadGate("stage2b", `/sequence/${SAMPLE}`);
 
   const m = new Image();
   m.onload = () => { $("#markedImg").src = m.src; $("#markedNote").style.display = "none"; };
@@ -185,6 +208,7 @@ async function boot() {
   const d = await (await fetch(`/api/xml/${SAMPLE}`)).json();
   CLASSES = d.classes;
   $("#lineage").textContent = d.xml_lineage;
+  $("#targetSel").value = d.target || "tikz";
   $("#codePane").textContent = d.code || "(no diagram code — run Stage 1 first)";
   $("#codePath").textContent = d.code_path ? d.code_path.split("/").slice(-2).join("/") : "";
   $("#origin").textContent = d.from_human ? "(your edit)" : (d.has_machine_xml ? "(from parser)" : "(none yet)");

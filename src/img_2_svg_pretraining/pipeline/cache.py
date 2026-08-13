@@ -205,10 +205,21 @@ class CachePaths:
         converter output. `reviewed=False` stops at the raster-integrated
         version, which is what the critic itself needs -- otherwise it would
         read its own output and refine its refinement.
+
+        A `code_reviewed` older than the `code_final` it reviewed is skipped:
+        it describes a diagram that no longer exists. This is what made a
+        freshly spliced set of rasters vanish from an animation -- the splice
+        was minutes old, the critique three days old, and stage 3 quietly
+        planned against the critique.
         """
         candidates = []
         if reviewed:
-            candidates.append(self.code_reviewed(sample_id))
+            critiqued = self.code_reviewed(sample_id)
+            spliced = self.code_final(sample_id)
+            superseded = (critiqued.is_file() and spliced.is_file()
+                          and critiqued.stat().st_mtime < spliced.stat().st_mtime)
+            if not superseded:
+                candidates.append(critiqued)
         candidates += [self.code_final(sample_id), self.code(sample_id)]
 
         for path in candidates:

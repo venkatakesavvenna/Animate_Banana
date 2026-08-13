@@ -41,7 +41,12 @@ transmuter:
     prompt: diagram_transmuter/svg_diagram_to_code.yaml#prompt
     params:
       temperature: 0.2
-      max_tokens: 16384
+      # SVG is far more verbose per element than TikZ -- every node carries
+      # explicit geometry plus five data-* attributes. 16384 truncated the two
+      # densest figures mid-element (pipe00004, pipe00011 at ~23-25 KB, versus
+      # 8-17 KB for the ones that fit), and a truncated document has no
+      # closing </svg> so the extractor correctly rejects the whole response.
+      max_tokens: 32768
 
   # Stage 1b. SVG raster placeholders are `<g data-class="raster_node">`
   # wrapping a dashed `<rect>` plus a centred `<text>` label, so detection and
@@ -84,12 +89,12 @@ planner:
       temperature: 0.0
       max_tokens: 16384
 
-  # The native sequencer prompt is target-neutral -- it plans over the
-  # structure XML, which is the same schema either way. `svg_sequencer.yaml`
-  # is the AnimateBench dialect variant, kept for bench-comparable runs.
+  # Plans the traversal itself from the code and the structural graph, which
+  # is why the strategizer no longer runs. Keys on `data-class` / `data-id`,
+  # so this is the SVG-specific variant rather than the TikZ one.
   sequencer:
     backend: gemini_flash
-    prompt: animation_planner/sequencer.yaml#prompt
+    prompt: animation_planner/svg_sequencer.yaml#new_prompt
     params:
       temperature: 0.3
       max_tokens: 32768
@@ -123,17 +128,27 @@ animator:
     prompt: animation_designer/svg_designer.yaml#progressive_reveal
     params:
       temperature: 0.2
-      max_tokens: 16384
+      # The designer echoes the whole document back with a <style> block added,
+      # so it needs at least as much room as the converter that produced it.
+      # 16384 truncated pipe00045 mid-<text> at ~25 KB.
+      max_tokens: 32768
 
+  # Off for SVG. Its compile check is already gated on `target == "tikz"`, so
+  # for SVG it only re-reads the document and echoes it back -- and an SVG
+  # animation runs to ~38 KB, which truncates even at 32768. The truncation is
+  # not merely wasteful: the sample is reported failed, no new animation_final
+  # is written, and a stale one from an earlier run is what the exporter then
+  # picks up. That is how four samples shipped raster-less videos from code
+  # that had the rasters.
   critic:
+    enabled: false
     backend: gemini_flash
     prompt: animation_designer/critic.yaml#prompt
     max_rounds: 3
-    # Already gated on `target == "tikz"` inside the agent, so this is a no-op
-    # for SVG; left true so flipping target back needs no edit here.
     compile_check: true
     params:
       temperature: 0.2
+      max_tokens: 32768
 
   # mp4 only to start: frames fall out of the mp4 path anyway, and pdf/pptx
   # go through the TikZ-specific PDF chain that has no SVG counterpart yet.

@@ -84,17 +84,18 @@
 
   <div id="panel">
     <div id="banner"></div>
+    <div id="staleWarn"></div>
+    <div id="gatePanel"></div>
     <div class="card">
       <h3>Detection</h3>
-      <button id="runRasterizerBtn" onclick="runRasterizer(false)" style="width:100%">
-        Run 1b &rarr; 1c
-      </button>
-      <button id="rerunRasterizerBtn" onclick="runRasterizer(true)" style="width:100%;margin-top:6px;display:none">
+      <button id="rerunRasterizerBtn" onclick="runRasterizer(true)" style="width:100%">
         Re-run (force)
       </button>
       <p class="hint">Detects each raster placeholder's region via one VLM call, then re-runs the
         critic over the spliced result &mdash; 1b rewrites code_final from the raw converter output,
         so a critique from before the splice no longer applies.</p>
+      <p class="hint">Always forced: the splice is a snapshot of 1a, so after editing the diagram
+        code this is what rebuilds it against the new version.</p>
     </div>
     <div class="card">
       <h3>Raster placeholders</h3>
@@ -116,6 +117,7 @@
 <div id="renderWrap"><div id="renderPanel"></div></div>
 
 <script src="/render_panel.js"></script>
+<script src="/gate_panel.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const SAMPLE = location.pathname.split("/").pop();
@@ -139,10 +141,12 @@ async function boot() {
   $("#reviewLink").href = "/#" + SAMPLE;
   $("#xmlLink").href = `/xml/${SAMPLE}`;
   $("#figImg").src = `/api/image/${SAMPLE}`;
+  $("#gatePanel").innerHTML = gatePanelMarkup("stage1b",
+    {title: "Stage 1b — rasters", nextHref: `/xml/${SAMPLE}`, nextLabel: "Next: structure XML"});
+  loadGate("stage1b", `/xml/${SAMPLE}`);
 
   const d = await (await fetch(`/api/rasters/${SAMPLE}`)).json();
   if (!d.available) {
-    $("#runRasterizerBtn").disabled = true;
     $("#rerunRasterizerBtn").disabled = true;
     banner(d.reason || "no raster data", false);
     return;
@@ -153,15 +157,25 @@ async function boot() {
   }));
   UNPLACED = d.boxes.filter(b => !b.human_bbox).map(b => b.xml_id);
   $("#promoteBtn").disabled = !d.has_code_final_human;
-  $("#runRasterizerBtn").disabled = false;
   $("#rerunRasterizerBtn").disabled = false;
-  $("#rerunRasterizerBtn").style.display = BOXES.length ? "" : "none";
 
   const notes = [];
   if (d.from_human_1a) notes.push("boxes parsed from your edited 1a");
-  if (d.undetected) notes.push(`${d.undetected} placeholder(s) not located — run 1b to place them`);
+  if (d.undetected) notes.push(`${d.undetected} placeholder(s) not located — re-run detection to place them`);
   if (d.detection_error) notes.push(`detection error: ${d.detection_error}`);
   if (notes.length) banner(notes.join(" · "), !d.detection_error);
+
+  // The splice is a snapshot of 1a. If 1a has changed since, the spliced code
+  // still has the old preamble -- which surfaces as a compile error naming a
+  // package the reviewer already added. Say so here instead.
+  $("#staleWarn").innerHTML = d.stale_splice
+    ? `<div class="banner err">Your diagram code changed after these rasters were
+         spliced, so the spliced version is out of date — re-run detection to
+         rebuild it against the current 1a.</div>`
+    : (d.stale_critique
+        ? `<div class="banner">The critic last ran before the current splice —
+             re-run detection to bring it up to date.</div>`
+        : "");
 
   $("#figImg").onload = layout;
   if ($("#figImg").complete) layout();
@@ -170,7 +184,6 @@ async function boot() {
 
 async function runRasterizer(force) {
   banner(force ? "re-running rasterizer…" : "running rasterizer…", true);
-  $("#runRasterizerBtn").disabled = true;
   $("#rerunRasterizerBtn").disabled = true;
   const r = await fetch(`/api/run-rasterizer/${SAMPLE}`, {
     method: "POST", headers: {"Content-Type": "application/json"},
@@ -180,8 +193,7 @@ async function runRasterizer(force) {
   const done = (d.results || []).map(x => `${x.stage} ${x.status}: ${x.detail}`).join(" | ");
   if (!r.ok || !d.ok) {
     banner(`failed after [${done || "nothing"}] — ${d.error || r.status}`, false);
-    $("#runRasterizerBtn").disabled = false;
-    $("#rerunRasterizerBtn").disabled = false;
+      $("#rerunRasterizerBtn").disabled = false;
     return;
   }
   banner(done, true);

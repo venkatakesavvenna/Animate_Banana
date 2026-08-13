@@ -23,6 +23,15 @@
   .item { padding: 10px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
   .item:hover { background: var(--panel2); }
   .item.active { background: var(--panel2); box-shadow: inset 3px 0 0 var(--accent); }
+  /* Every gate signed off: the sample is done and needs no further attention. */
+  .item.done { background: rgba(78,201,160,.10); box-shadow: inset 3px 0 0 var(--ok); }
+  .item.done .id { color: var(--ok); }
+  .item.done.active { background: rgba(78,201,160,.18); }
+  /* Written off deliberately -- distinct from both "done" and "not started". */
+  .item.discarded { opacity: .55; box-shadow: inset 3px 0 0 var(--bad); }
+  .item.discarded .id { text-decoration: line-through; color: var(--dim); }
+  .badge { margin-left: auto; font-size: 10px; padding: 1px 6px; border-radius: 8px;
+           border: 1px solid var(--ok); color: var(--ok); }
   .item .id { font-family: ui-monospace, monospace; font-size: 12px; }
   .item .sub { font-size: 11px; color: var(--dim); margin-top: 3px; display: flex; gap: 6px; }
   .status { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px;
@@ -73,28 +82,35 @@
 
 <div id="side">
   <h1>Stage 1 &middot; D2C review</h1>
+  <div class="hint" id="listNote" style="padding:6px 16px;border-bottom:1px solid var(--line)"></div>
   <div id="list"></div>
 </div>
 
 <div id="main"><div id="empty">Pick a sample.</div></div>
 
 <script src="/render_panel.js"></script>
+<script src="/gate_panel.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 let CURRENT = null;
 let SAMPLE_ID = null;   // render_panel.js reads this
-let TEMP = "";          // temperature box survives render()'s rebuild of #main
 
 async function boot() {
   const d = await (await fetch("/api/samples")).json();
   $("#list").innerHTML = d.samples.map(s => `
-    <div class="item" data-id="${s.id}" onclick="open_('${s.id}')">
-      <div class="id">${esc(s.id)}</div>
+    <div class="item ${s.discarded ? "discarded" : s.all_approved ? "done" : ""}"
+         data-id="${s.id}" onclick="open_('${s.id}')">
+      <div class="id" style="display:flex;align-items:center;gap:6px">
+        ${esc(s.id)}
+        ${s.all_approved && !s.discarded ? '<span class="badge">done</span>' : ""}
+      </div>
       <div class="sub">
         <span class="status ${s.stage1a_status !== 'unreviewed' ? 'reviewed' : 'pending'}">1a: ${s.stage1a_status}</span>
         <span class="status ${s.stage1b_status !== 'unreviewed' ? 'reviewed' : 'pending'}">1b: ${s.stage1b_status}</span>
       </div>
     </div>`).join("");
+  const done = d.samples.filter(x => x.all_approved && !x.discarded).length;
+  $("#listNote").textContent = `${done} of ${d.samples.length} complete`;
 }
 
 function esc(s) {
@@ -116,17 +132,18 @@ async function render() {
   $("#main").innerHTML = `
     <h2>${esc(d.id)}</h2>
     <div class="sub2">${esc(d.title || "")} &middot; lineage: ${esc(d.code_lineage)}</div>
-    <div class="toolbar">
-      <button onclick="runStages(['1a','1b','1c'], true)">Run full Stage 1 (1a&rarr;1b&rarr;1c)</button>
-      <button onclick="runStages(['1b','1c'], true)">Re-run 1b&rarr;1c</button>
+    <div class="toolbar" style="margin-bottom:8px">
       <label class="hint" style="display:flex;align-items:center;gap:6px">
-        temp
-        <input id="tempBox" type="number" step="0.1" min="0" max="2" placeholder="config"
-               value="${TEMP}"
-               title="Sampling temperature for 1a/1c. Blank uses the config value. A different value is also a different cache key, which is what makes a re-run actually resample."
-               style="width:70px;background:#101216;color:var(--fg);border:1px solid var(--line);
-                      border-radius:5px;padding:5px 6px;font:inherit;font-size:12px">
+        target
+        <select onchange="setTarget(this.value)">
+          <option value="tikz" ${d.target === "tikz" ? "selected" : ""}>tikz</option>
+          <option value="svg" ${d.target === "svg" ? "selected" : ""}>svg</option>
+        </select>
       </label>
+      <span class="hint">Each target keeps its own artifacts &mdash; switching never
+        loses work.</span>
+    </div>
+    <div class="toolbar">
       <a class="linkbtn" href="/rasters/${CURRENT}">Rasters &rarr;</a>
       <a class="linkbtn" href="/xml/${CURRENT}">Structure XML &rarr;</a>
       <a class="linkbtn" href="/sequence/${CURRENT}">Sequence &rarr;</a>
@@ -136,6 +153,7 @@ async function render() {
     </div>
     ${stageStrip(d.stages)}
     <div id="banner"></div>
+    <div id="gatePanel"></div>
 
     <!-- Stacked and full width rather than side by side: comparing the render
          against the source is the whole judgement, and two 420px columns made
@@ -193,6 +211,12 @@ async function render() {
   // Diagram source only: the raster splice belongs to the other screen, and
   // showing it here would stop the render matching the code beside it.
   $("#renderPanel").innerHTML = renderPanelMarkup("diagram");
+  // #main is rebuilt wholesale by render(), so the gate is re-mounted here
+  // rather than once at boot.
+  $("#gatePanel").innerHTML = gatePanelMarkup("stage1a",
+    {title: "Stage 1a — diagram code", nextHref: `/rasters/${CURRENT}`,
+     nextLabel: "Next: rasters"});
+  loadGate("stage1a", `/rasters/${CURRENT}`);
 
   const block = await (await fetch(`/api/copy-block/${CURRENT}`)).json();
   $("#promptBox").value = block.prompt;
@@ -221,37 +245,24 @@ function stageStrip(s) {
     ${pill("1c", s.has_1c, s.stale_1c)}${todo}</div>`;
 }
 
-async function runStages(stages, force) {
-  const raw = ($("#tempBox")?.value ?? "").trim();
-  const temperature = raw === "" ? null : Number(raw);
-  if (temperature !== null && (Number.isNaN(temperature) || temperature < 0 || temperature > 2)) {
-    banner("temperature must be a number between 0 and 2", false);
-    return;
-  }
-  TEMP = raw;   // survive the re-render below
-
-  const note = temperature === null ? "" : ` at temp ${temperature}`;
-  banner(`running ${stages.join(" → ")}${note}…`, true);
-  const r = await fetch(`/api/run-stages/${CURRENT}`, {
-    method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({stages, force, temperature}),
-  });
-  const d = await r.json();
-  const done = (d.results || []).map(x => `${x.stage} ${x.status}`).join(", ");
-  if (!r.ok || !d.ok) {
-    banner(`failed after [${done || "nothing"}] — ${d.error || r.status}`, false);
-    render();
-    return;
-  }
-  banner(`done: ${done}${note}`, true);
-  render();
-}
-
 function copyPrompt() {
   $("#promptBox").select();
   navigator.clipboard.writeText($("#promptBox").value).then(
     () => banner("prompt copied to clipboard", true),
     () => banner("clipboard write failed — select-all + copy manually", false));
+}
+
+async function setTarget(target) {
+  await fetch(`/api/target/${CURRENT}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({target}),
+  });
+  // Nothing is migrated. The two targets write different suffixes under
+  // different lineages, so each keeps its own artifacts and switching back
+  // re-exposes them.
+  banner(`target is now ${target} — artifacts are per-target, nothing was lost`, true);
+  render();
+  boot();          // the sidebar's has_code flags are target-dependent too
 }
 
 async function saveHumanCode() {
@@ -263,11 +274,14 @@ async function saveHumanCode() {
   const d = await r.json();
   if (!r.ok || !d.ok) { banner("save failed", false); return; }
   banner("human code saved", true);
-  // The splice and the critique were both built from the old 1a; offer to
-  // rebuild rather than leaving two artifacts that no longer describe it.
-  if (confirm("1a changed. Re-run 1b (rasters) then 1c (critic) so the "
-              + "downstream artifacts match?")) {
-    await runStages(["1b", "1c"], true);
+  // The splice is a snapshot of 1a taken when the rasters were inserted, so it
+  // still describes the old code. Send the reviewer to the screen that rebuilds
+  // it rather than re-running from here: the raster screen re-splices the
+  // stored boxes onto the new 1a, which is the step that actually propagates
+  // this edit.
+  if (confirm("1a changed. The raster splice was built from the old code — "
+              + "go to the raster screen and re-run to rebuild it?")) {
+    location.href = `/rasters/${CURRENT}`;
     return;
   }
   render();

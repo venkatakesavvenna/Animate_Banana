@@ -163,6 +163,8 @@ class AnimationSequence:
 
             nodes.append(SequenceNode(
                 id=f"t{timestamp}",
+                # Parent is filled in below: it follows from the depth ladder,
+                # which is only knowable once every step has been read.
                 parent=None,
                 # The bench carries depth per element, not per step; the
                 # shallowest element is the step's own level.
@@ -175,6 +177,8 @@ class AnimationSequence:
                 timestamp=timestamp,
             ))
 
+        cls._link_bench_parents(nodes)
+
         return cls(
             style=meta.get("animation_style") or data.get("style") or "",
             traversal_style=traversal_style,
@@ -182,6 +186,60 @@ class AnimationSequence:
             traversal=[n.id for n in nodes],
             provenance=data.get("provenance") or {},
         )
+
+    @staticmethod
+    def _link_bench_parents(nodes: list["SequenceNode"]) -> None:
+        """Recover step parentage from the depth ladder, in place.
+
+        The bench dialect has no per-step `parent`: its steps are timestamps,
+        and the hierarchy lives in the *elements* each step reveals. Copying
+        those element depths onto the step while leaving `parent` unset made
+        every nested step look like a root sitting at depth 2 -- twelve of
+        pipe00137's fifteen steps, all reported as "root node 't2' has depth 2,
+        expected 1" when nothing was actually wrong with them.
+
+        Playback order is the hierarchy: a step at depth N belongs to the most
+        recent step at depth N-1, exactly as an indented outline nests. That is
+        the same reading the prompt describes -- animate a parent block, then
+        its internals -- so this recovers what the dialect implies rather than
+        inventing structure.
+        """
+        # Deepest ancestor seen at each level, as playback walks forward.
+        open_at_depth: dict[int, str] = {}
+        for node in nodes:
+            depth = node.depth or 1
+            parent = open_at_depth.get(depth - 1)
+            if depth > 1 and parent:
+                node.parent = parent
+            elif depth > 1:
+                # Nothing shallower has been seen yet, so this cannot be a
+                # child of anything. Treat it as the root it actually is
+                # rather than leaving an unsatisfiable depth behind.
+                node.depth = 1
+            open_at_depth[node.depth] = node.id
+            # A new node at this level closes anything deeper that was open.
+            for deeper in [d for d in open_at_depth if d > node.depth]:
+                open_at_depth.pop(deeper, None)
+
+    def relink_orphan_depths(self) -> int:
+        """Repair steps that claim a depth but no parent. Returns how many.
+
+        The bench->native conversion used to drop step parentage, and those
+        sequences are already on disk in native form -- so re-reading them will
+        never re-run the conversion that now gets it right. This applies the
+        same depth-ladder reading to an existing sequence, which is what lets a
+        stale artifact be repaired without regenerating it from the model.
+
+        Only touches nodes that are inconsistent (depth > 1 with no parent);
+        a sequence whose hierarchy is already stated survives untouched.
+        """
+        orphaned = [n for n in self.nodes if (n.depth or 1) > 1 and not n.parent]
+        if not orphaned:
+            return 0
+        before = [(n.id, n.parent, n.depth) for n in self.nodes]
+        self._link_bench_parents(self.nodes)
+        return sum(1 for b, n in zip(before, self.nodes)
+                   if (n.parent, n.depth) != (b[1], b[2]))
 
     def to_bench_dict(self) -> dict:
         """Serialize in the AnimateBench dialect, for direct comparison.

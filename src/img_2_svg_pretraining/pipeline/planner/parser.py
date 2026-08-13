@@ -14,6 +14,7 @@ here rather than being re-derived per consumer.
 """
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -76,6 +77,44 @@ def element_ids(xml_text: str) -> set[str]:
 
 def load_element_ids(path: Path) -> set[str]:
     return element_ids(Path(path).read_text(encoding="utf-8"))
+
+
+# `xml id=foo` in TikZ, `data-id="foo"` / `id="foo"` in SVG.
+_CODE_ID_RE = re.compile(r'xml id=([A-Za-z0-9_\-.:]+)|(?:data-)?id="([^"]+)"')
+
+
+def code_element_ids(code: str) -> set[str]:
+    """Every element id the diagram code declares, whatever the target.
+
+    The XML deliberately omits `text_node` elements -- the parser prompt says
+    to exclude them, and the sequencer prompt says the code is the EXCLUSIVE
+    source for them. Validating `focus` against the XML alone therefore
+    reported every correctly-referenced text label as "absent from the
+    diagram": 9 of pipe00137's 11 text ids were false positives.
+    """
+    found: set[str] = set()
+    for tikz_id, svg_id in _CODE_ID_RE.findall(code or ""):
+        value = tikz_id or svg_id
+        if value:
+            found.add(value)
+    return found
+
+
+def referenceable_ids(xml_path: Path, code: str | None = None) -> set[str] | None:
+    """The ids a sequence's `focus` may legitimately name.
+
+    The union of the structural XML and the code, because the two are
+    deliberately partial in different ways. Returns None when neither is
+    available, which callers treat as "cannot check" rather than "nothing is
+    valid".
+    """
+    ids: set[str] = set()
+    xml_path = Path(xml_path) if xml_path else None
+    if xml_path and xml_path.is_file():
+        ids |= load_element_ids(xml_path)
+    if code:
+        ids |= code_element_ids(code)
+    return ids or None
 
 
 def run(cfg, samples: list[PaperSample], force: bool = False) -> StageReport:

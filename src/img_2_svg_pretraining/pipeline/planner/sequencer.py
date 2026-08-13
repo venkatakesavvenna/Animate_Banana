@@ -21,19 +21,28 @@ from ..runner import AgentContext, StageReport, run_agent
 from ..samples import PaperSample
 from ..schema import AnimationSequence
 from ..styles import get_style
-from .parser import load_element_ids
+from .parser import referenceable_ids
 
 AGENT = "sequencer"
 DEFAULT_MAX_DEPTH = 3
 
 
 def _load_strategy(ctx: AgentContext, sample: PaperSample) -> dict:
+    """The strategizer's plan, or an empty one when 2a did not run.
+
+    Optional rather than required: the bench sequencer prompts decide the
+    traversal order themselves ("You must determine the optimal Traversal
+    Style"), so a strategy is only useful to the placeholder-style prompt that
+    interpolates it. Missing strategy is therefore a configuration choice, not
+    an error.
+    """
     path = ctx.paths.strategy(sample.id)
     if not path.exists():
-        raise FileNotFoundError(
-            f"no strategy for '{sample.id}' at {path}. Run the strategize stage first."
-        )
-    return json.loads(path.read_text(encoding="utf-8"))
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 
 def _load_xml(ctx: AgentContext, sample: PaperSample) -> str:
@@ -65,6 +74,16 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
 
     template = load_prompt(ctx.agent.prompt)
     if has_placeholders(template):
+        # This form interpolates the strategizer's plan, so it genuinely needs
+        # one. Say so rather than rendering an empty outline into the prompt.
+        if not strategy:
+            raise FileNotFoundError(
+                f"no strategy for '{sample.id}' at {ctx.paths.strategy(sample.id)}. "
+                f"'{ctx.agent.prompt}' interpolates the strategizer's plan, so "
+                f"either run the strategize stage or point the sequencer at a "
+                f"bench prompt (tikz_sequencer / svg_sequencer), which plans "
+                f"the traversal itself."
+            )
         text = render(template, context)
     else:
         # The AnimateBench prompts (tikz_sequencer / svg_sequencer) are written
@@ -73,15 +92,18 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
         # supply nothing, so the same context is laid out as a labelled suffix
         # instead. They also read the diagram code directly, since text_node
         # elements are deliberately absent from the structure XML.
+        #
+        # Exactly the three inputs the prompt's own "YOUR INPUTS" section names
+        # -- code, structural graph, style. Deliberately no traversal hint: the
+        # prompt states "You must determine the optimal Traversal Style", so
+        # supplying one would work against the instruction it is being asked
+        # to follow.
         code = Path(ctx.paths.resolve_code(sample.id)).read_text(encoding="utf-8")
         text = "\n\n".join([
             template,
             "### ORIGINAL DIAGRAM CODE\n" + code,
             "### HIERARCHICAL GRAPH (STRUCTURE XML)\n" + structure_xml,
             f"### ANIMATION STYLE\n{ctx.cfg.style}\n\n{style.prompt_block()}",
-            f"### SUGGESTED TRAVERSAL\n{context['traversal_style']}\n"
-            f"{context['strategy_reasoning']}",
-            f"### MAXIMUM DEPTH\n{max_depth}",
         ])
 
     return [Message.user(text, images=[sample.image_path])]
@@ -104,7 +126,13 @@ def parse_response(ctx: AgentContext, sample: PaperSample, raw: str) -> str:
     # critic's job, and a sequence that fails validation is still the input
     # that stage needs. A response we cannot parse at all is different -- that
     # raises above.
-    element_ids = load_element_ids(ctx.paths.xml(sample.id))
+    # XML *and* code: `text_node` elements are deliberately absent from the
+    # XML, so checking against it alone flags every correctly-referenced text
+    # label as missing.
+    element_ids = referenceable_ids(
+        ctx.paths.xml(sample.id),
+        Path(ctx.paths.resolve_code(sample.id)).read_text(encoding="utf-8"),
+    )
     problems = sequence.validate(
         element_ids=element_ids,
         max_depth=ctx.agent.option("max_depth", DEFAULT_MAX_DEPTH),

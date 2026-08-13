@@ -151,6 +151,18 @@ class _Critic:
 
 def run(cfg, samples: list[PaperSample], force: bool = False) -> StageReport:
     critic = _Critic(cfg)
+
+    # Opt-out, matching `raster_integrator` and `diagram_critic`. Worth having
+    # for SVG: this critic's compile check is already a no-op for non-TikZ
+    # targets, so it only re-reads the document and echoes it back -- and an
+    # SVG animation runs to ~38 KB, which truncates. A truncated response
+    # raises, the sample is reported failed, and any *stale* animation_final
+    # from an earlier run survives -- which the exporter then prefers over the
+    # fresh animation, silently shipping the older version.
+    if critic.ctx.agent.option("enabled", True) is False:
+        print(f"[{AGENT}] disabled in config; skipping")
+        return StageReport(agent=AGENT)
+
     try:
         return run_iterative_agent(
             ctx=critic.ctx,

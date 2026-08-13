@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ..backends import Message
 from ..extract import extract_code
-from ..prompts import load_and_render
+from ..prompts import has_placeholders, load_prompt, render
 from ..runner import AgentContext, StageReport, run_agent
 from ..samples import PaperSample
 from ..schema import AnimationSequence
@@ -21,12 +21,20 @@ AGENT = "designer"
 
 
 def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
-    sequence_path = ctx.paths.sequence_final(sample.id)
-    if not sequence_path.exists():
-        # Fall back to the un-reviewed sequence so the animator can run before
-        # the critic stage has been executed.
-        sequence_path = ctx.paths.sequence(sample.id)
-    if not sequence_path.exists():
+    # Narrated first: 2e writes the spoken script onto an otherwise identical
+    # structure, and that script carries pacing and emphasis the designer can
+    # act on. Reading `sequence_final` directly meant narration was generated,
+    # stored, and then never seen by the stage that turns a sequence into
+    # motion -- on pipe00137, 15/15 narrated nodes reached the designer as 0.
+    # Then the reviewed sequence, then the raw one so the animator can still
+    # run before the critic stage has executed.
+    for candidate in (ctx.paths.sequence_narrated(sample.id),
+                      ctx.paths.sequence_final(sample.id),
+                      ctx.paths.sequence(sample.id)):
+        if candidate.exists():
+            sequence_path = candidate
+            break
+    else:
         raise FileNotFoundError(
             f"no sequence for '{sample.id}'. Run the sequence (and critique) stages first."
         )
@@ -34,11 +42,31 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
     sequence = AnimationSequence.load(sequence_path)
     code = Path(ctx.paths.resolve_code(sample.id)).read_text(encoding="utf-8")
 
-    text = load_and_render(ctx.agent.prompt, {
+    context = {
         "style_block": get_style(ctx.cfg.style).prompt_block(),
         "sequence_json": sequence.to_json(),
         "diagram_code": code,
-    })
+    }
+
+    template = load_prompt(ctx.agent.prompt)
+    if has_placeholders(template):
+        text = render(template, context)
+    else:
+        # `svg_designer.yaml` is written as standalone instructions with no
+        # {placeholders} -- it names its inputs in prose ("You will be provided
+        # with a JSON Animation Sequence and the Target Static SVG Code") and
+        # expects them appended. Substituting into it silently supplied
+        # *nothing*, so the model received the prompt and the figure but not
+        # the document it was told to animate -- and duly redrew the diagram
+        # from scratch, discarding every element id and every spliced raster.
+        # Same convention, and the same fix, as `planner/sequencer.py`.
+        text = "\n\n".join([
+            template,
+            "### TARGET STATIC SVG CODE\n" + code,
+            "### JSON ANIMATION SEQUENCE\n" + context["sequence_json"],
+            f"### ANIMATION STYLE\n{ctx.cfg.style}\n\n{context['style_block']}",
+        ])
+
     return [Message.user(text, images=[sample.image_path])]
 
 

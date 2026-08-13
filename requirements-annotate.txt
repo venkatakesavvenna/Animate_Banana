@@ -1,0 +1,42 @@
+# Annotation tool -- runtime dependencies.
+#
+# Deliberately smaller than pyproject.toml's `dependencies`. That list covers
+# the whole repo including local open-weights inference, which pulls torch,
+# transformers, flash-attn and accelerate -- several GB, a CUDA toolchain, and
+# none of it reachable from the annotation tool. `backends/hf_local.py` imports
+# torch *inside* the function that loads a local model, so a config that names
+# only Gemini never touches it.
+#
+#   pip install -r requirements-annotate.txt
+#
+# See docs/ANNOTATOR_SETUP.md for the system packages (TeX Live, poppler) that
+# pip cannot install.
+
+# -- the app itself -----------------------------------------------------
+flask>=3.0
+pyyaml>=6.0
+filelock>=3.12          # one annotation record, two rapid requests
+
+# -- model backend ------------------------------------------------------
+# Only Gemini is needed for the default config. openai/anthropic are here
+# because `backends/__init__.py` maps them by name; drop them if your config
+# never names those backends.
+google-genai>=2.0       # <2.0 breaks the Interactions API used for narration
+openai>=1.40
+anthropic>=0.40
+
+# -- rendering ----------------------------------------------------------
+pillow>=10.0
+cairosvg>=2.7           # SVG target: static render without a browser
+numpy<2                 # cv2 and imageio both still expect the 1.x ABI
+opencv-python>=4.9      # frame resizing during video assembly
+pymupdf>=1.24           # PDF -> PPTX
+imageio>=2.34
+imageio-ffmpeg>=0.5     # bundles its own ffmpeg; no system install needed
+python-pptx>=1.0
+
+# -- SVG animation frames ----------------------------------------------
+# CSS @keyframes cannot be seeked by a rasterizer, so SVG frames come from a
+# headless browser. After installing, run once:  playwright install chromium
+# Skip this and the SVG target still annotates -- only its frame export fails.
+playwright>=1.44

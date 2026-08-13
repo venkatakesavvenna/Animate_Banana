@@ -9,15 +9,24 @@ prompt: |
      number to the element id it sits on. Use the markers to see WHERE each element actually is
      — that is their only purpose. Never put a marker number in your output; always use the
      element id.
-  2. STRUCTURE XML — the authoritative list of element ids.
+  2. STRUCTURE XML — the structural element hierarchy. Note that this is DELIBERATELY
+     INCOMPLETE: `text_node` elements are excluded from it by design, and live only in the
+     diagram code. A `focus` entry naming a text element is therefore correct even though the
+     id does not appear here. Never delete a focus entry merely because you cannot find it in
+     this XML.
   3. THE PROPOSED SEQUENCE — the JSON under review.
-  4. AUTOMATED FINDINGS — violations already detected mechanically. These are facts, not
-     opinions. Every one of them must be fixed.
+  4. AUTOMATED FINDINGS — violations detected mechanically. Fix every one of them, but fix
+     them by CORRECTING the sequence, not by deleting the elements a finding mentions.
+     Removing a focus entry to silence a finding is never an acceptable repair: it makes the
+     check pass while making the animation worse.
   5. The animation style and maximum depth the sequence must satisfy.
 
   ### WHAT TO CHECK
 
-  First, fix every item in AUTOMATED FINDINGS. Those are certain.
+  First, fix every item in AUTOMATED FINDINGS — by repairing the sequence, never by dropping
+  the elements involved. If a finding claims an element is absent from the diagram but you can
+  see that element in the diagram image or the structure, keep the reference and leave the
+  step intact: the check is looking at a partial id list, and the element is real.
 
   Then review what automation cannot judge:
 

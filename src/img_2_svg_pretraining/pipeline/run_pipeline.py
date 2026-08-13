@@ -61,15 +61,22 @@ STAGE_MODULES = {
 
 STAGE_GROUPS = {
     "stage1": ["convert-code", "integrate-rasters", "critique-diagram"],
-    "stage2": ["strategize", "parse", "sequence", "critique-sequence", "narrate"],
+    # `strategize` is deliberately absent: the sequencer now uses the bench
+    # prompts, which plan the traversal themselves from the code and the
+    # structural graph, so a separate strategy pass adds a model call whose
+    # output nothing reads. The stage still exists and can be run explicitly
+    # (`run_pipeline.py strategize`) for the placeholder-style sequencer
+    # prompt, which does interpolate it.
+    "stage2": ["parse", "sequence", "critique-sequence", "narrate"],
     "stage3": ["design", "critique-animation", "export"],
 }
 STAGE_GROUPS["all"] = STAGE_GROUPS["stage1"] + STAGE_GROUPS["stage2"] + STAGE_GROUPS["stage3"]
 
-# Canonical agent order, which is what `--from`/`--to` slice against. The
-# groups above are contiguous windows of this list, so a range never has to be
-# reconciled against them separately.
-STAGE_ORDER = STAGE_GROUPS["all"]
+# Canonical agent order, which is what `--from`/`--to` slice against. Includes
+# `strategize` even though no group runs it, so `--from strategize` still
+# resolves rather than erroring on an unknown stage.
+STAGE_ORDER = (STAGE_GROUPS["stage1"] + ["strategize"]
+               + STAGE_GROUPS["stage2"] + STAGE_GROUPS["stage3"])
 
 
 def resolve_stages(stage: str, start: str | None = None, stop: str | None = None) -> list[str]:

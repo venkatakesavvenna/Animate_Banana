@@ -93,9 +93,13 @@ planner:
       temperature: 0.0
       max_tokens: 16384
 
+  # Plans the traversal itself from the diagram code and the structural graph,
+  # which is why the strategizer no longer runs as part of stage2. The native
+  # `sequencer.yaml#prompt` remains available and interpolates a strategy, but
+  # then `strategize` has to be run explicitly first.
   sequencer:
     backend: gemini_flash
-    prompt: animation_planner/sequencer.yaml#prompt
+    prompt: animation_planner/tikz_sequencer.yaml#seq_with_narration
     params:
       temperature: 0.3
       # A sequence with narration per node runs long; 8192 truncated mid-JSON

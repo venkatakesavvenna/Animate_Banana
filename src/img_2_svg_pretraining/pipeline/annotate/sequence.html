@@ -71,6 +71,12 @@
   <h1 id="sampleId"></h1>
   <a href="/">&larr; samples</a>
   <a id="xmlLink" href="#">&larr; xml</a>
+  <label class="hint">target
+    <select id="targetSel" onchange="setTarget(this.value)">
+      <option value="tikz">tikz</option>
+      <option value="svg">svg</option>
+    </select>
+  </label>
   <label class="hint">style
     <select id="styleSel" onchange="setStyle(this.value)"></select>
   </label>
@@ -81,16 +87,52 @@
   <div id="left">
     <div id="banner"></div>
 
+    <div class="card" id="gateCard">
+      <h3>Stage 2c &mdash; sequence <span class="hint" id="gateSummary"></span></h3>
+      <div id="gateChecks"></div>
+      <div class="toolbar" style="margin-top:8px">
+        <button id="approveBtn" onclick="toggleApprove()">Approve stage</button>
+        <button class="primary" id="nextBtn" onclick="goAnimation()">Next: animation &rarr;</button>
+      </div>
+      <p class="hint" id="gateNote"></p>
+    </div>
+
     <div class="card">
       <h3>Run</h3>
       <div class="toolbar">
-        <button onclick="runStages(['2a','2b','2c','2d'], true)">Plan (2a&rarr;2d)</button>
-        <button onclick="runStages(['2c','2d'], true)">Re-sequence (2c&rarr;2d)</button>
-        <button onclick="runStages(['2d'], true)">Re-critique (2d)</button>
-        <button class="primary" onclick="runStages(['3a','3b','3c'], true)">Render video (3a&rarr;3c)</button>
+        <button class="primary" onclick="runStages(['2c','2d','2e'], true)">
+          Sequence (2c&rarr;2d + narrate)</button>
+        <button onclick="runStages(['2c','2e'], true, true)">Sequence, no critic</button>
+        <button onclick="rebuildAnimation(true)">Re-animate</button>
+        <button onclick="rebuildAnimation(false)">Re-animate, no critic</button>
       </div>
-      <p class="hint" id="runNote">Rendering compiles the animation and rasterizes every frame;
-        it can take minutes but makes no API calls of its own.</p>
+      <p class="hint">Narration runs as part of every sequence build &mdash; it only
+        fills the <code>narrative</code> field of an already-valid sequence, so it is
+        never a separate decision.</p>
+      <p class="hint">The <em>no critic</em> variants skip 2d / 3b and bypass the
+        gate, because an uncritiqued sequence usually still has violations &mdash;
+        that is the point of running without it. The gate itself is unchanged, so
+        the stage will still read as incomplete until the sequence validates.</p>
+      <p class="hint">Re-parsing the XML (2b) is deliberately not here: it would
+        overwrite the structure you edited on the
+        <a id="xmlLink2" href="#">XML screen</a> and hand it back as model output.</p>
+      <div id="runProgress"></div>
+    </div>
+
+    <div class="card">
+      <h3>Copy prompt, to try a stronger model</h3>
+      <div class="hint" style="margin-bottom:8px">
+        The prompt below is exactly what the sequencer would send &mdash; it already contains
+        the diagram code, the structure XML and the style block. The separate buttons are for
+        when a model wants them pasted individually.
+      </div>
+      <textarea class="code" id="promptBox" readonly style="min-height:120px"></textarea>
+      <div class="toolbar" style="margin-top:8px">
+        <button onclick="copyText('#promptBox','prompt')">Copy prompt</button>
+        <button onclick="copyPart('xml')">Copy XML</button>
+        <button onclick="copyPart('code')">Copy D2C code</button>
+        <a class="linkbtn" id="imgDl" href="#" download>Download image</a>
+      </div>
     </div>
 
     <div class="card">
@@ -114,13 +156,16 @@
   </div>
 
   <div id="right">
-    <div class="card">
+    <!-- The sequence is JSON, so what is worth rendering here is the diagram
+         its focus ids point at -- that is what a reviewer checks them against. -->
+    <div id="renderPanel"></div>
+    <div class="card" id="videoCard" style="display:none">
       <h3>Video <span class="hint" id="videoNote"></span></h3>
-      <video id="vid" controls preload="metadata"></video>
-      <div id="noVideo" class="hint">Not rendered yet.</div>
+      <video id="vid" controls preload="metadata" style="width:100%;border-radius:4px;background:#000"></video>
     </div>
     <div class="card" id="framesCard" style="display:none">
       <h3>Frames <span class="hint" id="frameLabel"></span></h3>
+      <div id="framesNote"></div>
       <img id="frameImg">
       <input type="range" id="scrub" min="0" value="0" oninput="showFrame(+this.value)">
     </div>
@@ -136,11 +181,15 @@
   </div>
 </div>
 
+<script src="/render_panel.js"></script>
+<script src="/gate_panel.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const SAMPLE = decodeURIComponent(location.pathname.split("/").pop());
 const SAMPLE_ID = SAMPLE;
 let FRAMES = 0, VALIDATE_TIMER = null;
+// Bumped when the deck is rebuilt so cached PNGs are not reused.
+let FRAME_TAG = Date.now();
 // Focus ids the validator reported as absent from the XML, so the step list
 // can mark exactly which chip is broken rather than just counting problems.
 let MISSING = new Set();
@@ -155,11 +204,14 @@ function banner(msg, kind) {
 async function boot() {
   $("#sampleId").textContent = SAMPLE;
   $("#xmlLink").href = `/xml/${SAMPLE}`;
+  $("#xmlLink2").href = `/xml/${SAMPLE}`;
   $("#figImg").src = `/api/image/${SAMPLE}`;
+  $("#renderPanel").innerHTML = renderPanelMarkup("diagram");
 
   const d = await (await fetch(`/api/sequence-state/${SAMPLE}`)).json();
   $("#styleSel").innerHTML = d.styles.map(s =>
     `<option ${s === d.style ? "selected" : ""}>${esc(s)}</option>`).join("");
+  $("#targetSel").value = d.target || "tikz";
   $("#lineage").textContent = d.sequence_lineage;
   $("#origin").textContent = d.origin ? `(${d.origin})` : "(none yet)";
   $("#seqBox").value = d.sequence || "";
@@ -167,19 +219,30 @@ async function boot() {
 
   renderValidation(d.validation);
   renderSteps(d.sequence);
+  $("#imgDl").href = `/api/image/${SAMPLE}`;
+  $("#imgDl").setAttribute("download", `${SAMPLE}.png`);
+  loadPrompt();
+  loadGates();
 
-  // Video + frames
+  // Video alongside the deck: stills for checking one moment, video for
+  // judging whether the motion reads.
   if (d.has_video) {
-    $("#vid").src = `/api/video/${SAMPLE}?t=${Date.now()}`;
-    $("#vid").style.display = "";
-    $("#noVideo").style.display = "none";
+    $("#videoCard").style.display = "";
+    $("#vid").src = `/api/video/${SAMPLE}?t=${FRAME_TAG}`;
   } else {
-    $("#vid").style.display = "none";
-    $("#noVideo").style.display = "";
+    $("#videoCard").style.display = "none";
+    $("#vid").removeAttribute("src");
   }
   FRAMES = d.frames;
   $("#framesCard").style.display = FRAMES ? "" : "none";
   if (FRAMES) { $("#scrub").max = FRAMES - 1; showFrame(0); }
+  // Saving a sequence does not re-animate anything, so the deck can be older
+  // than the sequence beside it. Say so rather than showing stale slides as
+  // though they illustrate what is in the editor.
+  $("#framesNote").innerHTML = d.frames_stale
+    ? `<div class="banner warn">These frames are from an earlier sequence —
+         re-run the animation on the animation screen to rebuild them.</div>`
+    : "";
 
   const m = new Image();
   m.onload = () => { $("#markedImg").src = m.src; $("#markedNote").style.display = "none"; };
@@ -193,9 +256,80 @@ async function boot() {
 }
 
 function showFrame(i) {
-  $("#frameImg").src = `/api/frame/${SAMPLE}/${i}`;
+  $("#frameImg").src = `/api/frame/${SAMPLE}/${i}?t=${FRAME_TAG}`;
   $("#frameLabel").textContent = `${i + 1} / ${FRAMES}`;
 }
+
+// -- copy block ----------------------------------------------------------
+
+async function loadPrompt() {
+  const r = await fetch(`/api/copy-block/${SAMPLE}?agent=sequencer`);
+  const d = await r.json();
+  if (!r.ok) {
+    $("#promptBox").value = `(unavailable) ${d.error || r.status}`;
+    return;
+  }
+  $("#promptBox").value = d.prompt;
+}
+
+function copyText(sel, what) {
+  navigator.clipboard.writeText($(sel).value ?? $(sel).textContent).then(
+    () => banner(`${what} copied to clipboard`, "ok"),
+    () => banner("clipboard blocked — select and copy manually", "err"));
+}
+
+async function copyPart(which) {
+  // Fetched fresh rather than sliced out of the prompt: the prompt's section
+  // headers differ per target, and parsing them here would silently break the
+  // day a prompt is reworded.
+  // /api/xml returns both the structure XML and the diagram code it was
+  // parsed from, so one fetch covers both buttons.
+  const d = await (await fetch(`/api/xml/${SAMPLE}`)).json();
+  const text = which === "xml" ? (d.xml || "") : (d.code || "");
+  if (!text) { banner(`no ${which} available yet`, "err"); return; }
+  navigator.clipboard.writeText(text).then(
+    () => banner(`${which} copied to clipboard`, "ok"),
+    () => banner("clipboard blocked", "err"));
+}
+
+// -- gates ---------------------------------------------------------------
+
+let GATE = null;
+
+async function loadGates() {
+  const d = await (await fetch(`/api/workflow-state/${SAMPLE}`)).json();
+  GATE = d.gates.stage2c;
+  const g = GATE;
+  $("#gateSummary").textContent = g.passed ? "— complete" : "— incomplete";
+  $("#gateChecks").innerHTML = g.checks.map(c =>
+    `<div class="${c.passed ? "" : "bad"}" style="font-size:12px;margin:2px 0">
+       ${c.passed ? "&#10003;" : "&#10007;"} ${esc(c.name)}
+       ${c.detail ? `<span class="hint">— ${esc(c.detail)}</span>` : ""}
+     </div>`).join("");
+  const approved = g.checks.find(c => c.name === "reviewer approved")?.passed;
+  $("#approveBtn").textContent = approved ? "Un-approve stage" : "Approve stage";
+  // Hard block: the next screen is unreachable until every check passes. The
+  // API refuses too, so this is a signpost rather than the enforcement.
+  $("#nextBtn").disabled = !g.passed;
+  $("#gateNote").textContent = g.passed
+    ? "Stage 2c is complete. You can move on."
+    : `Blocked on: ${g.blocking.join(", ")}.`;
+}
+
+async function toggleApprove() {
+  const approved = GATE?.checks.find(c => c.name === "reviewer approved")?.passed;
+  const r = await fetch(`/api/approve/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({stage: "stage2c", approved: !approved}),
+  });
+  if (!r.ok) { banner(`approve failed: ${r.status}`, "err"); return; }
+  await loadGates();
+  banner(approved ? "approval withdrawn" : "stage approved", "ok");
+}
+
+// Stage 3 is the full animation-review screen: it carries every designer input
+// for copy-out, not just the compact 3a view.
+function goAnimation() { location.href = `/stage3/${SAMPLE}`; }
 
 function renderSteps(text) {
   let seq;
@@ -263,9 +397,48 @@ async function saveSeq() {
     banner(`save failed: ${(d.problems || []).join("; ") || d.error || r.status}`, "err");
     return;
   }
+  FRAME_TAG = Date.now();
   const bad = (d.validation.problems || []).length;
   banner(bad ? `saved with ${bad} outstanding problem(s)` : "saved", bad ? "warn" : "ok");
   boot();
+}
+
+async function rebuildAnimation(withCritic) {
+  // The frames on this screen are stage-3 output. Saving or re-sequencing does
+  // not touch them, so without this the deck can never catch up with the
+  // sequence beside it -- which is exactly what "the new frames don't render"
+  // looked like.
+  const buttons = [...document.querySelectorAll("button")];
+  buttons.forEach(b => b.disabled = true);
+  runProgressStart("#runProgress");
+  try {
+    const r = await fetch(`/api/run-stage2/${SAMPLE}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      // 3b is the animation critic; skipping it shows the designer's raw
+      // output, which is the point of the "no critic" variant.
+      body: JSON.stringify({stages: withCritic ? ["3a", "3b"] : ["3a"],
+                            force: true, override: !withCritic}),
+    });
+    const d = await r.json();
+    if (r.status === 409) {
+      banner(`${d.error} — unmet: ${(d.gate?.blocking || []).join(", ")}`, "err");
+      return;
+    }
+    if (!r.ok || !d.ok) { banner(`design failed: ${d.error || r.status}`, "err"); return; }
+    banner("designed — compiling frames and video…", "ok");
+    const c = await fetch(`/api/compile-animation/${SAMPLE}`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({force: true}),
+    });
+    const cd = await c.json();
+    if (!c.ok) { banner(`compile failed: ${cd.error || c.status}`, "err"); return; }
+    banner(`rebuilt: ${cd.frames} frame(s)${cd.has_video ? " + video" : ""}`, "ok");
+  } finally {
+    await runProgressStop("#runProgress");
+    buttons.forEach(b => b.disabled = false);
+    FRAME_TAG = Date.now();
+    boot();
+  }
 }
 
 async function promoteSeq() {
@@ -279,6 +452,18 @@ async function promoteSeq() {
          r.ok && d.ok ? "ok" : "err");
 }
 
+async function setTarget(target) {
+  await fetch(`/api/target/${SAMPLE}`, {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({target}),
+  });
+  // Nothing is migrated: the two targets write different suffixes under
+  // different lineages, so each keeps its own artifacts and switching back
+  // re-exposes them.
+  banner(`target is now ${target} — artifacts are per-target, nothing was lost`, "ok");
+  boot();
+}
+
 async function setStyle(style) {
   await fetch(`/api/style/${SAMPLE}`, {
     method: "POST", headers: {"Content-Type": "application/json"},
@@ -288,21 +473,25 @@ async function setStyle(style) {
   boot();
 }
 
-async function runStages(stages, force) {
+async function runStages(stages, force, override) {
   const buttons = [...document.querySelectorAll("button")];
   buttons.forEach(b => b.disabled = true);
-  const started = Date.now();
-  const tick = setInterval(() => {
-    banner(`running ${stages.join(" → ")}… ${Math.round((Date.now() - started) / 1000)}s`, "ok");
-  }, 1000);
+  // Per-stage progress from the server rather than a local second counter:
+  // which stage is running, and what the critic sent back, is the part worth
+  // watching.
+  runProgressStart("#runProgress");
   try {
     const r = await fetch(`/api/run-stage2/${SAMPLE}`, {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({stages, force}),
+      body: JSON.stringify({stages, force, override: !!override}),
     });
     const d = await r.json();
     const done = (d.results || []).map(x => `${x.stage} ${x.status}`).join(", ");
-    if (!r.ok || !d.ok) {
+    if (r.status === 409) {
+      // A gate refused the run. Say which check is unmet rather than reporting
+      // it as a generic failure -- the reviewer can act on the former.
+      banner(`${d.error} — unmet: ${(d.gate?.blocking || []).join(", ")}`, "err");
+    } else if (!r.ok || !d.ok) {
       banner(`failed after [${done || "nothing"}] — ${d.error || r.status}`, "err");
     } else if ((d.unresolved || []).length) {
       // The critic wrote its best attempt without converging; that is a real
@@ -312,7 +501,7 @@ async function runStages(stages, force) {
       banner(`done: ${done}`, "ok");
     }
   } finally {
-    clearInterval(tick);
+    await runProgressStop("#runProgress");
     buttons.forEach(b => b.disabled = false);
     boot();
   }

@@ -23,6 +23,44 @@ from ..samples import PaperSample
 AGENT = "exporter"
 
 
+def _export_svg(ctx: AgentContext, sample: PaperSample, code: str, out_dir: Path,
+                formats: list[str], fps: int) -> tuple[Path, str]:
+    """Export an animated SVG.
+
+    Only frame *production* differs from the TikZ path: the designer emits CSS
+    `@keyframes`, which no rasterizer can seek, so frames come from a headless
+    browser instead of a multipage PDF. Assembly reuses `frames_to_mp4` /
+    `frames_to_gif` unchanged, so both targets produce the same deliverables
+    from the same code.
+
+    pdf and pptx are skipped rather than faked -- both go through the TikZ
+    PDF chain, and claiming to produce them would be worse than saying so.
+    """
+    from ..export.svg_frames import render_svg_frames
+
+    frames, used_fps = render_svg_frames(code, out_dir / "frames", fps=fps)
+    if not frames:
+        raise RenderError(f"no frames rendered for '{sample.id}'")
+
+    produced = []
+    if "frames" in formats:
+        produced.append("frames")
+    if "mp4" in formats:
+        frames_to_mp4(frames, out_dir / "animation.mp4", fps=used_fps)
+        produced.append("mp4")
+    if "gif" in formats:
+        frames_to_gif(frames, out_dir / "animation.gif", fps=used_fps)
+        produced.append("gif")
+    if "narrated_mp4" in formats:
+        produced.append(_export_narrated(ctx, sample, frames, out_dir))
+
+    skipped = sorted({"pdf", "pptx"} & set(formats))
+    detail = f"{len(frames)} frames @ {used_fps}fps -> {', '.join(produced) or 'nothing'}"
+    if skipped:
+        detail += f" (no SVG path for {', '.join(skipped)})"
+    return out_dir, detail
+
+
 def _export_narrated(ctx: AgentContext, sample: PaperSample, frames: list[Path],
                      out_dir: Path) -> str:
     """Synthesize the narration and mux it against the frames.
@@ -77,14 +115,23 @@ def export_sample(ctx: AgentContext, sample: PaperSample, formats: list[str],
     out_dir = ctx.paths.exports(sample.id)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if ctx.cfg.target == "svg":
+        return _export_svg(ctx, sample, code, out_dir, formats, fps)
+
     frames_declared = frame_count(code)
     pdf_path = compile_pdf(to_multipage_pdf_source(code), out_dir / "animation.pdf")
 
     produced = ["pdf"]
-    needs_frames = {"mp4", "gif", "narrated_mp4"} & set(formats)
+    # "frames" is its own output token, not merely a by-product of the video
+    # formats. Without it there is no way to ask for a slide deck: `outputs: []`
+    # compiles the PDF (line above is unconditional) but leaves `needs_frames`
+    # empty, so zero PNGs are written and a frame scrubber has nothing to show.
+    needs_frames = {"frames", "mp4", "gif", "narrated_mp4"} & set(formats)
     frames: list[Path] = []
     if needs_frames:
         frames = pdf_to_frames(pdf_path, out_dir / "frames", dpi=dpi)
+    if "frames" in formats:
+        produced.append("frames")
 
     if "mp4" in formats:
         frames_to_mp4(frames, out_dir / "animation.mp4", fps=fps)
@@ -118,15 +165,26 @@ def run(cfg: PipelineConfig, samples: list[PaperSample], force: bool = False) ->
     fps = int(ctx.agent.option("fps", DEFAULT_FPS))
     dpi = int(ctx.agent.option("dpi", DEFAULT_DPI))
 
-    if cfg.target != "tikz":
-        raise NotImplementedError(
-            "SVG export is not wired up yet; it needs the dvisvgm + playwright "
-            "path from export/svg/ppt_and_video.py. Use target: tikz."
-        )
+    # The cached-artifact marker differs by target: TikZ always writes a PDF
+    # (every other format derives from it), while the SVG path has no PDF at
+    # all and the mp4 is the thing worth not rebuilding.
+    #
+    # A frames-only run writes neither, so both would re-render every time --
+    # which matters most for SVG, where frames come from a headless browser.
+    # Fall back to the frames directory as the marker in that case.
+    if not ({"mp4", "gif", "pptx", "narrated_mp4"} & set(formats)):
+        marker = "frames"
+    else:
+        marker = "animation.pdf" if cfg.target == "tikz" else "animation.mp4"
 
     for sample in samples:
         out_dir = ctx.paths.exports(sample.id)
-        if (out_dir / "animation.pdf").exists() and not force:
+        cached = out_dir / marker
+        # `frames` is a directory, and an empty one means a failed render, not
+        # a cached result worth honouring.
+        hit = (cached.is_dir() and any(cached.glob("*.png"))
+               if marker == "frames" else cached.exists())
+        if hit and not force:
             report.outcomes.append(SampleOutcome(sample.id, "skipped", out_dir, "cached"))
             continue
         try:

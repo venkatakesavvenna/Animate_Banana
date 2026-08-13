@@ -34,7 +34,7 @@ from ..runner import AgentContext, StageReport, run_iterative_agent
 from ..samples import PaperSample
 from ..schema import AnimationSequence
 from ..styles import get_style
-from .parser import load_element_ids
+from .parser import referenceable_ids
 from .sequencer import DEFAULT_MAX_DEPTH
 
 AGENT = "planner_critic"
@@ -134,7 +134,10 @@ class _Critic:
 
     def step(self, sample: PaperSample, round_index: int) -> tuple[bool, str, str]:
         sequence = self._load_current(sample, round_index)
-        element_ids = load_element_ids(self.ctx.paths.xml(sample.id))
+        element_ids = referenceable_ids(
+            self.ctx.paths.xml(sample.id),
+            Path(self.ctx.paths.resolve_code(sample.id)).read_text(encoding="utf-8"),
+        )
         findings = sequence.validate(element_ids=element_ids, max_depth=self.max_depth)
 
         # A clean sequence still gets one review pass, because the mechanical
