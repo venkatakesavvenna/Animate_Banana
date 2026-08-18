@@ -158,7 +158,9 @@ def gate_status(sample_id: str, stage: str, paths: CachePaths, target: str,
 
     elif stage == "stage2b":
         xml_path = paths.xml(sample_id)
-        human = block.get("human_xml_path")
+        # Per-target slot: the tikz and svg structure XMLs are separate
+        # artifacts, and the gate must judge the one this target reads.
+        human = store.human_xml_path(ann, target)
         path = Path(human) if human and Path(human).is_file() else xml_path
         if not path.is_file():
             checks.append(_check("XML parses", False, "no XML"))

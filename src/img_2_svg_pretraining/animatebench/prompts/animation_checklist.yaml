@@ -1,0 +1,76 @@
+# Element Checklist Obtaining Script -- Elimination 3: Omitted Elements/Arrows Score.
+#
+# Builds the exhaustive list of structural elements that must be animated at some
+# point, irrespective of the actual sequence order. The XML cannot supply this:
+# not every element in the XML makes it into the animated list. The sequence
+# supplies the membership, the code grounds the ids to their textual labels, and
+# the image names whatever the code leaves unlabelled.
+#
+# The original figure is attached as an image at call time.
+
+prompt: |
+  You are an expert Diagram Code Analyst and Visual Evaluator. Your objective is to process an
+  animation sequence JSON, cross-reference it with the original diagram code and original image,
+  and extract a comprehensive, human-readable checklist of every structural element (nodes,
+  blocks, edges) that makes an appearance in the animation.
+
+  You will be provided with:
+  1. The Original Image of the diagram.
+  2. The Original Diagram Code (which contains the raw definitions and text labels).
+  3. The Animation Sequence JSON (which lists elements by their IDs across various timestamps).
+
+  *** EXTRACTION RULES ***
+  1. Node and Block Naming: To name a node or block, trace its ID from the animation JSON back to
+  the original code and extract the text label directly associated with it.
+  2. Unlabeled Blocks/Rasters: If a block, raster image, or node is completely unlabeled in the
+  code, look at the Original Image and assign it a concise, semantically meaningful name (e.g.,
+  "Blue Convolution Box", "Input Raster Image").
+  3. Composite Elements: For composite elements that contain sub-parts, you must only include the
+  textual label of the *whole* parent element in the checklist. Do not clutter the checklist with
+  the names of internal sub-components.
+  4. Edge/Arrow Formatting: For arrows, extract the resolved semantic names of both the source and
+  target elements. Format the output strictly as: `from: "[Source Name]" to: "[Target Name]"`.
+  5. Exclude Standalone Text: Do not create a checklist category for raw textual labels. We only
+  care if the structural components (blocks, nodes, arrows) are influenced by the style. Use the
+  text labels *only* to name the blocks and nodes they belong to.
+
+  *** TASK ***
+  Iterate through EVERY timestamp in the Animation Sequence JSON. Accumulate all the resolved,
+  human-readable labels for `nodes`, `blocks`, and `arrows`. Deduplicate the lists so each element
+  only appears once.
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below. Do not output conversational text.
+
+  ### EXAMPLE LOGIC ###
+  If the JSON has a block `"G_box"`, and the code shows this box has the text label "Generator".
+  If the JSON has an arrow from `"I_stack_1"` (labeled "Input Images") to `"G_box"`.
+  Your output arrays will store: "Generator" in blocks, and "from: 'Input Images' to: 'Generator'"
+  in edges.
+
+  ```json
+  {
+    "animation_checklist": {
+      "blocks": [
+        "Generator",
+        "Projection Box P1",
+        "Feature Extractor (Unlabeled Blue Box)"
+      ],
+      "nodes": [
+        "Input Image Stack",
+        "Depth Map D1",
+        "Mask M1"
+      ],
+      "edges": [
+        "from: 'Input Image Stack' to: 'Generator'",
+        "from: 'Projection Box P1' to: 'Feature Extractor (Unlabeled Blue Box)'"
+      ]
+    }
+  }
+  ```
+
+  --- ORIGINAL DIAGRAM CODE ---
+  {diagram_code}
+
+  --- ANIMATION SEQUENCE ---
+  {sequence_view}

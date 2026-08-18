@@ -1,0 +1,20 @@
+# no need to set tensor_parallel_size here, in vlm_service we automatically
+# set it based on the number of gpus (vlm_gpus in main.py's build_args())
+models:
+  google/gemma-4-31B-it:
+    # Text-only rewrite/translation task (English captions -> Hindi captions),
+    # not vision — matches the original docker bakeoff which served with
+    # `--limit-mm-per-prompt '{"image": 0, "audio": 0}'`. is_llm:true makes
+    # VLLMConfig use AutoTokenizer (not AutoProcessor) and send no images,
+    # even in online mode where "image_paths" would otherwise be populated.
+    is_llm: true
+    engine_args:
+      max_model_len: 32000
+      gpu_memory_utilization: 0.90
+      limit_mm_per_prompt:
+        image: 0
+        audio: 0
+      # Mirrors the original `docker run ... --async-scheduling` flag from the
+      # manual vllm-openai bakeoff setup; translated 1:1 to a `vllm serve`
+      # flag by online_worker._engine_args_to_serve_flags().
+      async_scheduling: true

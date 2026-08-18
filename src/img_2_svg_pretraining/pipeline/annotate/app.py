@@ -159,7 +159,7 @@ def _stage_state(sample_id: str, ann: dict) -> dict:
     that has entered `_target_applied` gets that target's artifacts.
     """
     paths: CachePaths = _styled_paths()
-    human_1a = ann["stage1a"]["human_code_path"]
+    human_1a = store.human_code_path(ann, STATE["cfg"].target)
 
     def mtime(path) -> float | None:
         p = Path(path) if path else None
@@ -186,6 +186,34 @@ def _stage_state(sample_id: str, ann: dict) -> dict:
     }
 
 
+def _ann_view(ann: dict, target: str) -> dict:
+    """The record with the legacy flat override fields projected per target.
+
+    The screens read `annotation.stage1a.human_code_path` etc. directly, and
+    those flat fields hold whatever target saved last. Projecting the
+    `by_target` entry for the sample's *current* target over them keeps every
+    existing JS reader correct without teaching the front end about targets.
+    Returns a copy; the stored record is never mutated by a view.
+    """
+    import copy as _copy
+
+    view = _copy.deepcopy(ann)
+    code = store.human_code_entry(ann, target)
+    view["stage1a"].update(human_code_path=code.get("path"),
+                           human_code_source=code.get("source"),
+                           human_code_updated_at=code.get("updated_at"))
+    final = store.human_code_final_entry(ann, target)
+    view["stage1b"].update(code_final_human_path=final.get("path"),
+                           boxes=final.get("boxes") or [])
+    xml = store.human_xml_entry(ann, target)
+    view["stage2b"].update(human_xml_path=xml.get("path"),
+                           human_xml_source=xml.get("source"),
+                           human_xml_updated_at=xml.get("updated_at"),
+                           ids_added=xml.get("ids_added") or [],
+                           ids_removed=xml.get("ids_removed") or [])
+    return view
+
+
 @app.get("/api/sample/<sample_id>")
 def api_sample(sample_id):
     sample = _sample(sample_id)
@@ -195,6 +223,7 @@ def api_sample(sample_id):
     # this the SVG samples show TikZ code and the toggle appears to do nothing.
     with _target_applied(target):
         paths = _styled_paths()
+        human_code = store.human_code_path(ann, target)
         payload = {
             "id": sample_id,
             "title": sample.title,
@@ -203,11 +232,10 @@ def api_sample(sample_id):
             "style": _style_for(sample_id),
             "code": _read(paths.code(sample_id)),
             "code_lineage": paths.code_lineage,
-            "human_code": _read(Path(ann["stage1a"]["human_code_path"]))
-                          if ann["stage1a"]["human_code_path"] else None,
+            "human_code": _read(Path(human_code)) if human_code else None,
             "code_reviewed": _read(paths.code_reviewed(sample_id)),
             "stages": _stage_state(sample_id, ann),
-            "annotation": ann,
+            "annotation": _ann_view(ann, target),
         }
     return jsonify(payload)
 
@@ -256,7 +284,7 @@ def _effective_1a(sample_id: str) -> tuple[str | None, bool]:
     # the startup-time paths return TikZ for a sample switched to SVG.
     paths: CachePaths = _styled_paths()
     ann = store.load(paths.root, sample_id)
-    human = ann["stage1a"].get("human_code_path")
+    human = store.human_code_path(ann, STATE["cfg"].target)
     if human:
         code = _read(Path(human))
         if code:
@@ -297,7 +325,10 @@ def _human_1a_applied(sample_id: str):
     """
     paths: CachePaths = _styled_paths()
     ann = store.load(paths.root, sample_id)
-    human = ann["stage1a"].get("human_code_path")
+    # Per the *applied* target: the tikz and svg overrides are separate slots,
+    # and swapping the other target's file in here is how an SVG document once
+    # ended up compiled as TikZ.
+    human = store.human_code_path(ann, STATE["cfg"].target)
     target = paths.code(sample_id)
 
     if not human or not Path(human).is_file():
@@ -361,7 +392,7 @@ def _human_xml_applied(sample_id: str, paths: CachePaths, skip: bool = False):
     human edit would come back looking like model output.
     """
     ann = store.load(paths.root, sample_id)
-    human = ann["stage2b"].get("human_xml_path")
+    human = store.human_xml_path(ann, paths.cfg.target)
     if skip or not human or not Path(human).is_file():
         yield False
         return
@@ -543,11 +574,14 @@ def _gate_report(sample_id: str) -> dict:
     """
     target = _target_for(sample_id)
     # The 1a/1b gates compile whatever their screen shows, so the same
-    # resolution the render route uses has to be applied here.
-    code_for = {
-        "diagram": _resolve_render_code(sample_id, "diagram")[0],
-        "rasters": _resolve_render_code(sample_id, "rasters")[0],
-    }
+    # resolution the render route uses has to be applied here -- *inside* the
+    # sample's target context: resolution reads lineage-keyed paths lazily, so
+    # outside it the report compiles the TikZ artifacts of an SVG sample.
+    with _target_applied(target):
+        code_for = {
+            "diagram": _resolve_render_code(sample_id, "diagram")[0],
+            "rasters": _resolve_render_code(sample_id, "rasters")[0],
+        }
     out: dict[str, dict] = {}
     with _sample_context(sample_id) as paths:
         for stage in gates.STAGE_LABELS:
@@ -793,10 +827,12 @@ def _gate_refusal(sample_id: str, stages: list[str], override: bool):
     if override:
         return None
     target = _target_for(sample_id)
-    code_for = {
-        "diagram": _resolve_render_code(sample_id, "diagram")[0],
-        "rasters": _resolve_render_code(sample_id, "rasters")[0],
-    }
+    # Inside the target context for the same reason as `_gate_report`.
+    with _target_applied(target):
+        code_for = {
+            "diagram": _resolve_render_code(sample_id, "diagram")[0],
+            "rasters": _resolve_render_code(sample_id, "rasters")[0],
+        }
     with _sample_context(sample_id) as paths:
         for stage in sorted(stages, key=_STAGE_ORDER.index):
             required = gates.PREREQUISITE.get(stage)
@@ -887,10 +923,13 @@ def _resolve_render_code(sample_id: str, source: str) -> tuple[str | None, str]:
         with _sample_context(sample_id) as styled:
             return _effective_animation(sample_id, styled)
 
-    paths: CachePaths = STATE["paths"]
+    # Lazily target-resolved through the live config -- callers must already
+    # be inside `_target_applied` (the render route, the gate report). The
+    # human overrides are per-target slots.
+    paths: CachePaths = _styled_paths()
     ann = store.load(paths.root, sample_id)
-    human_1a = ann["stage1a"]["human_code_path"]
-    human_1b = ann["stage1b"]["code_final_human_path"]
+    human_1a = store.human_code_path(ann, STATE["cfg"].target)
+    human_1b = store.human_code_final_path(ann, STATE["cfg"].target)
 
     def read(path) -> str | None:
         return _read(Path(path)) if path else None
@@ -1015,19 +1054,33 @@ def api_human_code(sample_id):
     if not text:
         abort(400, "empty code")
 
-    paths: CachePaths = STATE["paths"]
-    out = paths.root / "code_human" / paths.code_lineage / f"{sample_id}{CODE_SUFFIX[_target_for(sample_id)]}"
+    target = _target_for(sample_id)
+    # Inside the target context: `code_lineage` carries the target, so outside
+    # it an SVG override lands in the TikZ lineage directory. And the record
+    # slot is per-target -- one shared slot meant saving one target's override
+    # silently replaced the other's on every screen.
+    with _target_applied(target):
+        paths: CachePaths = _styled_paths()
+        out = (paths.root / "code_human" / paths.code_lineage
+               / f"{sample_id}{CODE_SUFFIX[target]}")
+        lineage = paths.code_lineage
     write_text(out, text)
 
     def mutate(record):
         record["stage1a"]["status"] = "human_code_provided"
-        record["stage1a"]["code_lineage_at_review"] = paths.code_lineage
+        record["stage1a"]["code_lineage_at_review"] = lineage
+        record["stage1a"].setdefault("human_code_by_target", {})[target] = {
+            "path": str(out), "source": source, "updated_at": store.now(),
+        }
+        # Legacy flat fields track the last save so pre-per-target readers
+        # (external scripts, older records' merge tooling) keep seeing a value.
         record["stage1a"]["human_code_path"] = str(out)
         record["stage1a"]["human_code_source"] = source
         record["stage1a"]["human_code_updated_at"] = store.now()
 
     record = store.update(paths.root, sample_id, mutate)
-    return jsonify({"ok": True, "path": str(out), "annotation": record})
+    return jsonify({"ok": True, "path": str(out),
+                    "annotation": _ann_view(record, target)})
 
 
 @app.post("/api/comment/<sample_id>")
@@ -1102,11 +1155,15 @@ def api_promote(sample_id):
 
     paths: CachePaths = STATE["paths"]
     ann = store.load(paths.root, sample_id)
+    target = _target_for(sample_id)
 
+    # 1a/1b/2b overrides are per-target slots; promotion takes the slot for
+    # the target the sample is currently set to, and the destination resolves
+    # under that same target's lineage.
     sources = {
-        "stage1a": ann["stage1a"]["human_code_path"],
-        "stage1b": ann["stage1b"]["code_final_human_path"],
-        "stage2b": ann["stage2b"]["human_xml_path"],
+        "stage1a": store.human_code_path(ann, target),
+        "stage1b": store.human_code_final_path(ann, target),
+        "stage2b": store.human_xml_path(ann, target),
         "stage2c": ann["stage2c"]["human_sequence_path"],
         "stage2d": ann["stage2d"]["human_sequence_path"],
         "stage3a": ann["stage3a"]["human_animation_path"],
@@ -1118,7 +1175,8 @@ def api_promote(sample_id):
     text = Path(src).read_text(encoding="utf-8")
     flag = "promoted_to_code_final"
     if stage == "stage2b":
-        out = paths.xml(sample_id)
+        with _target_applied(target):
+            out = _styled_paths().xml(sample_id)
         flag = "promoted_to_xml"
     elif stage in ("stage2c", "stage2d", "stage3a"):
         # All three are style-keyed, so they resolve inside `_sample_context`
@@ -1136,7 +1194,8 @@ def api_promote(sample_id):
                 out = styled.animation_final(sample_id)
                 flag = "promoted_to_animation_final"
     else:
-        out = paths.code_final(sample_id)
+        with _target_applied(target):
+            out = _styled_paths().code_final(sample_id)
     write_text(out, text)
 
     def mutate(record):
@@ -1144,9 +1203,16 @@ def api_promote(sample_id):
         record[stage][flag] = True
         record[stage]["promoted_by"] = author
         record[stage]["promoted_at"] = store.now()
+        # So discard can revert the promoted copy under the lineage it
+        # actually landed in, whatever the sample's target is set to by then.
+        if stage in ("stage1a", "stage1b", "stage2b"):
+            promoted = record[stage].setdefault("promoted_targets", [])
+            if target not in promoted:
+                promoted.append(target)
 
     record = store.update(paths.root, sample_id, mutate)
-    return jsonify({"ok": True, "path": str(out), "annotation": record})
+    return jsonify({"ok": True, "path": str(out),
+                    "annotation": _ann_view(record, target)})
 
 
 @app.post("/api/discard/<sample_id>")
@@ -1177,24 +1243,48 @@ def api_discard(sample_id):
             p.unlink()
             removed.append(str(p))
 
+    # Both targets' override slots: a discard writes off the whole sample, so
+    # the tikz and svg edits go together. The legacy flat fields are covered
+    # too -- they can point at a file no by_target entry names on records that
+    # predate the per-target slots.
+    for tgt in ("tikz", "svg"):
+        unlink(store.human_code_path(ann, tgt))
+        unlink(store.human_code_final_path(ann, tgt))
+        for box in store.human_boxes(ann, tgt):
+            unlink(box.get("crop_path"))
+        unlink(store.human_xml_path(ann, tgt))
     unlink(ann["stage1a"]["human_code_path"])
     unlink(ann["stage1b"]["code_final_human_path"])
     for box in ann["stage1b"]["boxes"]:
         unlink(box.get("crop_path"))
-
     unlink(ann["stage2b"].get("human_xml_path"))
+
     unlink(ann["stage2c"].get("human_sequence_path"))
     unlink(ann["stage2d"].get("human_sequence_path"))
     unlink(ann["stage3a"].get("human_animation_path"))
 
+    def _promoted_targets(block) -> list[str]:
+        """Where a promotion landed. Legacy records carry only the bool flag,
+        and the pre-per-target promote always wrote under the config's default
+        target -- so that is the right fallback."""
+        recorded = block.get("promoted_targets") or []
+        return recorded if recorded else [STATE["cfg"].target]
+
     # A promotion copied human work into a pipeline-owned path; discarding the
     # work has to take that copy with it, or the pipeline keeps reading the
-    # thing the reviewer just declared unusable.
-    if (ann["stage1a"].get("promoted_to_code_final")
-            or ann["stage1b"].get("promoted_to_code_final")):
-        unlink(paths.code_final(sample_id))
+    # thing the reviewer just declared unusable. Each is reverted under the
+    # target it was promoted for, not the sample's current one.
+    code_final_targets = set()
+    for st in ("stage1a", "stage1b"):
+        if ann[st].get("promoted_to_code_final"):
+            code_final_targets.update(_promoted_targets(ann[st]))
+    for tgt in sorted(code_final_targets):
+        with _target_applied(tgt):
+            unlink(_styled_paths().code_final(sample_id))
     if ann["stage2b"].get("promoted_to_xml"):
-        unlink(paths.xml(sample_id))
+        for tgt in sorted(set(_promoted_targets(ann["stage2b"]))):
+            with _target_applied(tgt):
+                unlink(_styled_paths().xml(sample_id))
     # The style-keyed promotions each resolve under the style they were made
     # for, not the sample's current one -- a style flip between promote and
     # discard would otherwise leave the promoted file in place.
@@ -1211,16 +1301,19 @@ def api_discard(sample_id):
     def mutate(record):
         for stage in ("stage1a", "stage1b"):
             record[stage]["promoted_to_code_final"] = False
+            record[stage]["promoted_targets"] = []
             record[stage].pop("promoted_by", None)
             record[stage].pop("promoted_at", None)
         record["stage1a"].update(status="discarded", human_code_path=None,
-                                 human_code_source=None, human_code_updated_at=None)
+                                 human_code_source=None, human_code_updated_at=None,
+                                 human_code_by_target={})
         record["stage1b"].update(status="discarded", boxes=[],
-                                 code_final_human_path=None)
+                                 code_final_human_path=None, by_target={})
         record["stage2b"].update(status="discarded", human_xml_path=None,
                                  human_xml_source=None, human_xml_updated_at=None,
+                                 human_xml_by_target={},
                                  ids_added=[], ids_removed=[],
-                                 promoted_to_xml=False)
+                                 promoted_to_xml=False, promoted_targets=[])
         record["stage2c"].update(status="discarded", human_sequence_path=None,
                                  human_sequence_updated_at=None,
                                  validation_at_save=[],
@@ -1255,29 +1348,32 @@ def api_run_rasterizer(sample_id):
     """
     sample = _sample(sample_id)
     force = bool((request.json or {}).get("force", False))
-    # Target-resolved: `code_lineage` carries the target, so the startup-time
-    # paths would serve TikZ artifacts for a sample switched to SVG.
-    with _target_applied(_target_for(sample_id)):
-        paths: CachePaths = _styled_paths()
-    if not paths.code(sample_id).exists():
-        abort(422, "no diagram code yet; generate Stage 1a first")
-
     ctx = _ctx()
     try:
-        # Both stages run under the swap, so the splice and the critique are
-        # built from the reviewer's 1a rather than the converter's.
-        with _human_1a_applied(sample_id) as applied:
-            # 1c is forced regardless: its cached artifact was reviewed
-            # against the previous splice, so reusing it would describe a
-            # diagram that no longer exists.
-            results, error = _run_stages(sample, ["1b"], force)
-            if error is None:
-                more, error = _run_stages(sample, ["1c"], True)
-                results += more
-            if applied:
-                results.insert(0, {"stage": "1a", "label": "human override",
-                                   "status": "applied",
-                                   "detail": "spliced and critiqued your edited 1a"})
+        # The WHOLE run sits inside the sample's target context, not just the
+        # path resolution: CachePaths resolves lazily from the live config, so
+        # a `paths` built inside a context and used after it reverts to the
+        # config's default target -- which made this route check for (and run
+        # 1b/1c against) the TikZ artifacts of a sample switched to SVG.
+        with _target_applied(_target_for(sample_id)):
+            paths: CachePaths = _styled_paths()
+            if not paths.code(sample_id).exists():
+                abort(422, "no diagram code yet; generate Stage 1a first")
+
+            # Both stages run under the swap, so the splice and the critique
+            # are built from the reviewer's 1a rather than the converter's.
+            with _human_1a_applied(sample_id) as applied:
+                # 1c is forced regardless: its cached artifact was reviewed
+                # against the previous splice, so reusing it would describe a
+                # diagram that no longer exists.
+                results, error = _run_stages(sample, ["1b"], force)
+                if error is None:
+                    more, error = _run_stages(sample, ["1c"], True)
+                    results += more
+                if applied:
+                    results.insert(0, {"stage": "1a", "label": "human override",
+                                       "status": "applied",
+                                       "detail": "spliced and critiqued your edited 1a"})
     finally:
         ctx.unload()
 
@@ -1329,7 +1425,8 @@ def _rasters_payload(sample_id: str, target: str):
             pass
 
     ann = store.load(paths.root, sample_id)
-    human_boxes = {b["xml_id"]: b["human_bbox"] for b in ann["stage1b"]["boxes"]}
+    human_boxes = {b["xml_id"]: b["human_bbox"]
+                   for b in store.human_boxes(ann, target)}
 
     # Boxes are image-pixel coordinates, and detection is the only thing that
     # produces them. `RasterPlaceholder.bbox()` is tempting here and wrong:
@@ -1361,7 +1458,7 @@ def _rasters_payload(sample_id: str, target: str):
         "located": located,
         "undetected": len(boxes) - located,
         "detection_error": detection_error,
-        "has_code_final_human": bool(ann["stage1b"]["code_final_human_path"]),
+        "has_code_final_human": bool(store.human_code_final_path(ann, target)),
         "stale_splice": stages["stale_1b"],
         "stale_critique": stages["stale_1c"],
     })
@@ -1376,75 +1473,104 @@ def api_insert_raster(sample_id):
     if not edits:
         abort(400, "no boxes given")
 
-    # Target-resolved: `code_lineage` carries the target, so the startup-time
-    # paths would serve TikZ artifacts for a sample switched to SVG.
-    with _target_applied(_target_for(sample_id)):
-        paths: CachePaths = _styled_paths()
-    # Splice into the best repaired version, not the raw converter output.
-    # `splice()` only rewrites placeholder node bodies and leaves the rest of
-    # the document byte-identical, so re-splicing an already-spliced artifact
-    # swaps its crops while keeping 1c's fixes -- and those fixes are often
-    # the only reason it compiles at all (pipe00041's `child_node/.style`).
-    # Starting from raw 1a here silently reverted the critic every time a
-    # reviewer adjusted a box.
-    ann_now = store.load(paths.root, sample_id)
-    human_1a = ann_now["stage1a"].get("human_code_path")
-    code, base = None, ""
-    for label, candidate in (
-        ("human 1a", _read(Path(human_1a)) if human_1a else None),
-        ("code_reviewed", _read(paths.code_reviewed(sample_id))),
-        ("code_final", _read(paths.code_final(sample_id))),
-        ("code (1a)", _read(paths.code(sample_id))),
-    ):
-        if candidate:
-            code, base = candidate, label
-            break
-    if not code:
-        abort(404, "no diagram code; run Stage 1a first")
-
-    work_dir = paths.rasters(sample_id)
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    replacements: dict[str, str] = {}
-    box_records = []
     target = _target_for(sample_id)
-    placeholders = {p.xml_id: p for p in find_placeholders(code, target)}
-    for xml_id, bbox in edits.items():
-        if xml_id not in placeholders:
-            continue
-        crop_path = _crop(sample.image_path, tuple(bbox),
-                           work_dir / f"crop_{xml_id}.human.png")
-        if crop_path is None:
-            continue
-        replacements[xml_id] = crop_path.resolve().as_posix()
-        box_records.append({
-            "xml_id": xml_id,
-            "human_bbox": list(bbox),
-            "adjusted_by": author,
-            "adjusted_at": store.now(),
-            "crop_path": str(crop_path),
-            "inserted": True,
-        })
+    # The WHOLE route runs inside the target context: CachePaths resolves
+    # lazily, so a `paths` built inside a context and read after it reverts to
+    # the config's default target. That is exactly how an SVG sample's insert
+    # read the TikZ document as its splice base, matched zero placeholders,
+    # and reported "no boxes produced a usable crop" for perfectly good boxes.
+    with _target_applied(target):
+        paths: CachePaths = _styled_paths()
+        # Splice into the best repaired version, not the raw converter output.
+        # `splice()` only rewrites placeholder node bodies and leaves the rest
+        # of the document byte-identical, so re-splicing an already-spliced
+        # artifact swaps its crops while keeping 1c's fixes -- and those fixes
+        # are often the only reason it compiles at all (pipe00041's
+        # `child_node/.style`). Starting from raw 1a here silently reverted
+        # the critic every time a reviewer adjusted a box.
+        ann_now = store.load(paths.root, sample_id)
+        human_1a = store.human_code_path(ann_now, target)
+        code, base = None, ""
+        for label, candidate in (
+            ("human 1a", _read(Path(human_1a)) if human_1a else None),
+            ("code_reviewed", _read(paths.code_reviewed(sample_id))),
+            ("code_final", _read(paths.code_final(sample_id))),
+            ("code (1a)", _read(paths.code(sample_id))),
+        ):
+            if candidate:
+                code, base = candidate, label
+                break
+        if not code:
+            abort(404, "no diagram code; run Stage 1a first")
 
-    if not replacements:
-        return jsonify({"ok": False, "error": "no boxes produced a usable crop"}), 422
+        work_dir = paths.rasters(sample_id)
+        work_dir.mkdir(parents=True, exist_ok=True)
 
-    new_code, replaced = splice(code, replacements, target)
-    out = paths.root / "code_final_human" / paths.code_lineage / f"{sample_id}{CODE_SUFFIX[_target_for(sample_id)]}"
-    write_text(out, new_code)
+        replacements: dict[str, str] = {}
+        box_records = []
+        unmatched: list[str] = []
+        degenerate: list[str] = []
+        placeholders = {p.xml_id: p for p in find_placeholders(code, target)}
+        for xml_id, bbox in edits.items():
+            if xml_id not in placeholders:
+                unmatched.append(xml_id)
+                continue
+            crop_path = _crop(sample.image_path, tuple(bbox),
+                              work_dir / f"crop_{xml_id}.human.png")
+            if crop_path is None:
+                degenerate.append(xml_id)
+                continue
+            replacements[xml_id] = crop_path.resolve().as_posix()
+            box_records.append({
+                "xml_id": xml_id,
+                "human_bbox": list(bbox),
+                "adjusted_by": author,
+                "adjusted_at": store.now(),
+                "crop_path": str(crop_path),
+                "inserted": True,
+            })
+
+        if not replacements:
+            # Say WHY each box failed. The blanket "no boxes produced a usable
+            # crop" hid an id mismatch between the code on screen and the
+            # splice base for weeks -- the two failure modes need different
+            # fixes and the reviewer cannot act on either unnamed.
+            bits = []
+            if unmatched:
+                bits.append(f"{len(unmatched)} id(s) not found in the {base} "
+                            f"{target} code: {', '.join(sorted(unmatched)[:8])}")
+            if degenerate:
+                bits.append(f"{len(degenerate)} box(es) too small to crop: "
+                            f"{', '.join(sorted(degenerate)[:8])}")
+            return jsonify({"ok": False,
+                            "error": "; ".join(bits) or "no boxes given",
+                            "unmatched": sorted(unmatched),
+                            "degenerate": sorted(degenerate)}), 422
+
+        new_code, replaced = splice(code, replacements, target)
+        out = (paths.root / "code_final_human" / paths.code_lineage
+               / f"{sample_id}{CODE_SUFFIX[target]}")
+        write_text(out, new_code)
+        lineage = paths.code_lineage
 
     def mutate(record):
         record["stage1b"]["status"] = "adjusted"
-        record["stage1b"]["code_lineage_at_review"] = paths.code_lineage
-        existing = {b["xml_id"]: b for b in record["stage1b"]["boxes"]}
+        record["stage1b"]["code_lineage_at_review"] = lineage
+        entry = record["stage1b"].setdefault("by_target", {}).setdefault(
+            target, {"path": None, "boxes": []})
+        existing = {b["xml_id"]: b for b in (entry.get("boxes") or [])}
         for b in box_records:
             existing[b["xml_id"]] = b
-        record["stage1b"]["boxes"] = list(existing.values())
+        entry["boxes"] = list(existing.values())
+        entry["path"] = str(out)
+        # Legacy flat fields track the last save for pre-per-target readers.
+        record["stage1b"]["boxes"] = entry["boxes"]
         record["stage1b"]["code_final_human_path"] = str(out)
 
     record = store.update(paths.root, sample_id, mutate)
     return jsonify({"ok": True, "replaced": replaced, "base": base,
-                    "path": str(out), "annotation": record})
+                    "unmatched": sorted(unmatched), "path": str(out),
+                    "annotation": _ann_view(record, target)})
 
 
 # -- Screen 3: structure XML ---------------------------------------------
@@ -1452,7 +1578,7 @@ def api_insert_raster(sample_id):
 def _effective_xml(sample_id: str, paths: CachePaths) -> tuple[str | None, bool]:
     """The XML everything downstream should work from, human override first."""
     ann = store.load(paths.root, sample_id)
-    human = ann["stage2b"].get("human_xml_path")
+    human = store.human_xml_path(ann, paths.cfg.target)
     if human:
         text = _read(Path(human))
         if text:
@@ -1504,7 +1630,7 @@ def api_xml(sample_id):
         # against the same code the pipeline used.
         "code": code_text,
         "code_path": code_path,
-        "annotation": ann,
+        "annotation": _ann_view(ann, target),
     })
 
 
@@ -1553,36 +1679,49 @@ def api_human_xml(sample_id):
     except ET.ParseError as e:
         return jsonify({"ok": False, "error": f"not well-formed XML: {e}"}), 400
 
-    paths: CachePaths = STATE["paths"]
-    machine = _read(paths.xml(sample_id))
-    added, removed = xml_edit.id_diff(text, machine)
-
-    # Removing an id breaks every sequence step that focuses it, so check the
-    # sequence that exists for this sample's current style.
+    target = _target_for(sample_id)
     style = _style_for(sample_id)
+    # The whole save runs under the sample's target and style: the machine XML
+    # it is diffed against, the sequences the removed ids are checked against,
+    # and the lineage directory the edit lands in are all target-keyed --
+    # without the context an SVG sample's edit was diffed against the TikZ
+    # XML and saved into the TikZ lineage.
     with _sample_context(sample_id, style) as styled:
+        machine = _read(styled.xml(sample_id))
+        added, removed = xml_edit.id_diff(text, machine)
+
+        # Removing an id breaks every sequence step that focuses it, so check
+        # the sequence that exists for this sample's current style.
         conflicts = xml_edit.focus_conflicts(
             removed, styled.sequence_final(sample_id)) or xml_edit.focus_conflicts(
             removed, styled.sequence(sample_id))
 
-    out = paths.root / "xml_human" / paths.xml_lineage / f"{sample_id}.xml"
+        out = styled.root / "xml_human" / styled.xml_lineage / f"{sample_id}.xml"
+        lineage = styled.xml_lineage
     write_text(out, text)
 
     def mutate(record):
         record["stage2b"].update(
             status="human_xml_provided",
-            xml_lineage_at_review=paths.xml_lineage,
+            xml_lineage_at_review=lineage,
+            # Legacy flat fields track the last save; the per-target entry is
+            # what every reader resolves through.
             human_xml_path=str(out),
             human_xml_source=source,
             human_xml_updated_at=store.now(),
             ids_added=added,
             ids_removed=removed,
         )
+        record["stage2b"].setdefault("human_xml_by_target", {})[target] = {
+            "path": str(out), "source": source, "updated_at": store.now(),
+            "ids_added": added, "ids_removed": removed,
+        }
 
-    record = store.update(paths.root, sample_id, mutate)
+    record = store.update(STATE["paths"].root, sample_id, mutate)
     return jsonify({"ok": True, "path": str(out), "root_tag": root.tag,
                     "ids_added": added, "ids_removed": removed,
-                    "focus_conflicts": conflicts, "annotation": record})
+                    "focus_conflicts": conflicts,
+                    "annotation": _ann_view(record, target)})
 
 
 # -- Screen 4: sequence + video -------------------------------------------

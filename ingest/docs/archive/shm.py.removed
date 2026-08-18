@@ -1,0 +1,89 @@
+"""
+Shared-memory IPC pool.
+
+Moves large VLLMRequest / response payloads between stage processes and
+VLLMService through shared RAM instead of the mp.Queue kernel pipe. Only a
+tiny int (slot index) ever crosses a queue; the actual pickled object lives
+in a slot of this pool. See src/vision_ingest/shm/shm_ipc.md and v1.md for
+the full design rationale.
+"""
+import pickle
+import struct
+import logging
+from multiprocessing.shared_memory import SharedMemory
+from queue import Empty
+
+HEADER_SIZE = 8  # unsigned long long — payload length prefix written into every slot
+
+
+class Shm:
+    """
+    Fixed-name shared memory pool of fixed-size slots. Bidirectional — used for
+    both request payloads (stage -> VLLMService) and response payloads
+    (VLLMService -> stage). Callers pass a plain int slot index through the
+    existing mp.Queue(s); this class handles pickling in/out of shared RAM.
+    """
+
+    def __init__(self, name, create, free_slots,
+                 slot_size=50 * 1024 * 1024, total_size=1024 * 50 * 1024 * 1024): # 1024 slots of 50MB each.
+        self.name = name
+        self.slot_size = slot_size
+        self.n_slots = total_size // slot_size
+        self.free_slots = free_slots  # mp.Queue, created alongside request_queue in main.py
+
+        if create:
+            try:
+                stale = SharedMemory(name=name)
+                stale.close()
+                stale.unlink()
+                logging.warning(f"Shm: reclaimed stale block '{name}' from a previous crash")
+            except FileNotFoundError:
+                pass
+            self.shm = SharedMemory(name=name, create=True, size=self.n_slots * slot_size)
+            for idx in range(self.n_slots):
+                self.free_slots.put(idx)
+        else:
+            self.shm = SharedMemory(name=name, create=False)
+
+    def acquire(self, stop_event=None, poll_interval=0.25) -> int:
+        """Block until a slot is free, return its index."""
+        while True:
+            if stop_event and stop_event.is_set():
+                raise RuntimeError("Shutdown requested while waiting for a free shm slot")
+            try:
+                return self.free_slots.get(timeout=poll_interval)
+            except Empty:
+                print (f"****WARNING**** Waiting for free slots")
+                continue
+
+    def release(self, idx: int) -> None:
+        """Return a slot to the free pool."""
+        self.free_slots.put(idx)
+
+    def put(self, idx: int, obj) -> None:
+        """Pickle obj and write it into slot idx."""
+        raw = pickle.dumps(obj)
+        if HEADER_SIZE + len(raw) > self.slot_size:
+            raise ValueError(f"Object too large for shm slot: {len(raw)}B > slot_size={self.slot_size}B")
+        # elif HEADER_SIZE + len(raw) > self.slot_size/10:
+        #     print (f"****WARNING**** Unusually big object: {len(raw)}B")
+        offset = idx * self.slot_size
+        self.shm.buf[offset:offset + HEADER_SIZE] = struct.pack("Q", len(raw))
+        self.shm.buf[offset + HEADER_SIZE: offset + HEADER_SIZE + len(raw)] = raw
+
+    def get(self, idx: int):
+        """Read and unpickle the object in slot idx."""
+        offset = idx * self.slot_size
+        nbytes = struct.unpack("Q", bytes(self.shm.buf[offset:offset + HEADER_SIZE]))[0]
+        raw = bytes(self.shm.buf[offset + HEADER_SIZE: offset + HEADER_SIZE + nbytes])
+        return pickle.loads(raw)
+
+    def close(self) -> None:
+        """Unmap from this process's address space. Call in every process that opened the shm."""
+        self.shm.close()
+
+    def cleanup(self) -> None:
+        """Unmap and delete the name from /dev/shm. Call exactly once, from the owner process."""
+        self.shm.close()
+        print("----- SHM Closed, trying to unlink now.-----")
+        self.shm.unlink()

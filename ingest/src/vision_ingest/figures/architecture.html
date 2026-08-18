@@ -1,0 +1,327 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VLM Inference Orchestrator</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #f0f4f8;
+            color: #1a202c;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.1);
+            max-width: 1400px;
+            width: 100%;
+            border: 1px solid #e2e8f0;
+            position: relative;
+            overflow: hidden;
+        }
+        /* Grid Background */
+        .grid-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: radial-gradient(#cbd5e0 1px, transparent 1px);
+            background-size: 20px 20px;
+            opacity: 0.3;
+            pointer-events: none;
+            z-index: 0;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2d3748;
+            margin-bottom: 8px;
+            font-size: 24px;
+            font-weight: 700;
+            position: relative;
+            z-index: 1;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: -0.5px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #718096;
+            margin-bottom: 40px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            position: relative;
+            z-index: 1;
+        }
+        svg {
+            width: 100%;
+            height: auto;
+            position: relative;
+            z-index: 1;
+            overflow: visible;
+        }
+        
+        /* Component Styles */
+        .component rect {
+            stroke-width: 1.5;
+            fill-opacity: 0.08;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.05));
+            transition: all 0.3s ease;
+        }
+        
+        .component:hover rect {
+            stroke-width: 2.5;
+            fill-opacity: 0.15;
+            filter: drop-shadow(0 8px 12px rgba(0,0,0,0.1));
+        }
+
+        /* Typography */
+        .title-text {
+            font-family: 'Inter', sans-serif;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        .code-text {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        }
+        .method-text {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+        }
+
+        /* Connectors */
+        .arrow {
+            stroke: #718096;
+            stroke-width: 1.5;
+            fill: none;
+            marker-end: url(#arrowhead);
+            stroke-linejoin: round;
+            stroke-linecap: round;
+        }
+        .arrow:hover {
+            stroke: #2d3748;
+            stroke-width: 2;
+        }
+        
+        /* Labels with Halo Effect for readability */
+        .arrow-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; /* Slightly larger */
+            fill: #2d3748;   /* Darker text for contrast */
+            font-weight: 600;
+            paint-order: stroke;
+            stroke: white;
+            stroke-width: 6px; /* Thick white outline creates "background" */
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        
+        /* Specific Status Colors */
+        .sync-box {
+            fill: #fffaf0;
+            stroke: #ed8936;
+            stroke-width: 1.5;
+            stroke-dasharray: 4, 2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="grid-bg"></div>
+        <h1>VLM Inference Orchestrator</h1>
+        <p class="subtitle">// High-Throughput Vision Pipeline</p>
+        
+        <svg viewBox="0 0 1200 900" xmlns="http://www.w3.org/2000/svg">
+            <!-- Define arrow markers -->
+            <defs>
+                <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+                    <path d="M2,2 L10,6 L2,10 L2,2" fill="#718096" style="transition: fill 0.3s"/>
+                </marker>
+                
+                <!-- Refined Gradients -->
+                <linearGradient id="orchestratorGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#667eea"/>
+                    <stop offset="100%" style="stop-color:#764ba2"/>
+                </linearGradient>
+                <linearGradient id="dbGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#48bb78"/>
+                    <stop offset="100%" style="stop-color:#38a169"/>
+                </linearGradient>
+                <linearGradient id="vlmGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#ed8936"/>
+                    <stop offset="100%" style="stop-color:#dd6b20"/>
+                </linearGradient>
+                <linearGradient id="writerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#4299e1"/>
+                    <stop offset="100%" style="stop-color:#3182ce"/>
+                </linearGradient>
+                <linearGradient id="recoveryGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#f56565"/>
+                    <stop offset="100%" style="stop-color:#e53e3e"/>
+                </linearGradient>
+            </defs>
+            
+            <!-- CLI Orchestrator (Central Hub) -->
+            <g class="component">
+                <rect x="300" y="40" width="600" height="130" rx="6" fill="url(#orchestratorGrad)" stroke="#5a67d8"/>
+                <text x="600" y="75" text-anchor="middle" fill="#434190" font-size="18" class="title-text">CLI ORCHESTRATOR</text>
+                <text x="600" y="95" text-anchor="middle" fill="#5a67d8" class="code-text">drivers/cli.py</text>
+                <line x1="320" y1="105" x2="880" y2="105" stroke="#e2e8f0" stroke-width="1" />
+                <text x="600" y="125" text-anchor="middle" fill="#4a5568" class="method-text">MainLogger(events) | Metrics(throughput)</text>
+            </g>
+            
+            <!-- Recovery System (Far Left) - Updated Text -->
+            <g class="component">
+                <rect x="50" y="320" width="180" height="140" rx="6" fill="url(#recoveryGrad)" stroke="#e53e3e"/>
+                <text x="140" y="350" text-anchor="middle" fill="#9b2c2c" font-size="14" class="title-text">RECOVERY</text>
+                <text x="140" y="370" text-anchor="middle" fill="#c53030" class="code-text">modules/recovery.py</text>
+                <line x1="65" y1="380" x2="215" y2="380" stroke="#fed7d7" stroke-width="1" />
+                <text x="140" y="395" text-anchor="middle" fill="#4a5568" class="method-text">load_last_shard()</text>
+                <text x="140" y="410" text-anchor="middle" fill="#4a5568" class="method-text">verify_vs_db()</text>
+                <text x="140" y="425" text-anchor="middle" fill="#4a5568" class="method-text">truncate & return</text>
+            </g>
+
+            <!-- Database Layer (Center-Left) - Moved down to y=320 -->
+            <g class="component">
+                <rect x="330" y="320" width="200" height="140" rx="6" fill="url(#dbGrad)" stroke="#38a169"/>
+                <text x="430" y="350" text-anchor="middle" fill="#22543d" font-size="14" class="title-text">DATABASE</text>
+                <text x="430" y="370" text-anchor="middle" fill="#2f855a" class="code-text">db/*.db</text>
+                <line x1="345" y1="380" x2="515" y2="380" stroke="#c6f6d5" stroke-width="1" />
+                <text x="430" y="395" text-anchor="middle" fill="#4a5568" class="method-text">fetch_batch(0→1)</text>
+                <text x="430" y="410" text-anchor="middle" fill="#4a5568" class="method-text">mark_done(1→2)</text>
+                <text x="430" y="425" text-anchor="middle" fill="#4a5568" class="method-text">get_health()</text>
+            </g>
+            
+            <!-- JSONL Writer (Center-Right) - Moved down to y=320 -->
+            <g class="component">
+                <rect x="630" y="320" width="200" height="140" rx="6" fill="url(#writerGrad)" stroke="#3182ce"/>
+                <text x="730" y="350" text-anchor="middle" fill="#2a4365" font-size="14" class="title-text">JSONL WRITER</text>
+                <text x="730" y="370" text-anchor="middle" fill="#3182ce" class="code-text">modules/writer.py</text>
+                <line x1="645" y1="380" x2="815" y2="380" stroke="#bee3f8" stroke-width="1" />
+                <text x="730" y="395" text-anchor="middle" fill="#4a5568" class="method-text">enqueue(obj)</text>
+                <text x="730" y="410" text-anchor="middle" fill="#4a5568" class="method-text">async_flush()</text>
+                <text x="730" y="425" text-anchor="middle" fill="#4a5568" class="method-text">fsync() + commit</text>
+            </g>
+
+            <!-- VLM Prediction (Far Right) - Moved down to y=320 -->
+            <g class="component">
+                <rect x="950" y="320" width="200" height="140" rx="6" fill="url(#vlmGrad)" stroke="#dd6b20"/>
+                <text x="1050" y="350" text-anchor="middle" fill="#7b341e" font-size="14" class="title-text">VLM PREDICTION</text>
+                <text x="1050" y="370" text-anchor="middle" fill="#dd6b20" class="code-text">modules/prediction.py</text>
+                <line x1="965" y1="380" x2="1135" y2="380" stroke="#feebc8" stroke-width="1" />
+                <text x="1050" y="395" text-anchor="middle" fill="#4a5568" class="method-text">CPU: prep_batch()</text>
+                <text x="1050" y="410" text-anchor="middle" fill="#4a5568" class="method-text">GPU: inference()</text>
+                <text x="1050" y="425" text-anchor="middle" fill="#4a5568" class="method-text">ParallelExec</text>
+            </g>
+            
+            <!-- Storage Layer (JSONL Shards) - Moved down to y=570 -->
+            <g class="component">
+                <rect x="630" y="570" width="200" height="100" rx="6" fill="#cbd5e0" stroke="#a0aec0" stroke-dasharray="4"/>
+                <text x="730" y="605" text-anchor="middle" fill="#2d3748" font-size="14" class="title-text">JSONL SHARDS</text>
+                <text x="730" y="625" text-anchor="middle" fill="#4a5568" class="code-text">results_00000.jsonl</text>
+                <text x="730" y="640" text-anchor="middle" fill="#4a5568" class="code-text">results_00001.jsonl</text>
+                <text x="730" y="655" text-anchor="middle" fill="#4a5568" class="code-text">...</text>
+            </g>
+            
+            <!-- Storage Layer (Local JSON Files) - Moved down to y=570 -->
+            <g class="component">
+                <rect x="850" y="570" width="200" height="100" rx="6" fill="#e6fffa" stroke="#38b2ac" stroke-dasharray="4"/>
+                <text x="950" y="605" text-anchor="middle" fill="#234e52" font-size="14" class="title-text">LOCAL FILES</text>
+                <text x="950" y="625" text-anchor="middle" fill="#285e61" class="code-text">/data/img1.json</text>
+                <text x="950" y="640" text-anchor="middle" fill="#285e61" class="code-text">...</text>
+            </g>
+            
+            <!-- External Process - Moved down to y=570 -->
+            <g class="component">
+                <rect x="330" y="570" width="200" height="100" rx="6" fill="#fff5f5" stroke="#fc8181" stroke-dasharray="8,4"/>
+                <text x="430" y="605" text-anchor="middle" fill="#9b2c2c" font-size="13" class="title-text">EXTERNAL PROCESS</text>
+                <text x="430" y="625" text-anchor="middle" fill="#c53030" class="code-text">drivers/db_driver.py</text>
+                <text x="430" y="645" text-anchor="middle" fill="#c53030" class="method-text">add_paths()</text>
+                <text x="430" y="660" text-anchor="middle" fill="#c53030" class="method-text">verify_counts()</text>
+            </g>
+            
+            <!-- Arrows with "Halo" labels -->
+            
+            <!-- Startup (Init) - Moved text right and below -->
+            <path class="arrow" d="M 330 170 C 330 250, 120 250, 120 320" />
+            <text x="145" y="300" text-anchor="start" class="arrow-label">init()</text>
+
+            <!-- Recovery Return Path (Moved to Left Most Position) -->
+            <path class="arrow" d="M 90 320 C 90 240, 310 240, 310 170" />
+            <text x="170" y="240" text-anchor="middle" class="arrow-label">validated_path</text>
+
+            <!-- fetch_batch (Vertical) - Moved to left of arrow and LOWER (y=280) -->
+            <path class="arrow" d="M 380 170 L 380 320" />
+            <text x="375" y="280" text-anchor="end" class="arrow-label">fetch_batch()</text>
+            
+            <!-- return paths (Vertical) -->
+            <path class="arrow" d="M 420 320 L 420 170" />
+            <text x="420" y="245" text-anchor="middle" class="arrow-label">images</text>
+            
+            <!-- mark_failed (Vertical) - Moved to right of arrow and LOWER (y=280) -->
+            <path class="arrow" d="M 460 170 L 460 320" />
+            <text x="465" y="280" text-anchor="start" class="arrow-label" fill="#c53030" stroke="white">mark_failed()</text>
+
+            
+            <!-- VLM Interaction (CLI <-> VLM) -->
+            <!-- send paths (VLM -> CLI) - Text moved to RIGHT of arrow -->
+            <path class="arrow" d="M 1000 320 L 800 170" />
+            <text x="960" y="255" text-anchor="start" class="arrow-label">images</text>
+
+            <!-- return results (CLI -> VLM) - Text moved to LEFT of arrow -->
+            <path class="arrow" d="M 840 170 L 1040 320" />
+            <text x="910" y="235" text-anchor="end" class="arrow-label">results</text>
+
+            
+            <!-- BRANCHING PATHS: CLI -> Writer AND CLI -> Local Files -->
+            <!-- Main Trunk from CLI -->
+            <path class="arrow" d="M 730 170 L 730 320" />
+            
+            <!-- Branch to Local Files -->
+            <path class="arrow" d="M 730 265 L 870 265 L 870 570" />
+            
+            <!-- Junction Point -->
+            <circle cx="730" cy="265" r="3" fill="#718096" />
+            
+            <!-- Labels -->
+            <text x="720" y="290" text-anchor="end" class="arrow-label">enqueue()</text>
+            <text x="880" y="515" text-anchor="start" class="arrow-label">write_local()</text>
+
+
+            <!-- Writer -> DB (Horizontal) -->
+            <path class="arrow" d="M 630 380 L 530 380" />
+            <text x="585" y="380" text-anchor="middle" class="arrow-label">mark_done()</text>
+            
+            <!-- Writer -> Shards -->
+            <path class="arrow" d="M 730 460 L 730 570" />
+            <text x="730" y="515" text-anchor="middle" class="arrow-label">flush()</text>
+            
+            
+            <!-- Recovery -> DB (Updated Label: is_done()) -->
+            <path class="arrow bidirectional" d="M 230 380 L 330 380" />
+            <text x="280" y="380" text-anchor="middle" class="arrow-label">is_done()</text>
+            
+            <!-- NEW: Shards -> Recovery (Under Loop - Updated Label: get the highest shard) -->
+            <path class="arrow" d="M 730 670 L 730 730 L 140 730 L 140 460" />
+            <text x="435" y="730" text-anchor="middle" class="arrow-label">get the highest shard</text>
+
+
+            <!-- External -> DB -->
+            <path class="arrow" d="M 430 570 L 430 460" />
+            <text x="430" y="515" text-anchor="middle" class="arrow-label">INSERT</text>
+            
+        </svg>
+    </div>
+</body>
+</html>

@@ -1,0 +1,210 @@
+# Score Contributor 1: Selection Sensibility Score (SSS)
+#
+# Transcribed verbatim from
+#   6c8b9736-4d26-4580-ab35-be9f3ca865c4_Score_Contributor_1_Selection_Sensibility_Score_(SSS).pdf
+# (pp. 1-11, the `selection_sensibility/common.py` listing; pp. 12+ are worked
+# examples and are not transcribed).
+#
+# Sub-criteria: Criterion A (Element Appropriateness) / Criterion B (Group
+# Coherence). Bands: Fully Sensible | Minor Deviation | Moderate Violation |
+# Major Violation | Severe Violation. Collapse rule: take the LOWER of the two
+# bands, and one band lower still when BOTH are <= 2.
+#
+# `system` is build_system_instruction(): the evaluator preamble followed by a
+# blank line and RUBRIC_TEXT spliced in verbatim. The `rubric` key holds the
+# same RUBRIC_TEXT on its own. `user` is build_user_prompt() with the f-string
+# interpolations replaced by {tokens}; note that build_user_prompt does NOT
+# splice the rubric -- only {style_adapter} and {output_format}.
+#
+# Output headers the parser must match:
+#   ### RATIONALE / ### CRITERION_A_BAND / ### CRITERION_B_BAND
+#   ### FINAL_BAND / ### LABEL
+system: |
+  You are a meticulous evaluator of diagram animations. You are an expert at reading hierarchical XML diagram schemas (blocks, standalone nodes, child nodes, raster nodes, composite wholes/parts, and edges) and mapping them onto what is visually targeted/revealed at each animation timestep. You are strict, consistent, and skeptical of animations that merely 'look fine' but do not respect the diagram's actual structure and dependencies. You always ground your reasoning in specific element ids from the provided XML, never vague visual impressions alone.
+
+  You will score ONE combined severity band (0-4) per timestep, but you must
+  reason about the two underlying criteria SEPARATELY before collapsing them
+  into a single band. Do not skip straight to a number.
+
+  --- CRITERION A: ELEMENT APPROPRIATENESS ---
+  Given the spatial layout, the underlying flow/hierarchy of the ORIGINAL
+  diagram, and what has already been targeted/revealed in prior timesteps, judge whether
+  the newly targeted element or group of elements at THIS timestep is the right
+  thing to focus on now.
+  - It is correct if it logically follows from what was already shown, OR if
+    this is the first reveal and it is a sensible entrypoint into the diagram
+    (per the XML hierarchy/edges).
+  - A MISSING significant element (one that logically belongs in this reveal
+    group and is not yet present) is a heavier violation than an EXTRA element
+    that could have been deferred to a later step.
+  - This criterion is also the catch-all for cases where the animation STYLE is
+    technically correct but is being applied to the wrong element at the wrong
+    time.
+
+  --- CRITERION B: GROUP COHERENCE ---
+  Judge whether the elements targeted TOGETHER at this timestep are related
+  enough to justify being grouped. A valid group reflects at least one
+  of:
+    (i)   structural relation (e.g. parallel elements, or unconnected elements
+          that are spatially/structurally close per the XML `block` /
+          `composite_whole` nesting),
+    (ii)  logical relation (components of the same sub-structure, frames of the
+          same picture),
+    (iii) semantic relation (elements representing the same idea).
+  - If two elements are grouped in the SAME timestep but the XML `edge` data
+    shows a non-trivial PREREQUISITE dependency between them (one must
+    logically/visually exist before the other for the reveal to make sense),
+    that is a violation — trivial/instantaneous dependencies (e.g. a node and
+    its own text label) do not count.
+  - Grouping elements that belong to unrelated sub-diagrams/branches with no
+    structural, logical, or semantic link is penalized.
+
+  --- COMBINING A AND B INTO ONE BAND ---
+  4 - Fully Sensible: Correct element/group choice per Criterion A AND a
+      coherent, justified group per Criterion B. No missing elements, no
+      dependency violations.
+  3 - Minor Deviation: Core choice is correct, but there is one small avoidable
+      imperfection (e.g. one extra/deferrable element included, or the group
+      could have been split slightly more cleanly) — nothing significant is
+      missing and no dependency is violated.
+  2 - Moderate Violation: EITHER a non-critical element is missing from what
+      should logically be present at this step, OR the group mixes in one
+      loosely-related element without violating a hard dependency — but the
+      overall intent of the step is still recognizable.
+  1 - Major Violation: EITHER a significant/necessary element is missing such
+      that the reveal does not make sense on its own, OR elements are grouped
+      despite a non-trivial prerequisite dependency between them, OR the group
+      mixes clearly unrelated structural/semantic elements.
+  0 - Severe Violation: The element/group choice is essentially arbitrary or
+      incoherent relative to the diagram — wrong entrypoint, elements from
+      unrelated parts of the diagram merged with no justification, or the step
+      actively contradicts the diagram's flow/hierarchy.
+
+  Tie-break rule: if Criterion A and Criterion B would independently point to
+  different bands, report the LOWER (worse) band as your combined band, and
+  say explicitly in the rationale which criterion drove the score. If BOTH
+  criteria are independently moderate-or-worse (band <= 2), go one band lower
+  than the worse of the two (violations compound), down to a floor of 0.
+
+user: |
+  This is timestep {timestep_idx} of {total_steps} in a '{style_name}' animation of the diagram below.
+
+  You are given, in order:
+  1. The ORIGINAL fully-revealed diagram image (ground truth layout).
+  2. The PREVIOUS timestep's rendered frame (state before this reveal). Omitted if this is timestep 1.
+  3. The CURRENT timestep's rendered frame (state after this reveal).
+
+  --- CUMULATIVE ELEMENTS ALREADY TARGETED BEFORE THIS STEP ---
+  {prior_summary}
+
+  --- FULL XML DIAGRAM SCHEMA ---
+  {xml_text}
+
+  {style_adapter}
+
+  Identify what is NEW in the CURRENT frame relative to the PREVIOUS frame (or, if timestep 1, what the entrypoint reveal consists of) based strictly on the Style Adapter definition above, map it onto ids in the XML, and score it per the rubric.
+
+  {output_format}
+
+adapter_progressive_reveal: |
+  *** STYLE ADAPTER: PROGRESSIVE REVEAL ***
+  In Progressive Reveal, elements are cumulatively drawn onto the canvas.
+  - 'Newly Revealed Elements': For this evaluation, identify the specific diagram elements that were just drawn or rendered in the CURRENT frame that were not present in the PREVIOUS frame.
+
+adapter_alpha_masking: |
+  *** STYLE ADAPTER: ALPHA MASKING ***
+  In Alpha Masking, the entire diagram is visible, but active elements are fully opaque while inactive elements are masked (transparent or dimmed).
+  - 'Newly Revealed Elements': For this evaluation, identify the specific diagram elements that transitioned to FULL OPACITY in the CURRENT frame. (Do not evaluate elements that faded back to a dimmed state; focus only on what is actively highlighted now).
+
+adapter_colour_pop: |
+  *** STYLE ADAPTER: COLOUR POP ***
+  In Colour Pop, the entire diagram starts in greyscale, and active elements permanently transition to full color.
+  - 'Newly Revealed Elements': For this evaluation, identify the specific diagram elements that transitioned from greyscale to FULL COLOR in the CURRENT frame.
+
+adapter_hopping_bounding_box: |
+  *** STYLE ADAPTER: HOPPING BOUNDING BOX ***
+  In Hopping Bounding Box, the diagram itself does not move or change. Instead, a discrete highlight box jumps to enclose the active region.
+  - 'Newly Revealed Elements': For this evaluation, identify the specific underlying diagram elements (nodes, blocks, etc. from the XML) that are ENCLOSED by the new position of the bounding box in the CURRENT frame. You are scoring the selection of the elements inside the box, not the box itself.
+
+adapter_sliding_bounding_box: |
+  *** STYLE ADAPTER: SLIDING BOUNDING BOX ***
+  In Sliding Bounding Box, the diagram itself does not move or change. Instead, a highlight box smoothly slides to enclose the active region.
+  - 'Newly Revealed Elements': For this evaluation, identify the specific underlying diagram elements (nodes, blocks, etc. from the XML) that are ENCLOSED by the bounding box once it has come to rest in the CURRENT frame. You are scoring the selection of the elements inside the box, not the box itself.
+
+rubric: |
+  You will score ONE combined severity band (0-4) per timestep, but you must
+  reason about the two underlying criteria SEPARATELY before collapsing them
+  into a single band. Do not skip straight to a number.
+
+  --- CRITERION A: ELEMENT APPROPRIATENESS ---
+  Given the spatial layout, the underlying flow/hierarchy of the ORIGINAL
+  diagram, and what has already been targeted/revealed in prior timesteps, judge whether
+  the newly targeted element or group of elements at THIS timestep is the right
+  thing to focus on now.
+  - It is correct if it logically follows from what was already shown, OR if
+    this is the first reveal and it is a sensible entrypoint into the diagram
+    (per the XML hierarchy/edges).
+  - A MISSING significant element (one that logically belongs in this reveal
+    group and is not yet present) is a heavier violation than an EXTRA element
+    that could have been deferred to a later step.
+  - This criterion is also the catch-all for cases where the animation STYLE is
+    technically correct but is being applied to the wrong element at the wrong
+    time.
+
+  --- CRITERION B: GROUP COHERENCE ---
+  Judge whether the elements targeted TOGETHER at this timestep are related
+  enough to justify being grouped. A valid group reflects at least one
+  of:
+    (i)   structural relation (e.g. parallel elements, or unconnected elements
+          that are spatially/structurally close per the XML `block` /
+          `composite_whole` nesting),
+    (ii)  logical relation (components of the same sub-structure, frames of the
+          same picture),
+    (iii) semantic relation (elements representing the same idea).
+  - If two elements are grouped in the SAME timestep but the XML `edge` data
+    shows a non-trivial PREREQUISITE dependency between them (one must
+    logically/visually exist before the other for the reveal to make sense),
+    that is a violation — trivial/instantaneous dependencies (e.g. a node and
+    its own text label) do not count.
+  - Grouping elements that belong to unrelated sub-diagrams/branches with no
+    structural, logical, or semantic link is penalized.
+
+  --- COMBINING A AND B INTO ONE BAND ---
+  4 - Fully Sensible: Correct element/group choice per Criterion A AND a
+      coherent, justified group per Criterion B. No missing elements, no
+      dependency violations.
+  3 - Minor Deviation: Core choice is correct, but there is one small avoidable
+      imperfection (e.g. one extra/deferrable element included, or the group
+      could have been split slightly more cleanly) — nothing significant is
+      missing and no dependency is violated.
+  2 - Moderate Violation: EITHER a non-critical element is missing from what
+      should logically be present at this step, OR the group mixes in one
+      loosely-related element without violating a hard dependency — but the
+      overall intent of the step is still recognizable.
+  1 - Major Violation: EITHER a significant/necessary element is missing such
+      that the reveal does not make sense on its own, OR elements are grouped
+      despite a non-trivial prerequisite dependency between them, OR the group
+      mixes clearly unrelated structural/semantic elements.
+  0 - Severe Violation: The element/group choice is essentially arbitrary or
+      incoherent relative to the diagram — wrong entrypoint, elements from
+      unrelated parts of the diagram merged with no justification, or the step
+      actively contradicts the diagram's flow/hierarchy.
+
+  Tie-break rule: if Criterion A and Criterion B would independently point to
+  different bands, report the LOWER (worse) band as your combined band, and
+  say explicitly in the rationale which criterion drove the score. If BOTH
+  criteria are independently moderate-or-worse (band <= 2), go one band lower
+  than the worse of the two (violations compound), down to a floor of 0.
+
+output_format: |
+  Respond in EXACTLY this structure, with these literal section headers:
+
+  ### RATIONALE
+  <Write a thorough step-by-step rationale. First identify what is NEWLY TARGETED in the current frame relative to the previous frame according to the Style Adapter, mapping it to specific XML IDs. Then analyze Criterion A (element appropriateness) referencing specific XML ids and what was already targeted. Then analyze Criterion B (group coherence) referencing specific XML ids and any relevant edges. Then explain how you combined them into the final band using the tie-break rule.>
+
+  ### CRITERION_A_BAND: <integer 0-4, your standalone judgment for Criterion A only>
+  ### CRITERION_B_BAND: <integer 0-4, your standalone judgment for Criterion B only>
+  ### FINAL_BAND: <integer 0-4, the combined band per the tie-break rule>
+  ### LABEL: <one of: Fully Sensible | Minor Deviation | Moderate Violation | Major Violation | Severe Violation>
+
+  Do not output anything after the LABEL line.

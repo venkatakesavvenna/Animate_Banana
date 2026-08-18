@@ -15,6 +15,7 @@ Wraps a pipeline ChatBackend (Gemini 3.6 Flash by default) behind a single
 """
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 
@@ -82,6 +83,46 @@ class Judge:
 
         raise JudgeError(f"judge failed after 2 attempts: {last_error}")
 
+    def ask_text(self, prompt: str, images: list[Path] | None = None,
+                 tag: str = "judge", accept=None,
+                 retry_note: str = "Your previous reply did not follow the "
+                                   "required output format. Respond again using "
+                                   "exactly the section headers specified.",
+                 **params) -> str:
+        """One judged question -> raw text, or JudgeError.
+
+        The selection-sensibility and granularity-pacing judges answer in a
+        `### HEADER: value` block rather than JSON, so `ask_json` cannot serve
+        them -- its retry fires on "no JSON object" and would burn a second
+        call on every single timestep, and there are hundreds of them.
+
+        `accept` is an optional predicate over the response text; when it
+        rejects, one retry is spent with `retry_note` appended, which is the
+        same one-nudge-then-record policy `ask_json` uses. Parsing stays with
+        the caller, where the design document's own regexes live.
+        """
+        merged = {**DEFAULT_PARAMS, **params}
+        attempt_prompt = prompt
+        last_error = "no attempts made"
+
+        for _ in range(2):
+            result = self._backend.generate(
+                [Message.user(attempt_prompt, images=list(images or []))], **merged)
+            if not result.ok:
+                last_error = result.error or "call failed"
+                continue
+            text = result.text or ""
+            raw_path = self._save_raw(tag, text)
+            if not text.strip():
+                last_error = f"empty response; raw at {raw_path}"
+                continue
+            if accept is None or accept(text):
+                return text
+            last_error = f"response did not match the expected format; raw at {raw_path}"
+            attempt_prompt = f"{prompt}\n\n{retry_note}"
+
+        raise JudgeError(f"judge failed after 2 attempts: {last_error}")
+
     def unload(self) -> None:
         self._backend.unload()
 
@@ -96,16 +137,23 @@ def make_judge(cfg, cache_root: Path | None = None,
                raw_dir: Path | None = None, backend_name: str = "gemini_flash") -> Judge:
     """Judge from a pipeline config's backend definition.
 
-    Prefers the candidate config's own gemini entry (and thereby the
-    api_keys.csv pool); falls back to a standalone gemini-3.6-flash definition
-    when the config doesn't carry one, so judging a local-model run needs no
-    config edits.
+    The named backend is used **as declared**, whatever its type. That is what
+    lets the animation suite point at a served Qwen judge through an
+    `openai_compat` block without any code change here.
+
+    Falls back to a standalone gemini-3.6-flash definition only when the config
+    carries no such backend at all, so judging a local-model run still needs no
+    config edits. This used to fall back whenever the type was not `gemini`,
+    which silently rewrote every non-Gemini judge -- `--judge-backend qwen` ran
+    Gemini and recorded Gemini's name, so the substitution was invisible in the
+    record rather than wrong in it. A fallback is now announced on stderr,
+    because a score attributed to a model that did not produce it cannot be
+    audited.
     """
     try:
         backend_cfg = cfg.backend_cfg(backend_name)
-        if backend_cfg.get("type") != "gemini":
-            backend_cfg = FALLBACK_JUDGE
-    except Exception:
-        backend_cfg = FALLBACK_JUDGE
-    return Judge(backend_name if backend_cfg is not FALLBACK_JUDGE else "judge_gemini",
-                 backend_cfg, cache_root=cache_root, raw_dir=raw_dir)
+    except Exception as e:
+        print(f"judge backend '{backend_name}' unavailable ({e}); "
+              f"falling back to {FALLBACK_JUDGE['model']}", file=sys.stderr)
+        backend_cfg, backend_name = FALLBACK_JUDGE, "judge_gemini"
+    return Judge(backend_name, backend_cfg, cache_root=cache_root, raw_dir=raw_dir)

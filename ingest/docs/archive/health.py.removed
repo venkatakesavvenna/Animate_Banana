@@ -1,0 +1,643 @@
+"""
+Backend liveness — telling "this image is bad" apart from "the backend died".
+
+The problem this solves (v1.7)
+------------------------------
+Every backend reports a failed request the same way. `prediction.py` then
+retried it `max_attempts` times and marked the path FAILED in the DB. That is
+right for a bad prompt and catastrophically wrong for a dead engine: when
+`vllm serve` or the AsyncLLM engine core died, *every* subsequent request came
+back a failure, so the pipeline cheerfully walked the entire database into
+state 3 (FAILED) at maximum speed. Those images were never actually attempted —
+but a run that ends with 10M rows in state=3 is indistinguishable from one where
+the model genuinely refused them.
+
+`prediction.py` checks health whenever a request comes back an infra failure and
+raises `VLMServiceDown` instead of marking anything failed. That propagates out
+of `run_iteration()` -> `process_pipeline()` -> `cli()`'s `finally`, which resets
+every in-flight path from state 1 back to its fetch state. Nothing gets marked
+FAILED, and the run stops immediately instead of burning through the dataset.
+
+N workers (v1.9 §4)
+-------------------
+A function backend runs a POOL — 32 chrome processes, or 8 SAM3 replicas on 8
+GPUs — so "the backend is dead" stops being one bit. `VLMHealth` is per-rank,
+with the two aggregates chosen so each stays the useful question:
+
+  - `is_ready()`   is true when ALL ranks have reported ready, so cli()'s "wait
+                   for the backend, then start the clock" keeps excluding
+                   model-load time.
+  - `failure_reason()` is non-None only when ALL ranks are dead. One chrome
+                   worker dying costs throughput, not the run — the supervisor
+                   in `core/service.py` respawns it.
+
+`n_workers=1` (the default) reproduces the old single-flag behaviour exactly,
+which is why `VLLMService` needs no per-rank bookkeeping at all.
+
+One shared structure instead of nine attributes (v1.9.1 §1)
+-----------------------------------------------------------
+Through v1.9 this class was nine attributes spread across three sharing
+mechanisms — `mp.Event` x2, `mp.Value`, `mp.Array` x2, a `Manager()` dict (and
+therefore a whole extra SyncManager *process* per instance), plus two attributes
+stripped by hand from every pickle. Two of those (`dead_event` / `ready_event`)
+were pure derived state, hand-synchronised inside every `mark_*` method for no
+behavioural reason: **nothing in the codebase ever `.wait()`ed on either one.**
+Every consumer polls, because it has to interleave the check with
+`shutdown_event` and `failure_reason()` anyway (see `cli.py`'s readiness loop).
+Computing the aggregate on read is therefore behaviourally identical, and it
+deletes the two-step lock dance in every mutator — including `mark_alive`'s
+trickiest piece of logic, the manual un-latch of `dead_event` and rollback of
+`_reason`, which now has nothing left to desynchronise from.
+
+Everything this class tracks is per-rank, so it all collapses into ONE
+`mp.Array` of a ctypes structure, one entry per rank:
+
+    ready       latches 1, never cleared        heartbeat   monotonic() of last tick
+    dead        cooperative: the rank's own     n_inflight  occupied ledger slots
+                finally block ran               req_ids     k x 37 bytes
+    reason      REASON_* for THIS rank          stages      k x 256 bytes
+
+`req_ids` and `stages` are **separate fixed-width parallel arrays**, not one
+delimited blob (v1.9 packed them as `b"<req_id>\\x00<stage_name>"`). A `req_id`
+is always exactly 36 characters — `str(uuid4())`, no variance — so a 37-byte
+field can never truncate one. `stage_name` has no length constraint upstream,
+so it is the one genuinely variable field; giving it its own array means an
+oversized name can only ever truncate *itself*, never corrupt or collide with a
+neighbouring `req_id`. (StageWeaver's `StageConfig` also rejects a name longer
+than `MAX_STAGE_NAME_LEN` at construction time, so this stays a backstop.)
+
+The in-flight ledger — k slots per rank (v1.9.1 §2)
+---------------------------------------------------
+The ledger of what each rank currently has checked out is what lets a SIGKILLed
+worker's requests be recovered EXACTLY: the supervisor looks up every entry for
+the dead rank and emits a real `infra` response for each precise req_id, instead
+of leaving them in `prediction.py`'s `inflight` dict forever, where `_owned`
+never decrements, `fetch_n` walks to 0 and the pipeline stalls in silence.
+
+v1.9 gave each rank ONE slot, overwritten unconditionally. A worker holding more
+than one request at once — internal micro-batching, an async/threaded worker;
+nothing did this yet, but `WorkerSpec` was written with SAM3/YOLO in mind, which
+naturally want to — would silently destroy the first request's recovery record.
+Exactly the failure mode the mechanism exists to prevent, moved one layer down.
+
+Now each rank gets `k` slots (`max_inflight_per_rank`, from that pool's own
+`WorkerSpec.max_inflight_per_worker`), and going past `k` **logs an error and
+drops that one record** rather than silently overwriting another. Loud, not
+silent. `k` is deliberately per-instance rather than one large shared constant:
+a ceiling generous enough to "never matter" is also generous enough that a real
+bug — a leaked semaphore permit inflating concurrency 5-10x — sails through
+undetected. Hitting `k` is meant to be a signal worth logging.
+
+The heartbeat (v1.9.1 §3)
+-------------------------
+Hard-kill detection used to run entirely through `attach_process()` /
+`_all_procs_exited()`, which needs a live `Process` object — and a `Process`
+handle only means something in the process that started it, so `__getstate__`
+drops it. Under StageWeaver the group leader starts the backend but `cli()` runs
+in a separately-spawned StageWorker, so `_all_procs_exited()` there was
+permanently `False`: not an error, just silently inert, and a SIGKILLed backend
+hung that stage forever (`docs/v1.7_stageweaver_gap.md`).
+
+So every backend process now runs one daemon thread that writes `monotonic()`
+into its own rank slot every `HEARTBEAT_INTERVAL_S`, independent of whatever it
+is actually doing:
+
+    dead(rank) = ranks[rank].dead                            # cooperative
+              or (has ever ticked and now - heartbeat > STALE_S)   # inferred
+
+A shared `mp.Array` *does* survive pickling across `spawn` (verified two levels
+deep: main -> group leader -> leaf worker), so `failure_reason()` gives the same
+correct answer in any process. A SIGKILL simply means the ticks stop.
+
+`attach_process` / `attach_worker_process` are **not** removed: wherever a live
+`Process` object is available (the group leader, standalone's `__main__`) they
+stay as a faster, more precise corroborating signal — exact exit code, no
+`STALE_S` wait. The heartbeat is the baseline that works everywhere;
+`Process` liveness is an accelerant where it happens to be available.
+
+`STALE_S` is deliberately generous. A worker blocked in GIL-holding C code can
+miss ticks, so this is a backstop for "gone", not a tight SLA; the cooperative
+`dead` flag stays the fast path for ordinary Python-level crashes. And a rank
+that has *never* ticked is never called stale — otherwise a slow `spawn` import
+(vLLM's own import can take tens of seconds before `run()` is even entered) or a
+long model load would be misreported as a dead backend. Startup failures are
+covered by the cooperative flag and by `attach_process`, which is exactly where
+they are observable.
+
+Explicitly NOT solved with a per-request timeout: under StageWeaver several
+stages share one backend, so a request can legitimately sit queued for a very
+long time with nothing wrong. A deadline would have to be tuned against
+contention it cannot observe. The process that knows the fact reports the fact.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import logging
+import multiprocessing as mp
+import threading
+import time
+from ctypes import c_char, c_double, c_int8, c_int16
+from typing import Dict, List, Optional, Tuple
+
+# Never silent, even when the caller has no logger to hand. The pipeline's own
+# file loggers are built by get_logger(); this is the floor under them.
+_log = logging.getLogger(__name__)
+
+# reason codes — small ints so they fit in a shared ctypes field with no Manager.
+REASON_UNKNOWN = 0
+REASON_WORKER_EXITED = 1        # worker loop returned/raised; run()'s finally fired
+REASON_ENGINE_FAILED = 2        # in-process AsyncLLM engine raised / is dead
+REASON_SERVER_EXITED = 3        # `vllm serve` subprocess died
+REASON_SERVER_UNREACHABLE = 4   # serve process alive but not answering
+REASON_STARTUP_FAILED = 5       # never came up at all
+REASON_WORKER_DIED = 6          # a function-pool worker process died (v1.9)
+REASON_HEARTBEAT_STALE = 7      # no tick for STALE_S — SIGKILL/OOM-kill (v1.9.1)
+
+_REASON_TEXT = {
+    REASON_UNKNOWN: "VLM service stopped for an unknown reason",
+    REASON_WORKER_EXITED: "VLM service worker exited",
+    REASON_ENGINE_FAILED: "vLLM engine failed / is dead",
+    REASON_SERVER_EXITED: "`vllm serve` subprocess exited",
+    REASON_SERVER_UNREACHABLE: "`vllm serve` is not answering requests",
+    REASON_STARTUP_FAILED: "VLM service failed to start",
+    REASON_WORKER_DIED: "every worker process in the pool has died",
+    REASON_HEARTBEAT_STALE: (
+        "backend stopped heartbeating (SIGKILL/OOM-kill leaves no other trace)"
+    ),
+}
+
+# How long a rank may go without a heartbeat tick before it is inferred dead.
+# Generous on purpose — see the module docstring.
+STALE_S = 30.0
+
+# How often each backend process stamps its own rank slot.
+HEARTBEAT_INTERVAL_S = 1.0
+
+# A uuid4 string is always exactly 36 characters; +1 for the NUL terminator.
+REQ_ID_FIELD_BYTES = 37
+# Generous headroom for a stage name, the one field with no upstream length
+# constraint. StageWeaver's StageConfig enforces MAX_STAGE_NAME_LEN at
+# construction so an oversized name fails loudly at startup rather than
+# silently truncating deep inside a crash-recovery path.
+STAGE_NAME_FIELD_BYTES = 256
+MAX_STAGE_NAME_LEN = STAGE_NAME_FIELD_BYTES - 1
+
+# Refuse an obviously-absurd declared in-flight ceiling at construction time,
+# the way WorkerSpec.resolved_n_workers() already refuses a devices/n_workers
+# mismatch (v1.9.1 §6 Q3). k slots cost k*293 bytes per rank, so this is about
+# catching a typo/units mistake, not about the memory.
+MAX_INFLIGHT_HARD_CEILING = 512
+
+
+class VLMServiceDown(RuntimeError):
+    """
+    Fatal: the inference backend is gone. Raised into the pipeline loop instead
+    of failing the in-flight paths, so they stay in state=1 and are reset to
+    their fetch state by cli()'s shutdown path (i.e. replayed on the next run).
+    """
+
+
+# ---------------------------------------------------------------------------
+# The per-rank shared structure
+# ---------------------------------------------------------------------------
+#
+# One ctypes.Structure class per distinct `k`, built on demand and cached.
+#
+# Why the module-level `__getattr__` below matters: `mp.Array(cls, n)` is shared
+# across `spawn` by pickling `cls` BY REFERENCE — the child re-imports this
+# module and looks the class up by qualified name. A class created inside a
+# function is normally unpicklable for exactly that reason. Registering each
+# generated class under a deterministic name (`_RankState_<k>`) and resolving it
+# lazily through PEP 562's module `__getattr__` makes the lookup succeed in a
+# fresh child that has never called `_make_rank_state` itself. Verified two
+# spawn levels deep (main -> group leader -> leaf worker), in both directions.
+
+_RANK_STATE_CLASSES: Dict[int, type] = {}
+
+
+def _make_rank_state(k: int) -> type:
+    """Build (or return the cached) per-rank structure with `k` in-flight slots."""
+    cached = _RANK_STATE_CLASSES.get(k)
+    if cached is not None:
+        return cached
+
+    class _RankState(ctypes.Structure):
+        _fields_ = [
+            ("ready",      c_int8),                              # latches 1, never cleared
+            ("dead",       c_int8),                              # cooperative: this rank's finally ran
+            ("reason",     c_int8),                              # REASON_* for THIS rank
+            ("heartbeat",  c_double),                            # monotonic() of last tick; 0.0 = never
+            ("n_inflight", c_int16),                             # occupied slots below
+            ("req_ids",    (c_char * REQ_ID_FIELD_BYTES) * k),
+            ("stages",     (c_char * STAGE_NAME_FIELD_BYTES) * k),
+        ]
+
+    _RankState.__name__ = _RankState.__qualname__ = f"_RankState_{k}"
+    _RANK_STATE_CLASSES[k] = _RankState
+    globals()[_RankState.__name__] = _RankState
+    return _RankState
+
+
+def __getattr__(name: str):
+    """Resolve `_RankState_<k>` on demand — see the note above `_make_rank_state`."""
+    if name.startswith("_RankState_"):
+        suffix = name[len("_RankState_"):]
+        if suffix.isdigit():
+            return _make_rank_state(int(suffix))
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+class VLMHealth:
+    """
+    Shared liveness channel for a backend of `n_workers` processes.
+
+    Create it in `init_fn` (StageWeaver) or `__main__` (standalone) *before*
+    spawning the backend — same rule as every other IPC primitive — publish it
+    on the `ServiceChannel` so `cli()` can read it, hand the same object to
+    `VLLMService(...)` / `FunctionService(...)`, then attach the started Process
+    objects in the parent. A started `Process` does not pickle and is
+    deliberately not part of what reaches a child.
+
+    `n_workers=1, max_inflight_per_rank=1` are the defaults and reproduce the
+    single-process behaviour exactly, which is why `VLLMService` needs no
+    per-rank bookkeeping: one rank, `mark_ready()` means all-ready, `mark_dead()`
+    means all-dead.
+    """
+
+    def __init__(self, n_workers: int = 1, max_inflight_per_rank: int = 1):
+        self.n_workers = max(1, int(n_workers))
+
+        k = int(max_inflight_per_rank)
+        if k < 1:
+            raise ValueError(
+                f"max_inflight_per_rank must be >= 1, got {max_inflight_per_rank!r}"
+            )
+        if k > MAX_INFLIGHT_HARD_CEILING:
+            raise ValueError(
+                f"max_inflight_per_rank={k} exceeds the sanity ceiling of "
+                f"{MAX_INFLIGHT_HARD_CEILING}. This is the number of requests ONE "
+                "worker process holds at once, not the pipeline's batch size — if "
+                "you really need more, raise MAX_INFLIGHT_HARD_CEILING deliberately."
+            )
+        self.max_inflight_per_rank = k
+
+        # The one shared primitive — and deliberately LOCK-FREE (`lock=False`
+        # gives a raw ctypes array instead of mp.Array's default
+        # SynchronizedArray).
+        #
+        # This is not a micro-optimisation, it is a correctness requirement.
+        # `mp.Array`'s lock is a POSIX semaphore living in shared memory, and a
+        # process SIGKILLed while holding it NEVER releases it — there is no
+        # robust-futex recovery in CPython. Every later reader would then block
+        # forever. That would poison precisely the code path this class exists
+        # to serve: `failure_reason()` asking "did the backend get SIGKILLed?"
+        # would itself hang on the dead process's lock, turning the one failure
+        # mode we must detect into an undetectable hang. A heartbeat that can be
+        # killed by the kill it is watching for is worse than no heartbeat.
+        #
+        # No lock is needed, because the access pattern is single-writer:
+        #   - rank i's slot is written ONLY by rank i's own process (its
+        #     heartbeat thread and its own mark_* calls), plus the supervisor —
+        #     and the supervisor only touches a rank AFTER that worker is dead
+        #     (recover its ledger, mark_alive on respawn), never concurrently.
+        #   - ranks never touch each other's slots; they are distinct array
+        #     elements.
+        #   - everyone else only reads.
+        # Each field is a naturally-aligned scalar or a fixed-width byte array
+        # written by that one writer, so a reader sees either the old or the new
+        # value, never a torn mixture that means anything different. The two
+        # orderings a reader could observe mid-update are both benign and are
+        # noted at their write sites.
+        self._ranks = mp.Array(_make_rank_state(k), self.n_workers, lock=False)
+
+        self.proc = None    # parent-side only; single-process backends
+        self.procs = {}     # parent-side only; rank -> Process, for a pool
+
+    # ------------------------------------------------------------------
+    # child side — state transitions
+    # ------------------------------------------------------------------
+
+    def _valid(self, rank: int) -> bool:
+        return 0 <= rank < self.n_workers
+
+    def mark_dead(self, reason: int = REASON_UNKNOWN, rank: int = 0) -> None:
+        """
+        Report that THIS rank can no longer serve requests. Idempotent; the
+        first reason wins, because the first thing that went wrong is the one
+        worth reporting.
+
+        Note this only marks ONE rank. `failure_reason()` — the thing the whole
+        abort path keys off — stays None until every rank is dead. That is the
+        entire difference between "a chrome worker crashed" (throughput) and
+        "the backend is gone" (stop the run).
+        """
+        if not self._valid(rank):
+            return
+        r = self._ranks[rank]
+        # `reason` BEFORE `dead`: a reader that catches the gap sees a rank not
+        # yet flagged dead, i.e. it waits one more poll. The other order would
+        # briefly advertise a dead rank with reason UNKNOWN and lose the
+        # specific explanation from the report.
+        if r.reason == REASON_UNKNOWN:
+            r.reason = reason
+        r.dead = 1
+
+    def mark_alive(self, rank: int = 0) -> None:
+        """
+        Undo `mark_dead` for one rank — called by the supervisor after it has
+        respawned that worker. Clearing the reason too means a pool that lost
+        every worker and got them back is not permanently branded dead.
+        """
+        if not self._valid(rank):
+            return
+        r = self._ranks[rank]
+        # Re-arm the heartbeat to NOW rather than 0.0: the respawned process has
+        # not ticked yet, so leaving the dead worker's last (by now ancient)
+        # timestamp would make the fresh rank look stale the instant it came
+        # back. Starting its clock here also means a respawn that dies during
+        # its own startup still goes stale on schedule.
+        r.heartbeat = time.monotonic()
+        r.reason = REASON_UNKNOWN
+        r.dead = 0
+
+    def mark_ready(self, rank: int = 0) -> None:
+        """
+        Called from a backend process the moment it can serve requests: right
+        after `_load_model()` / `_build_async_engine()` returns (async/batch),
+        right after `_launch_server()`'s health check passes (online), or right
+        after `init_fn()` returns (function pool). Idempotent.
+
+        Latches and never un-sets: cli() waits on the aggregate once at startup
+        to decide when to start the clock, and a worker that dies and respawns
+        mid-run must not send it back to "still loading".
+        """
+        if not self._valid(rank):
+            return
+        self._ranks[rank].ready = 1
+
+    # ------------------------------------------------------------------
+    # child side — heartbeat
+    # ------------------------------------------------------------------
+
+    def beat(self, rank: int = 0) -> None:
+        """Stamp this rank's liveness tick. Cheap enough to call from anywhere."""
+        if not self._valid(rank):
+            return
+        self._ranks[rank].heartbeat = time.monotonic()
+
+    def start_heartbeat(self, rank: int = 0, stop_event=None) -> threading.Thread:
+        """
+        Start this rank's heartbeat thread and return it (daemon, so it never
+        holds up process exit).
+
+        Call it as the FIRST thing a backend process does — before loading a
+        model, before `init_fn`, before anything that can block for minutes. The
+        whole point is that the tick is independent of what the process is busy
+        with, so a long model load is never mistaken for a dead backend.
+
+        `time.monotonic()` is CLOCK_MONOTONIC on Linux, which is system-wide, so
+        a timestamp written by one process is directly comparable in another.
+        `VLMHealth` never crosses a machine boundary, so that is the whole
+        requirement.
+        """
+        self.beat(rank)
+
+        def _tick():
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    return
+                self.beat(rank)
+                time.sleep(HEARTBEAT_INTERVAL_S)
+
+        t = threading.Thread(target=_tick, name=f"vlm-heartbeat-{rank}", daemon=True)
+        t.start()
+        return t
+
+    # ------------------------------------------------------------------
+    # child side — in-flight ledger: what each rank is working on right now
+    # ------------------------------------------------------------------
+
+    def set_inflight(self, rank: int, req_id: str, stage_name: str) -> bool:
+        """
+        Record a request this rank just picked up. Called IMMEDIATELY after the
+        queue get(), so the window in which a kill loses the request is
+        microseconds wide and contains no user code.
+
+        Safe to call more than once per rank before the matching
+        `clear_inflight` — each req_id gets its own slot, up to
+        `max_inflight_per_rank`.
+
+        Returns False if this rank's ledger is already full, having logged the
+        overflow. The request still runs; only its recovery record is dropped,
+        so a kill mid-flight would stall that one item instead of all of them.
+        Reaching this point means the worker holds more requests at once than
+        its `WorkerSpec` declared — a real bug worth surfacing, which is exactly
+        why the ceiling is per-pool rather than one number generous enough to
+        never trip.
+        """
+        if not self._valid(rank):
+            return False
+        key = req_id.encode("utf-8")[:REQ_ID_FIELD_BYTES - 1]
+        name = stage_name.encode("utf-8")[:STAGE_NAME_FIELD_BYTES - 1]
+        r = self._ranks[rank]
+        free = -1
+        for i in range(self.max_inflight_per_rank):
+            held = r.req_ids[i].value
+            if held == key:
+                free = i          # re-checkout of the same id: reuse its slot
+                break
+            if not held and free < 0:
+                free = i
+        if free < 0:
+            _log.error(
+                "VLMHealth: rank=%d in-flight ledger is full (%d slots) — dropping "
+                "the recovery record for req_id=%s stage=%s. This worker is holding "
+                "more requests at once than its WorkerSpec declared via "
+                "max_inflight_per_worker; if that worker was killed now, this one "
+                "request would stall its item.",
+                rank, self.max_inflight_per_rank, req_id, stage_name,
+            )
+            return False
+        # `stages` BEFORE `req_ids`: a slot is considered occupied when its
+        # req_id is non-empty, so writing the req_id last means a reader either
+        # sees the slot empty or sees it complete. The reverse order could hand
+        # the supervisor a req_id with an empty stage name — unroutable, i.e.
+        # exactly the recovery failure this ledger prevents.
+        r.stages[free].value = name
+        r.req_ids[free].value = key
+        r.n_inflight = sum(
+            1 for i in range(self.max_inflight_per_rank) if r.req_ids[i].value
+        )
+        return True
+
+    def clear_inflight(self, rank: int, req_id: str) -> None:
+        """
+        Clear one request's entry. Called immediately after its response is
+        put(). Takes req_id (not just rank) because a rank may hold more than
+        one entry at a time, and only clears a slot owned by `rank`, so a
+        stale/mistargeted call can't delete another rank's live entry.
+        """
+        if not self._valid(rank):
+            return
+        key = req_id.encode("utf-8")[:REQ_ID_FIELD_BYTES - 1]
+        r = self._ranks[rank]
+        for i in range(self.max_inflight_per_rank):
+            if r.req_ids[i].value == key:
+                # req_id first, for the mirror image of set_inflight's reason:
+                # clearing it is what makes the slot free, so a reader can never
+                # see a live req_id whose stage name has already been wiped.
+                r.req_ids[i].value = b""
+                r.stages[i].value = b""
+                break
+        r.n_inflight = sum(
+            1 for i in range(self.max_inflight_per_rank) if r.req_ids[i].value
+        )
+
+    def get_inflight(self, rank: int) -> List[Tuple[str, str]]:
+        """
+        Every `(req_id, stage_name)` currently checked out by this rank, in no
+        particular order. Used by the supervisor to recover a dead worker's
+        requests exactly — one `infra` response per entry returned here.
+        """
+        if not self._valid(rank):
+            return []
+        out: List[Tuple[str, str]] = []
+        r = self._ranks[rank]
+        for i in range(self.max_inflight_per_rank):
+            held = r.req_ids[i].value
+            if held:
+                out.append((
+                    held.decode("utf-8", "replace"),
+                    r.stages[i].value.decode("utf-8", "replace"),
+                ))
+        return out
+
+    # ------------------------------------------------------------------
+    # any process — aggregates
+    # ------------------------------------------------------------------
+
+    def is_ready(self) -> bool:
+        """True once EVERY rank has reported ready."""
+        return all(self._ranks[i].ready for i in range(self.n_workers))
+
+    def _rank_status(self) -> List[Tuple[bool, int, bool]]:
+        """Per-rank `(dead, reason, stale)` snapshot."""
+        now = time.monotonic()
+        out = []
+        for i in range(self.n_workers):
+            r = self._ranks[i]
+            # heartbeat == 0.0 means "has never ticked" — a rank still importing
+            # or loading weights, not a corpse. See the module docstring.
+            #
+            # `time.monotonic()` is CLOCK_MONOTONIC on Linux, which is
+            # system-wide, so a timestamp written by another process is directly
+            # comparable here. VLMHealth never crosses a machine boundary, which
+            # is the whole requirement.
+            stale = bool(r.heartbeat) and (now - r.heartbeat) > STALE_S
+            out.append((bool(r.dead), int(r.reason), stale))
+        return out
+
+    def failure_reason(self) -> Optional[str]:
+        """
+        Return a human-readable reason if the backend is known to be gone, else
+        None.
+
+        "Gone" means EVERY rank is gone, by either signal: the cooperative flag
+        its own `finally` set, or a heartbeat that stopped `STALE_S` ago. A
+        partial loss is the supervisor's problem, not the run's.
+
+        `_all_procs_exited()` is consulted as a corroborating accelerant where a
+        live Process object happens to be available — it gives an exact exit
+        code with no STALE_S wait. It is never *required*, which is the whole
+        point of the heartbeat: under StageWeaver, `cli()` holds no Process
+        handle at all.
+        """
+        statuses = self._rank_status()
+        all_gone = all(dead or stale for dead, _reason, stale in statuses)
+        procs_exited = self._all_procs_exited()
+
+        if not all_gone and not procs_exited:
+            return None
+
+        if not all_gone and procs_exited:
+            # Killed hard enough that nothing ran its own finally block, and we
+            # happen to hold the Process objects — no need to wait out STALE_S.
+            return (
+                "backend process(es) died without reporting "
+                f"(exit code(s) {self._exit_codes()} — SIGKILL/OOM-kill leaves no other trace)"
+            )
+
+        # Every rank is gone. Report the first *cooperative* reason if there is
+        # one — a rank that got to say why is more informative than one that was
+        # merely inferred stale.
+        code = REASON_UNKNOWN
+        for dead, reason, _stale in statuses:
+            if dead and reason != REASON_UNKNOWN:
+                code = reason
+                break
+        else:
+            if all(stale and not dead for dead, _r, stale in statuses):
+                code = REASON_HEARTBEAT_STALE
+
+        text = _REASON_TEXT.get(code, _REASON_TEXT[REASON_UNKNOWN])
+        n_stale = sum(1 for _d, _r, stale in statuses if stale)
+        if n_stale:
+            text += f" [{n_stale}/{self.n_workers} rank(s) stopped heartbeating]"
+        if procs_exited:
+            text += f" (backend process(es) exited, code(s) {self._exit_codes()})"
+        return text
+
+    def raise_if_dead(self, context: str = "") -> None:
+        reason = self.failure_reason()
+        if reason:
+            suffix = f" [{context}]" if context else ""
+            raise VLMServiceDown(f"{reason}{suffix}")
+
+    # ------------------------------------------------------------------
+    # parent side — Process handles, an accelerant where they exist
+    # ------------------------------------------------------------------
+
+    def attach_process(self, proc) -> None:
+        """
+        Single-process backends (VLLMService). A faster, exact-exit-code version
+        of what the heartbeat detects after STALE_S — available only in the
+        process that started `proc`, which is why it cannot be the only signal.
+        """
+        self.proc = proc
+
+    def attach_worker_process(self, rank: int, proc) -> None:
+        """Pool backends (FunctionService). Called again on every respawn so the
+        parent-side liveness check always looks at the CURRENT process."""
+        self.procs[rank] = proc
+
+    def _all_procs_exited(self) -> bool:
+        """True only when every attached process object is dead. Deliberately
+        `all`, not `any`: losing one worker of eight is not a dead backend.
+        Always False in a process that holds no handles — that is the case the
+        heartbeat exists for, not an error."""
+        procs = [p for p in self.procs.values() if p is not None]
+        if self.proc is not None:
+            procs.append(self.proc)
+        if not procs:
+            return False
+        return all(not p.is_alive() for p in procs)
+
+    def _exit_codes(self) -> str:
+        codes = []
+        if self.proc is not None:
+            codes.append(str(self.proc.exitcode))
+        for rank in sorted(self.procs):
+            proc = self.procs[rank]
+            if proc is not None:
+                codes.append(f"rank{rank}={proc.exitcode}")
+        return ", ".join(codes) if codes else "unknown"
+
+    def __getstate__(self):
+        # An mp.Array pickles fine into a spawned child — that is what makes it
+        # a shared primitive at all. A started Process does not, and a handle
+        # only means anything in the process that started it, so drop both.
+        state = self.__dict__.copy()
+        state["proc"] = None
+        state["procs"] = {}
+        return state

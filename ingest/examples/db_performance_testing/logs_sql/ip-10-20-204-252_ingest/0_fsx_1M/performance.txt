@@ -1,0 +1,56 @@
+(vllm_env) srihari.bandarupalli@ip-10-20-204-252:/code/examples/db_performance_testing$ python bench_ops_sql.py --db-dir ./bench_sql_data/   --batch-size 1000   --n-batches 200
+Opening DB:         ./bench_sql_data/images.db
+Opening seen-cache: ./bench_sql_data/seen_cache.db
+
+============================================================
+Target: 200 batches x 1,000 = 200,000 paths total
+============================================================
+
+[fetch_batch]  batch_size=1,000  n_batches=200
+  batch   20/200: 328.0ms  3,049 paths/s
+  batch   40/200: 275.4ms  3,631 paths/s
+  batch   60/200: 244.3ms  4,094 paths/s
+  batch   80/200: 196.6ms  5,087 paths/s
+  batch  100/200: 176.7ms  5,659 paths/s
+  batch  120/200: 166.9ms  5,991 paths/s
+  batch  140/200: 157.5ms  6,350 paths/s
+  batch  160/200: 149.5ms  6,688 paths/s
+  batch  180/200: 141.6ms  7,065 paths/s
+  batch  200/200: 129.6ms  7,714 paths/s
+  → fetch_batch: avg 224.5ms/batch  total 44.91s  4,453 paths/s
+
+[mark_done]  100,000 paths in 100 calls
+  batch   10/100: 184.2ms  5,428 paths/s
+  batch   20/100: 184.4ms  5,424 paths/s
+  batch   30/100: 176.1ms  5,679 paths/s
+  batch   40/100: 171.1ms  5,844 paths/s
+  batch   50/100: 185.2ms  5,399 paths/s
+  batch   60/100: 168.5ms  5,936 paths/s
+  batch   70/100: 156.4ms  6,393 paths/s
+  batch   80/100: 158.4ms  6,314 paths/s
+  batch   90/100: 169.9ms  5,887 paths/s
+  batch  100/100: 141.3ms  7,076 paths/s
+  → mark_done: avg 168.7ms/batch  total 16.87s  5,926 paths/s
+
+[mark_failed]  100,000 paths in 100 calls
+  batch   10/100: 141.3ms  7,077 paths/s
+  batch   20/100: 136.6ms  7,321 paths/s
+  batch   30/100: 145.8ms  6,859 paths/s
+  batch   40/100: 135.7ms  7,368 paths/s
+  batch   50/100: 124.5ms  8,030 paths/s
+  batch   60/100: 119.5ms  8,371 paths/s
+  batch   70/100: 120.1ms  8,330 paths/s
+  batch   80/100: 114.2ms  8,756 paths/s
+  batch   90/100: 107.0ms  9,342 paths/s
+  batch  100/100: 107.4ms  9,315 paths/s
+  → mark_failed: avg 127.9ms/batch  total 12.79s  7,821 paths/s
+
+============================================================
+📊 Final DB health:
+   Main DB size : 533.76 MB
+   Total images : 3,500,000
+   state_0 (pending): 3,300,000
+   state_1 (in-progress): 0
+   state_2 (done): 100,000
+   state_3 (failed): 100,000
+   state_4 (upstream-ready): 0

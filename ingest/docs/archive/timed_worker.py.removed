@@ -1,0 +1,260 @@
+import time
+import traceback
+from queue import Empty
+from typing import List, Optional
+
+from .health import REASON_ENGINE_FAILED
+from .wire import (
+    KIND_OK,
+    KIND_REJECT,
+    VLLMResponse,
+    build_chat_messages,
+    chat_template_kwargs,
+    stats_from_request_output,
+)
+
+# ---------------------------------------------------------------------------
+# Timed variant of VLLMService._worker() — identical behavior to vlm_service.py,
+# with per-item and aggregate timing printed for request_queue/response_queue
+# IPC. Selected via vlm_service.debug_timing.
+#
+# Also holds the batch backend's shared helpers (both _worker and timed_worker
+# use them): DEBUG_LEVEL / debug_big_payload / avg_excluding_first, and
+# chat_batch() below.
+#
+# v1.9.1: the shared-memory pool this file's instrumentation was built to
+# measure is gone (a request has been paths + text since v1.8, so there was
+# nothing left worth moving out of the queue). What remains measures the only
+# transport there is — request_queue.get() and response_queue.put() carrying the
+# payload itself, which is exactly the "pre-shm" baseline these numbers were
+# always compared against.
+# ---------------------------------------------------------------------------
+
+# Debug print verbosity for IPC timing instrumentation:
+#   0 = silent
+#   1 = batch-level summary only
+#   2 = level 1 + a line per individual item
+DEBUG_LEVEL = 1
+
+# When True, simulate a 10x bigger payload: stage() writes [req] * 10 and the
+# worker reads data[-1] (and symmetrically for responses). Purely an IPC
+# benchmark knob — it inflates what crosses the queue without changing what is
+# generated.
+debug_big_payload = False
+
+
+def avg_excluding_first(times: List[float]) -> Optional[float]:
+    """
+    Average of a per-item timing list, dropping the first sample.
+
+    The first item in a batch is fetched with a blocking get() that includes
+    however long it took the producer to make it available (submit() lag on
+    the request side, model.generate() latency on the response side) — that
+    wait isn't IPC cost, so leaving it in skews the "true" per-item IPC latency
+    this is trying to measure.
+    """
+    if not times:
+        return None
+    if len(times) == 1:
+        return times[0]
+    return sum(times[1:]) / (len(times) - 1)
+
+
+# ---------------------------------------------------------------------------
+# Batch-backend rendering (v1.8 §1 / §5)
+#
+# The batch backend receives the same unified payload as everyone else (raw
+# text + image paths), so it has to render too. Unlike the async backend it has
+# no event loop to overlap with — `LLM.chat()` is one blocking call per
+# collected batch — so rendering happens inline, serialized, before generation.
+# That is a deliberate loss of CPU/GPU overlap on this backend only: it is kept
+# as the legacy A/B timing baseline, not as a recommended path, and building
+# double-buffering plumbing for it was explicitly out of scope.
+#
+# `LLM.chat()` is vLLM's own public messages -> engine-input -> generate path
+# (it calls the same renderer `vllm serve` does), so this backend templates
+# identically to the other two rather than re-implementing it.
+# ---------------------------------------------------------------------------
+
+def _is_engine_dead(exc: BaseException) -> bool:
+    """Shared with async_worker's check — import there to avoid duplicating the
+    match list, which has to track vLLM's own exception names."""
+    from .async_worker import _is_engine_dead_error
+    return _is_engine_dead_error(exc)
+
+
+def _chat_group(model, group):
+    """One LLM.chat() call over items sharing the same chat-template kwargs."""
+    return model.chat(
+        [build_chat_messages(item.prompt) for item in group],
+        sampling_params=[item.sampling_params for item in group],
+        chat_template_kwargs=chat_template_kwargs(group[0].prompt) or None,
+        use_tqdm=False,
+    )
+
+
+def chat_batch(self, model, batch) -> List[VLLMResponse]:
+    """
+    Render and generate one collected batch. Returns one VLLMResponse per item,
+    in the same order as `batch`. `self` is the VLLMService instance (for its
+    logger and health flag), matching _worker/timed_worker's own convention.
+
+    Items are grouped by their chat-template kwargs (i.e. enable_thinking) so a
+    batch mixing both still templates each item the way its own payload asked
+    for, rather than silently applying the first item's setting to all of them.
+
+    On a batch-level failure the batch is retried ONE ITEM AT A TIME. A single
+    unreadable image or over-long prompt raises out of `chat()` for the whole
+    batch, and failing all of its cohort for one poison item is exactly the
+    behaviour the streaming backends were built to avoid — so the fallback
+    isolates the culprit and lets the rest through. It only runs on the failure
+    path, so the healthy case still pays for one call per group.
+    """
+    groups: dict = {}
+    for idx, item in enumerate(batch):
+        key = tuple(sorted(chat_template_kwargs(item.prompt).items()))
+        groups.setdefault(key, []).append(idx)
+
+    responses: List[Optional[VLLMResponse]] = [None] * len(batch)
+    for indices in groups.values():
+        group = [batch[i] for i in indices]
+        try:
+            outputs = _chat_group(model, group)
+            for i, output in zip(indices, outputs):
+                responses[i] = VLLMResponse.ok(
+                    batch[i].req_id,
+                    output.outputs[0].text,
+                    stats_from_request_output(output),
+                )
+            continue
+        except Exception as e:
+            self.logger.error(f"[batch] chat() failed for a group of {len(group)}; "
+                              f"isolating items one at a time: "
+                              f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+            if _is_engine_dead(e):
+                # Not worth isolating: every item will fail the same way, and
+                # the engine is what is broken, not the inputs. Flag it so the
+                # stage aborts instead of retrying the whole dataset into state=3.
+                self.vlm_health.mark_dead(REASON_ENGINE_FAILED)
+                for i in indices:
+                    responses[i] = VLLMResponse.infra(
+                        batch[i].req_id, f"engine is dead ({type(e).__name__}: {e})")
+                continue
+
+        for i in indices:
+            item = batch[i]
+            try:
+                (output,) = _chat_group(model, [item])
+                responses[i] = VLLMResponse.ok(
+                    item.req_id, output.outputs[0].text,
+                    stats_from_request_output(output))
+            except Exception as e:
+                if _is_engine_dead(e):
+                    self.vlm_health.mark_dead(REASON_ENGINE_FAILED)
+                    responses[i] = VLLMResponse.infra(
+                        item.req_id, f"engine is dead ({type(e).__name__}: {e})")
+                else:
+                    # Reproducible on its own, so it is this request's problem —
+                    # unless nothing at all in this batch worked, see below.
+                    responses[i] = VLLMResponse.reject(
+                        item.req_id, f"{type(e).__name__}: {e}")
+
+    # Blaming the inputs requires evidence that the engine is otherwise fine.
+    # If not one item in this batch produced an answer, "every single one of
+    # them is individually bad" is the far less likely explanation than "the
+    # engine is not serving" — and getting that wrong is expensive in one
+    # direction only: a reject is TERMINAL, so a misjudged engine failure marks
+    # real, untried images FAILED forever. Downgrading to infra costs a retry
+    # and then trips the stage's consecutive-infra fuse, which aborts the run
+    # with every path still replayable. This also stops _is_engine_dead's
+    # name/text heuristic from being load-bearing on its own.
+    if not any(r is not None and r.kind == KIND_OK for r in responses):
+        responses = [
+            r if r is None or r.kind != KIND_REJECT
+            else VLLMResponse.infra(
+                r.req_id,
+                f"{r.error} (reported as a backend failure, not a bad input: "
+                "nothing in this batch succeeded)")
+            for r in responses
+        ]
+    return responses
+
+
+def timed_worker(self, model) -> None:
+    """
+    Batch inference loop — timed/instrumented version of VLLMService._worker().
+
+    Collects requests from request_queue up to batch_size or max_wait_ms,
+    runs model.generate(), then routes each output to the correct
+    response_queue via the stage_name key. Takes the VLLMService instance
+    explicitly (like an unbound method) so it can share the same attribute
+    access (self.request_queue, self.response_queues, ...) as the class's own
+    _worker.
+    """
+    while not self.stop_event.is_set():
+        deadline = time.time() + self.max_wait_ms / 1000.0
+
+        # --- collect batch: each token off request_queue IS the payload ---
+        batch = [] # List[VLLMRequest]
+        qget_times = []
+        batch_start = time.perf_counter()
+
+        while time.time() < deadline and len(batch) < self.batch_size:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            try:
+                t0 = time.perf_counter()
+                got = self.request_queue.get(timeout=remaining)
+                t1 = time.perf_counter()
+            except Empty:
+                break
+
+            batch.append(got[-1] if debug_big_payload else got)
+            qget_times.append(t1 - t0)
+
+            if DEBUG_LEVEL >= 2:
+                print(f"request_queue.get() took {t1 - t0:.6f}s")
+
+        if DEBUG_LEVEL >= 1 and qget_times:
+            n = len(qget_times)
+            print(
+                f"[recv] request_queue.get(): {n} items, "
+                f"total {time.perf_counter() - batch_start:.6f}s, "
+                f"avg excl. first {avg_excluding_first(qget_times):.6f}s"
+            )
+
+        if not batch:
+            continue
+
+        # --- lazy load on first real batch ---
+        if model is None:
+            model = self._load_model()
+            self.vlm_health.mark_ready()
+
+        # --- render + inference (chat_batch never raises; every item comes
+        #     back tagged ok/reject/infra) ---
+        responses = chat_batch(self, model, batch)
+
+        # --- route responses (the payload itself travels through the queue) ---
+        qput_times = []
+        route_start = time.perf_counter()
+
+        for item, response in zip(batch, responses):
+            resp_payload = [response] * 10 if debug_big_payload else response
+
+            t0 = time.perf_counter()
+            self.response_queues[item.stage_name].put(resp_payload)
+            t1 = time.perf_counter()
+            qput_times.append(t1 - t0)
+
+            if DEBUG_LEVEL >= 2:
+                print(f"response_queue.put() took {t1 - t0:.6f}s")
+
+        if DEBUG_LEVEL >= 1 and qput_times:
+            n = len(qput_times)
+            print(
+                f"[route] response_queue.put(): {n} items, "
+                f"total {time.perf_counter() - route_start:.6f}s, "
+                f"avg {sum(qput_times)/n:.6f}s"
+            )

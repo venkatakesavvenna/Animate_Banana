@@ -1,0 +1,330 @@
+from multiprocessing import Queue, Process
+from typing import Dict, List, NamedTuple, Optional
+from .vllm import LLM, SamplingParams
+from .health import (
+    REASON_ENGINE_FAILED,
+    REASON_STARTUP_FAILED,
+    REASON_WORKER_EXITED,
+    VLMHealth,
+)
+from vision_ingest.utils.utils import get_logger
+import os, time, traceback
+from queue import Empty
+
+# Dispatch is now driven by the per-instance `backend` string (set from
+# args.backend, threaded in via main.py -> model_init -> VLLMService). See the
+# dispatch in run() and self.backend in __init__.
+
+# Only consulted when backend == "batch": when True, run() dispatches to the
+# fully-instrumented timed_worker() (see timed_worker.py) instead of _worker().
+debug_timing = True
+
+VALID_BACKENDS = ("online", "async", "batch")
+
+class VLLMRequest(NamedTuple):
+    """A single inference request placed on the shared request queue."""
+    req_id: str          # uuid4 string — set by stage() in retry_validate
+    stage_name: str      # used to route the response to the right response queue
+    # The unified v1.8 payload, identical for every backend:
+    #   {"prompt": <raw user text>, "image_paths": [...], "enable_thinking": bool}
+    # NOT chat-templated and carrying no decoded pixels — the worker does both,
+    # through vLLM's own renderer. See vllm_module/wire.py.
+    prompt: Dict
+    sampling_params: SamplingParams
+
+class VLLMService(Process):
+    """
+    Runs the vLLM model in a dedicated process.
+
+    All stage processes share one request_queue (in).
+    Each stage gets its own response_queue (out), keyed by stage_name.
+
+    Queues must be created by the caller BEFORE spawning this process
+    (only safe window for fd inheritance with spawn start method) — in practice
+    by `core.channel.build_channel()`, in the group leader or in `__main__`.
+
+    Requests and responses travel through request_queue / response_queues as
+    full payloads. That is the only transport as of v1.9.1: a request is paths +
+    text and a response is text + stats, so the shared-memory pool that used to
+    carry them (added in v1.5 for pre-v1.8 offline prompts, which embedded 3-12
+    MB of decoded PIL image per request) had nothing left to justify it and was
+    deleted. See docs/v1.9.1_changes.md §4.4.
+
+    Usage:
+        channel    = build_channel(["stage_a", "stage_b"])
+        vlm_health = VLMHealth()
+
+        svc = VLLMService.from_channel(channel, engine_args, gpus, batch_size,
+                                       vlm_health=vlm_health)
+        svc.start()
+        vlm_health.attach_process(svc)
+        channel.set_health(vlm_health)
+        ...
+        # shutdown handled by model_term() / term_fn()
+    """
+
+    def __init__(
+        self,
+        engine_args: Dict,
+        gpus: str,
+        batch_size: int,
+        request_queue: Queue,
+        response_queues: Dict[str, Queue],
+        stop_event, # mp.Event
+        max_wait_ms: int = 5000,
+        lazy_loading: bool = False,
+        backend: str = "async",
+        vlm_health: Optional[VLMHealth] = None,
+        logs_dir: str = "./logs",
+    ) -> None:
+        super().__init__(daemon=False)  # non-daemon so join() in model_term works correctly
+
+        if backend not in VALID_BACKENDS:
+            raise ValueError(f"unknown backend {backend!r}; expected one of {VALID_BACKENDS}")
+
+        # stored on the Process object — will be pickled and sent to the child
+        self.engine_args   = engine_args
+        self.gpus          = gpus
+        self.batch_size    = batch_size
+        # Inference backend selector (see backend note above run()):
+        #   "online" -> local `vllm serve` over HTTP (online_worker)
+        #   "async"  -> in-process AsyncLLM continuous batching (async_worker)
+        #   "batch"  -> batch-boundary LLM.generate (timed_worker / _worker)
+        self.backend       = backend
+        self.max_wait_ms   = max_wait_ms
+        self.lazy_loading  = lazy_loading
+
+        # Liveness channel back to the stage. Set (in the child) the moment this
+        # process cannot serve requests any more, so prediction.py can raise
+        # VLMServiceDown instead of walking the whole DB into state=3, plus a
+        # heartbeat thread started at the top of run() so a SIGKILL is noticed
+        # from ANY process — including a StageWorker that holds no Process
+        # handle. See health.py.
+        #
+        # Defaulted rather than required so older call sites keep working, but
+        # a throwaway health object is a real loss of protection: nothing else
+        # ever reads it, so both the readiness wait and crash detection go dead.
+        # Always build one in init_fn and publish it on the ServiceChannel.
+        self.vlm_health = vlm_health if vlm_health is not None else VLMHealth()
+
+        # NOTE: there is no allowed_media_roots parameter as of v1.8. The
+        # directory images may be read from now travels inside engine_args as
+        # vLLM's own `allowed_local_media_path` (VLLMConfig.get_engine_args
+        # derives it from allowed_media_roots), so the in-process engine and
+        # `vllm serve` are configured from the one value the stage also validates
+        # against. Accepting it separately here meant two ways to say the same
+        # thing, which is how they drift.
+
+        # IPC primitives — created by caller, inherited at spawn
+        self.request_queue  = request_queue
+        self.response_queues = response_queues
+        self.stop_event     = stop_event
+
+        # Log directory for this process's own logger (vlm_service.log — see
+        # run()). Same directory cli() writes main.log/vlm_prediction.log/etc.
+        # to, so `tail -f` across the run shows everything in one place.
+        # get_logger() is not called until run(), because a logging.Logger with
+        # an open file handle does not survive being pickled across the spawn
+        # boundary into this Process's child.
+        self.logs_dir = logs_dir
+        self.logger = None
+
+    # ------------------------------------------------------------------
+    # Construction from a ServiceChannel
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_channel(
+        cls,
+        channel,
+        engine_args: Dict,
+        gpus: str,
+        batch_size: int,
+        **kwargs,
+    ) -> "VLLMService":
+        """
+        Build a service from a `ServiceChannel`, unpacking the three primitives
+        it carries.
+
+        v1.9.1 §6 Q1 asked whether these constructors should take the channel
+        directly. They do not: a constructor is not a process boundary that has
+        to survive a pickle, so forcing the bundle past that point would only
+        hide which primitives the class actually uses. This classmethod removes
+        the call-site boilerplate without giving up that explicitness — the
+        parameter list below is still the honest list of what a VLLMService
+        touches.
+        """
+        return cls(
+            engine_args=engine_args,
+            gpus=gpus,
+            batch_size=batch_size,
+            request_queue=channel.request_queue,
+            response_queues=channel.response_queues,
+            stop_event=channel.stop_event,
+            **kwargs,
+        )
+
+    # ------------------------------------------------------------------
+    # Process entry point
+    # ------------------------------------------------------------------
+
+    def run(self) -> None:
+        """Called automatically by Process.start() inside the child process."""
+        # Created here, not in __init__: a logging.Logger holding an open file
+        # handle does not survive being pickled across the spawn boundary, so
+        # it must be built fresh inside the child. Shared with online_worker.py
+        # / async_worker.py via self.logger, exactly like self.proc.
+        self.logger = get_logger(self.logs_dir, "vlm_service")
+
+        # FIRST thing, before the model is even touched: the heartbeat has to be
+        # independent of what this process is busy with, or a 5-minute model load
+        # would be indistinguishable from a corpse. Deliberately NOT tied to
+        # stop_event — it reports "this process is alive", not "this process is
+        # accepting work"; the cooperative dead flag below is what reports the
+        # latter. Daemon thread, so it never holds up exit.
+        self.vlm_health.start_heartbeat(rank=0)
+
+        started = False
+        try:
+            if self.backend == "online":
+                # Online serving: launch a local `vllm serve` subprocess and
+                # drive it over HTTP. No in-process engine is built here — the
+                # subprocess owns the GPU. Local import keeps httpx/subprocess
+                # out of this module's import path (and mirrors the others).
+                from .online_worker import online_worker
+                started = True
+                online_worker(self)
+            elif self.backend == "async":
+                # Phase C: AsyncLLM worker. It builds its own AsyncLLM engine
+                # (lazily on the first request unless lazy_loading is False), so
+                # we do NOT pre-load a sync LLM here. Local import mirrors the
+                # timed_worker import below (avoids pulling vLLM's async surface
+                # into this module's import path).
+                from .async_worker import async_worker
+                started = True
+                async_worker(self)
+            else:
+                # backend == "batch": batch-boundary LLM.generate().
+                model = None
+
+                if not self.lazy_loading:
+                    model = self._load_model()
+                    # LLM(**engine_args) is synchronous and only returns once
+                    # the engine (weights included) is fully built.
+                    self.vlm_health.mark_ready()
+                started = True
+
+                if debug_timing:
+                    # Local import: timed_worker.py imports VLLMRequest so a top-level
+                    # import here would be circular.
+                    from .timed_worker import timed_worker
+                    timed_worker(self, model)
+                else:
+                    self._worker(model)
+        except BaseException:
+            # Print before anything else: this traceback is the only record of
+            # why the GPU process died, and the parent only ever sees an exit
+            # code. The health flag is set in the finally below.
+            self.logger.error(f"[VLLMService] backend={self.backend} died:\n{traceback.format_exc()}")
+            self.vlm_health.mark_dead(
+                REASON_ENGINE_FAILED if started else REASON_STARTUP_FAILED
+            )
+            raise
+        finally:
+            # Whatever the reason, this process is no longer serving requests.
+            # Marking it here (rather than only on the exception path) covers
+            # the clean-exit case too, so a stage still waiting on in-flight
+            # responses learns immediately instead of blocking forever.
+            self.vlm_health.mark_dead(REASON_WORKER_EXITED)
+
+            # Opt out of the exit-time flush-and-join for every queue this
+            # process ever put() to. response_queues can have unread items if
+            # the collecting stage died first, which leaves this process's
+            # feeder thread blocked on a full pipe with no reader, hanging
+            # Process._bootstrap()'s exit finalizers (and therefore
+            # vllm_proc.join() in the parent). See
+            # docs/archive/exit_hang_postmortem.md. Runs here (in finally) so it
+            # fires whether the worker exited via stop_event or an exception.
+            for q in self.response_queues.values():
+                q.cancel_join_thread()
+            self.logger.info("Successfully cancelled response_queues join threads")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _load_model(self):
+        self.logger.info("Model Loading started")
+        cur_time = time.time()
+        os.environ['VLLM_WORKER_MULTIPROC_METHOD'] = 'spawn'
+        os.environ["CUDA_VISIBLE_DEVICES"] = self.gpus
+        os.environ['NCCL_NET_PLUGIN'] = ""
+
+        no_of_gpus = len(self.gpus.split(",")) if self.gpus else 0
+        if no_of_gpus > 0:
+            self.engine_args['tensor_parallel_size'] = no_of_gpus
+
+        self.logger.info(f"engine_args: {self.engine_args}")
+        temp =  LLM(**self.engine_args)
+        self.logger.info(f"Model loaded in {time.time()-cur_time}")
+        return temp
+
+    def _unpack_request(self, token) -> VLLMRequest:
+        """
+        Turn one request-queue token into the VLLMRequest it carries. Shared by
+        _worker/timed_worker.
+
+        The v1.7 `assert_payload_kind()` check is gone as of v1.8: there is one
+        payload shape now, so the two processes have nothing left to disagree
+        about (see wire.py). Since v1.9.1 the token simply IS the request — the
+        only remaining wrapper is timed_worker's `debug_big_payload` IPC
+        benchmark, which inflates it into a list.
+        """
+        from .timed_worker import debug_big_payload
+        return token[-1] if debug_big_payload else token
+
+    def _worker(self, model) -> None:
+        """
+        Batch inference loop.
+
+        Collects requests from request_queue up to batch_size or max_wait_ms,
+        renders + generates them (chat_batch), then routes each tagged response
+        to the correct response_queue via the stage_name key.
+        """
+        from .timed_worker import chat_batch
+        while not self.stop_event.is_set():
+            deadline = time.time() + self.max_wait_ms / 1000.0
+
+            # --- collect batch ---
+            batch: List[VLLMRequest] = []
+
+            while time.time() < deadline and len(batch) < self.batch_size:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                try:
+                    token = self.request_queue.get(timeout=remaining)
+                except Empty:
+                    break
+
+                batch.append(self._unpack_request(token))
+
+            if not batch:
+                continue
+
+            # --- lazy load on first real batch ---
+            if model is None:
+                model = self._load_model()
+                self.vlm_health.mark_ready()
+
+            # --- render + inference ---
+            # chat_batch owns both: it renders the unified payload through
+            # vLLM's own LLM.chat() and classifies every failure, so it never
+            # raises and always returns one tagged response per item. An engine
+            # death is flagged on vlm_health in there, which is what stops the
+            # stage from marking this whole batch of paths FAILED.
+            responses = chat_batch(self, model, batch)
+
+            # --- route responses ---
+            for item, response in zip(batch, responses):
+                self.response_queues[item.stage_name].put(response)

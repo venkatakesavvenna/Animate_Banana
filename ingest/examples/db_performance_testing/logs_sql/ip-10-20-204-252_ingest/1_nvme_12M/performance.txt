@@ -1,0 +1,70 @@
+Database path: /opt/dlami/nvme/srihari.bandarupalli/sql_db_test                                                                                         
+--------------------------------------------------------------------------------                                                                        
+                                                                                                                                                        
+================================================================================                                                                        
+✅ Ingestion completed in 590.16s                                                                                                                       
+📊 Final database health:                                                                                                                               
+   Total images in main DB: 12,000,000                                                                                                                  
+   Total images in seen cache: 12,000,000                                                                                                                                                                                                      
+   Main DB size: 1843.22 MB                                                                                                                             
+   Seen cache size: 1693.48 MB                                                                                                                                                                                                                 
+(vllm_env) srihari.bandarupalli@ip-10-20-204-252:/code/examples/db_performance_testing$ python bench_ops_sql.py \                                         --db-dir /opt/dlami/nvme/srihari.bandarupalli/sql_db_test/ \                         
+                                                                                                                                                        
+  --batch-size 1000 \                                                                                                                                   
+  --n-batches 200                                                                                                                                       
+Opening DB:         /opt/dlami/nvme/srihari.bandarupalli/sql_db_test/images.db                                                                          
+Opening seen-cache: /opt/dlami/nvme/srihari.bandarupalli/sql_db_test/seen_cache.db                                                                      
+                                                                                                                                                        
+============================================================                                                                                            
+Target: 200 batches x 1,000 = 200,000 paths total                                                                                                       
+============================================================                                                                                            
+                                                                                     
+[fetch_batch]  batch_size=1,000  n_batches=200                                                                         
+  batch   20/200: 8.0ms  124,482 paths/s                                                                               
+  batch   40/200: 7.8ms  128,972 paths/s                                                                               
+  batch   60/200: 8.1ms  124,077 paths/s                                                                               
+  batch   80/200: 8.0ms  125,394 paths/s                                                                               
+  batch  100/200: 7.7ms  129,135 paths/s                                                                               
+  batch  120/200: 8.4ms  119,601 paths/s                                                                               
+  batch  140/200: 8.1ms  123,260 paths/s                                                                               
+  batch  160/200: 7.8ms  128,317 paths/s                                                                               
+  batch  180/200: 8.1ms  122,870 paths/s                                                                               
+  batch  200/200: 7.8ms  128,857 paths/s                                                                               
+  → fetch_batch: avg 8.6ms/batch  total 1.73s  115,819 paths/s                                                         
+                                                                                                                       
+[mark_done]  100,000 paths in 100 calls                                                                                
+  batch   10/100: 70.5ms  14,178 paths/s                                                                               
+  batch   20/100: 65.6ms  15,239 paths/s                                                                               
+  batch   30/100: 62.6ms  15,978 paths/s                                                                               
+  batch   40/100: 58.8ms  17,003 paths/s                                                                               
+  batch   50/100: 55.7ms  17,959 paths/s                                                                               
+  batch   60/100: 51.8ms  19,310 paths/s                                                                               
+  batch   70/100: 49.2ms  20,337 paths/s                                                                               
+  batch   80/100: 44.9ms  22,279 paths/s                                                                               
+  batch   90/100: 41.3ms  24,214 paths/s                                                                               
+  batch  100/100: 38.4ms  26,030 paths/s                                                                               
+  → mark_done: avg 55.4ms/batch  total 5.54s  18,038 paths/s                                                           
+                                                                                                                       
+[mark_failed]  100,000 paths in 100 calls                                                                              
+  batch   10/100: 34.5ms  28,985 paths/s                                                                               
+  batch   20/100: 30.9ms  32,363 paths/s                                                                               
+  batch   30/100: 27.8ms  35,916 paths/s                                                                               
+  batch   40/100: 23.6ms  42,305 paths/s                                                                               
+  batch   50/100: 20.7ms  48,408 paths/s                                                                               
+  batch   60/100: 17.7ms  56,348 paths/s                                                                               
+  batch   70/100: 13.8ms  72,317 paths/s                                                                               
+  batch   80/100: 9.8ms  102,458 paths/s                                                                               
+  batch   90/100: 6.8ms  146,102 paths/s                                                                               
+  batch  100/100: 3.5ms  285,599 paths/s                                                                               
+  → mark_failed: avg 20.4ms/batch  total 2.04s  48,949 paths/s                                                         
+                                                                                                                       
+============================================================                                                           
+📊 Final DB health:                                        
+   Main DB size : 1844.80 MB                               
+   Total images : 12,000,000                               
+   state_0 (pending): 11,800,000                           
+   state_1 (in-progress): 0                                
+   state_2 (done): 100,000                                                                                             
+   state_3 (failed): 100,000                                                                                                                                                                                                                   
+   state_4 (upstream-ready): 0                                                                                         
+============================================================                    

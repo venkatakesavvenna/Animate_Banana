@@ -1,0 +1,119 @@
+# Debug instance of the annotation tool over the 24-sample-bench-hard bundle
+# (data/24-sample-bench-hard.zip, imported flat via import_bench into
+# data/bench_hard_annotate). The bundle's halfway-corrected diagram codes are
+# seeded into this config's stage-1a cache (scripts/seed_bench_hard_cache.py)
+# so every sample opens with reviewable tikz AND svg code.
+#
+# Same models as default.yaml so lineage components match what the seeder
+# computes. Run on its own port so the production instance (8602) is untouched:
+#
+#   python -m img_2_svg_pretraining.pipeline.annotate.app \
+#     --config src/img_2_svg_pretraining/pipeline/configs/annotate_bench_hard.yaml \
+#     --port 8603 --styles progressive_reveal
+
+dataset:
+  root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/bench_hard_annotate
+  limit: 0
+
+# The default pipeline/cache is root-owned (written from the container); this
+# debug instance runs on the host, so it gets its own user-writable cache.
+cache_root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/bench_hard_annotate_cache
+
+animation_style: progressive_reveal
+target: tikz
+
+backends:
+  gemini_pro:
+    type: gemini
+    model: gemini-3-pro-preview
+    max_concurrency: 2
+
+  gemini_flash:
+    type: gemini
+    model: gemini-3.6-flash
+    max_concurrency: 4
+
+transmuter:
+  code_converter:
+    backend: gemini_flash
+    prompt: diagram_transmuter/tikz_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  raster_integrator:
+    enabled: true
+    backend: gemini_flash
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  diagram_critic:
+    enabled: true
+    backend: gemini_flash
+    prompt: diagram_transmuter/critic.yaml
+    fidelity_threshold: 0.7
+    max_rounds: 3
+    params:
+      temperature: 0.1
+      max_tokens: 32768
+
+planner:
+  strategizer:
+    backend: gemini_flash
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+    params:
+      temperature: 0.3
+
+  parser:
+    backend: gemini_flash
+    prompt: animation_planner/tikz_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  sequencer:
+    backend: gemini_flash
+    prompt: animation_planner/tikz_sequencer.yaml#seq_with_narration
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    backend: gemini_flash
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    use_set_of_mark: true
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  narrative_writer:
+    backend: gemini_flash
+    prompt: animation_planner/narrative_writer.yaml
+    context_tier: full
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+animator:
+  designer:
+    backend: gemini_flash
+    prompt: animation_designer/designer.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  critic:
+    backend: gemini_flash
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+
+  exporter:
+    outputs: [pdf, mp4, gif, pptx, narrated_mp4]
+    fps: 2
+    dpi: 300

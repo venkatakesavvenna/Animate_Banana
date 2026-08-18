@@ -61,6 +61,8 @@ HEADLINES: dict[str, list[str]] = {
     "sequence": ["coverage_precision", "coverage_recall", "tof", "dovr",
                  "sscr_pass"],
     "stage3": ["anim_csr", "anim_code_quality", "aif"],
+    "animation": ["vfs", "ascs_pass", "omission_rate", "sss", "gps",
+                  "repetition_rate"],
 }
 
 

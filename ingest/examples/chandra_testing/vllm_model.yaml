@@ -1,0 +1,50 @@
+# no need to set tensor_parallel_size here, in the vlm_service we are automatically putting it based on number of gpus
+models:
+  Qwen/Qwen3-VL-32B-Instruct:
+    is_llm: false
+    engine_args:
+      limit_mm_per_prompt:
+        image: 1
+      gpu_memory_utilization: 0.95
+      
+  Qwen/Qwen3-14B:
+    is_llm: true
+    engine_args:
+      max_model_len: 128000
+      tensor_parallel_size: 8
+      gpu_memory_utilization: 0.95
+
+  Qwen/Qwen3.6-35B-A3B:
+    is_llm: false
+    engine_args:
+      max_model_len: 128000
+      limit_mm_per_prompt:
+        image: 1
+      gpu_memory_utilization: 0.90
+
+  Qwen/Qwen3-VL-235B-A22B-Instruct:
+    is_llm: false
+    engine_args:
+      max_model_len: 128000
+      limit_mm_per_prompt:
+        image: 2
+      gpu_memory_utilization: 0.95
+      
+  datalab-to/chandra-ocr-2:
+    # Vision model: it must be able to receive images. Stated explicitly rather
+    # than relying on the default — is_llm: true would make VIE refuse any
+    # prompt carrying an image (it used to silently drop them instead).
+    is_llm: false
+    engine_args:
+      max_model_len: 60000
+      gpu_memory_utilization: 0.95
+      trust_remote_code: true
+      # One image per prompt. Also enforced stage-side before submission, so
+      # sending more is a clear per-item error instead of an engine rejection.
+      limit_mm_per_prompt:
+        image: 1
+      # Pinned off deliberately. vLLM >= 0.25 enables async scheduling when the
+      # flag is absent, and it has been implicated in node-level hangs here.
+      # VIE defaults it to false anyway (vllm_config.DEFAULT_ASYNC_SCHEDULING);
+      # stated here so the yaml shows the value the run actually uses.
+      async_scheduling: false

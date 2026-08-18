@@ -29,13 +29,16 @@ from img_2_svg_pretraining.pipeline.config import ConfigError, load_config
 from img_2_svg_pretraining.pipeline.samples import discover_samples
 from img_2_svg_pretraining.pipeline.schema import AnimationSequence
 
+from . import checklist as checklist_mod
+from . import frames as frames_mod
 from . import results
 from .alignment import Alignment, align
 from .gt import DiagramXml, load_ground_truth
 from .judge import JudgeError, make_judge
-from .metrics import stage1_code, stage2_sequence, stage2_xml, stage3_anim
+from .metrics import (animation_quality, stage1_code, stage2_sequence,
+                      stage2_xml, stage3_anim)
 
-SUITES = ("stage1", "xml", "sequence", "stage3")
+SUITES = ("stage1", "xml", "sequence", "stage3", "animation")
 
 
 def _paths_for(cfg, style: str) -> CachePaths:
@@ -126,6 +129,116 @@ def _run_stage3(cfg, paths, sample, judge, include_quality) -> dict:
                            work, include_quality=include_quality)
 
 
+def _get_checklist(cfg, paths, root: Path, config_name: str, sample, style: str,
+                   judge, force: bool):
+    """The element checklist, judged once per (config, style, sample).
+
+    Elimination 3 and the repetition contributor are both specified to start
+    from the same call -- the design document says so in capitals and repeats
+    the prompt byte for byte -- so it is built once and shared, exactly as the
+    GT<->prediction alignment is. Two metrics that disagreed about what "the
+    elements" are could not be read against each other.
+
+    Style-keyed, unlike the alignment: it is derived from that style's own
+    animation sequence, not from the structure XML.
+    """
+    path = checklist_mod.checklist_path(root, config_name, style, sample.id)
+    if path.exists() and not force:
+        return checklist_mod.Checklist.load(path)
+    if judge is None:
+        return None
+
+    seq_path = paths.sequence_narrated(sample.id)
+    if not seq_path.exists():
+        seq_path = paths.sequence(sample.id)
+    xml_path = paths.xml(sample.id)
+    if not seq_path.exists() or not xml_path.exists():
+        return None
+
+    view = checklist_mod.sequence_view(AnimationSequence.load(seq_path),
+                                       DiagramXml.load(xml_path))
+    code = Path(paths.resolve_code(sample.id)).read_text(encoding="utf-8")
+    try:
+        built = checklist_mod.build(judge, sample.image_path, code, view)
+    except JudgeError as e:
+        print(f"    [{sample.id}] checklist failed: {e}", file=sys.stderr)
+        return None
+
+    built.save(path)
+    print(f"    [{sample.id}] checklist: {len(built.blocks)} block(s), "
+          f"{len(built.nodes)} node(s), {len(built.edges)} edge(s)")
+    return built
+
+
+def _run_animation(cfg, paths, root, config_name, sample, style, judge, args) -> dict:
+    """The judged animation tree for one (sample, style) cell."""
+    if judge is None:
+        return {"suite": "animation", "judge_skipped": "no judge configured"}
+
+    exports = paths.exports(sample.id)
+    frames_dir = exports / "frames"
+    if not frames_dir.is_dir() or not frames_mod.list_frames(frames_dir):
+        return {"suite": "animation",
+                "error": f"no exported frames under {frames_dir}"}
+
+    stages = tuple(args.stages) if args.stages else animation_quality.STAGES
+    checklist = None
+    if {"omission", "repetition"} & set(stages):
+        checklist = _get_checklist(cfg, paths, root, config_name, sample, style,
+                                   judge, args.force)
+
+    # The per-timestep judges need "the frame for step i". That map is the
+    # identity where the counts agree and undefined where they do not, so an
+    # unmappable cell is skipped rather than guessed -- a frame taken from the
+    # wrong step yields a band that is wrong while looking entirely plausible.
+    step_frames_, xml_text, prior_at = None, "", None
+    if {"sss", "gps"} & set(stages):
+        seq_path = paths.sequence_narrated(sample.id)
+        if not seq_path.exists():
+            seq_path = paths.sequence(sample.id)
+        xml_path = paths.xml(sample.id)
+        if seq_path.exists() and xml_path.exists():
+            seq = AnimationSequence.load(seq_path)
+            xml_text = xml_path.read_text(encoding="utf-8")
+            mapped = frames_mod.step_frames(
+                frames_mod.list_frames(frames_dir), len(seq.traversal))
+            if mapped is not None:
+                step_frames_ = frames_mod.prepare(
+                    mapped[0], args.frame_px,
+                    cache_dir=root / "_frames" / style / sample.id / "steps")
+                prior_at = animation_quality.prior_summary_builder(
+                    seq, DiagramXml.load(xml_path))
+
+    record = animation_quality.run(
+        judge, source_image=sample.image_path, frames_dir=frames_dir,
+        style=style, checklist=checklist, xml_text=xml_text,
+        step_frames_=step_frames_, prior_summary_at=prior_at, stages=stages,
+        frame_px=args.frame_px,
+        cache_dir=root / "_frames" / style / sample.id)
+
+    # A partial `--stages` run merges into whatever was scored before rather
+    # than replacing it. The tree costs ~70 judged calls per cell, so rebuilding
+    # a record one node at a time is the normal way to work -- and a re-run of
+    # `--stages gps` that silently erased this cell's fidelity and omission
+    # scores would be an expensive, and completely invisible, loss.
+    if set(stages) != set(animation_quality.STAGES):
+        previous = results.read_record(
+            results.suite_path(root, config_name, style, sample.id, "animation"))
+        if previous:
+            merged = {**previous, **record}
+            merged["stages_run"] = sorted(
+                set(previous.get("stages_run") or []) | set(record["stages_run"]))
+            merged["stages_skipped"] = {
+                **(previous.get("stages_skipped") or {}),
+                **record.get("stages_skipped", {})}
+            # A stage that has now run is no longer skipped.
+            for name in record["stages_run"]:
+                merged["stages_skipped"].pop(name, None)
+            merged["would_eliminate"] = animation_quality._would_eliminate(merged)
+            record = merged
+    return record
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -141,6 +254,23 @@ def main() -> None:
     ap.add_argument("--include-quality", action="store_true",
                     help="also run the optional code-quality judgements")
     ap.add_argument("--judge-backend", default="gemini_flash")
+    ap.add_argument("--evals-root", help="where records are written. Defaults "
+                                         "to <cache>/<dataset>/evals, which is "
+                                         "root-owned wherever a root container "
+                                         "wrote it first; this override lets "
+                                         "the eval run as an ordinary user")
+    ap.add_argument("--dataset", help="override the config's dataset root. The "
+                                      "bench configs name container paths "
+                                      "(/code/data/...), which do not exist "
+                                      "when the eval runs outside that container")
+    ap.add_argument("--stages", nargs="+", choices=list(animation_quality.STAGES),
+                    help="animation suite: which nodes of the tree to run. "
+                         "sss and gps cost one call per timestep and dominate "
+                         "the bill, so they are worth selecting separately")
+    ap.add_argument("--frame-px", type=int, default=frames_mod.DEFAULT_LONG_EDGE,
+                    help="long edge frames are downscaled to before judging "
+                         f"(default {frames_mod.DEFAULT_LONG_EDGE}); too small "
+                         "and the judge cannot read the diagram's labels")
     args = ap.parse_args()
 
     if args.suite == "report":
@@ -148,7 +278,8 @@ def main() -> None:
         if not args.config:
             ap.error("report needs --config to locate the cache")
         cfg = load_config(args.config)
-        root = results.evals_root(cfg.cache_root, cfg.dataset_root.name)
+        root = (Path(args.evals_root) if args.evals_root
+                else results.evals_root(cfg.cache_root, cfg.dataset_root.name))
         data, markdown = results.render_report(root)
         results.write_record(root / "report.json", {"configs": data})
         (root / "report.md").write_text(markdown, encoding="utf-8")
@@ -164,9 +295,17 @@ def main() -> None:
         print(f"config error: {e}", file=sys.stderr)
         raise SystemExit(2)
 
+    if args.dataset:
+        # Set before anything reads it: the evals root is keyed by the dataset
+        # directory's name, so overriding it late would scatter records under
+        # two different roots for one run.
+        cfg.dataset_root = Path(args.dataset)
+        cfg.raw.setdefault("dataset", {})["root"] = args.dataset
+
     config_name = Path(args.config).stem
     paths = _paths_for(cfg, args.style)
-    root = results.evals_root(cfg.cache_root, cfg.dataset_root.name)
+    root = (Path(args.evals_root) if args.evals_root
+            else results.evals_root(cfg.cache_root, cfg.dataset_root.name))
 
     samples = discover_samples(cfg.dataset_root, limit=args.limit, only=args.only)
     if not samples:
@@ -174,13 +313,24 @@ def main() -> None:
         raise SystemExit(1)
 
     suites = list(SUITES) if args.suite == "all" else [args.suite]
-    needs_judge = not args.no_judge and (
-        {"stage1", "stage3"} & set(suites) or {"xml", "sequence"} & set(suites))
+    # Every suite has some judged component, so this is "unless --no-judge".
+    # Spelled out rather than simplified: the animation suite is judged end to
+    # end, and omitting it here would have built no judge and recorded a whole
+    # run of `judge_skipped` that looked like a configuration choice.
+    needs_judge = not args.no_judge and bool(
+        {"stage1", "stage3", "xml", "sequence", "animation"} & set(suites))
 
     judge = None
     if needs_judge:
         try:
-            judge = make_judge(cfg, cache_root=paths.root,
+            # The backend's response cache follows --evals-root when it is
+            # given. It normally sits beside the artifacts, but that tree is
+            # root-owned wherever a root container wrote it first, and a judge
+            # that cannot write its cache fails every call rather than merely
+            # re-paying for one.
+            judge = make_judge(cfg,
+                               cache_root=(Path(args.evals_root)
+                                           if args.evals_root else paths.root),
                                raw_dir=root / "raw" / config_name,
                                backend_name=args.judge_backend)
             print(f"judge: {judge.model}")
@@ -211,6 +361,9 @@ def main() -> None:
                         record = _run_xml(cfg, paths, sample, alignment)
                     elif suite == "sequence":
                         record = _run_sequence(cfg, paths, sample, alignment, args.style)
+                    elif suite == "animation":
+                        record = _run_animation(cfg, paths, root, config_name,
+                                                sample, args.style, judge, args)
                     else:
                         record = _run_stage3(cfg, paths, sample, judge,
                                              args.include_quality)

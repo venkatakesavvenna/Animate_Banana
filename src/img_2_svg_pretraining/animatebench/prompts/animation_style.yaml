@@ -1,0 +1,248 @@
+# Ani-Style Compliance Score (ASCS) -- Elimination 2.
+#
+# Transcribed from the ASCS design document. The document shows the judge the
+# original image followed by EVERY frame in chronological order and asks for a
+# `frame_evaluations` array plus one `overall_verdict`. We call the judge once
+# per frame instead: each call sees the original figure and ONE frame, plus a
+# short note of where that frame sits in the sequence, and returns the
+# evaluation of that frame alone. The overall verdict is aggregated in Python.
+#
+# The document repeats an identical generic body for all five styles; only the
+# `*** <STYLE> RULES ***` block and the `style_specific_checks` object of the
+# schema vary. Those two are factored out here as `adapter_*` and `schema_*`.
+#
+# `frames` carries {style_name}, {frame_context}, {style_adapter} and
+# {output_schema}.
+
+frames: |
+  You are an expert Animation Style Verifier. Your objective is to determine if the "{style_name}" animation style has been correctly and consistently applied to a diagram on a per-frame basis, and whether the overall output is acceptable.
+
+  You are provided with the Original Image first, followed by a single animation frame taken from the animation sequence ({frame_context}). You are a highly strict judge. Evaluate this frame against the original image based on the generic quality checks and style-specific rules below.
+
+  The CRITICAL factors must heavily influence the final verdict.
+
+  *** GENERIC QUALITY RULES ***
+  1. Artifact-Free: The frame must not introduce any blur, jitter, or rendering artifacts.
+  2. Visual Integrity: Elements must remain fully recognizable. There must be no corruption of text or shapes due to rendering.
+
+  {style_adapter}
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below, describing this single frame. Provide a lengthy, deeply reasoned rationale for EVERY rule on this frame before marking whether it was followed (`true` or `false`). Set the `frame_verdict` to "ACCEPT" only if all rules are followed for that frame, otherwise "DISCARD". Discard immediately if the critical rules are not followed.
+
+  ```json
+  {output_schema}
+  ```
+
+adapter_progressive_reveal: |
+  *** PROGRESSIVE REVEAL RULES ***
+  1. Cumulative Addition: The elements present in the current frame must represent a logical cumulative addition from the previous frames.
+  2. Absolute Persistence (CRITICAL): Any element revealed in previous frames MUST remain fully visible in the current frame.
+  3. No Masking/Hiding: Nothing should be hidden, dimmed, or masked. Elements must remain at full visibility.
+  4. No Premature Floating Elements (CRITICAL): Arrows, text, or floating nodes must not be visible out of context in distant parts of the diagram before their logical reveal.
+
+adapter_alpha_masking: |
+  *** ALPHA MASKING RULES ***
+  1. Fade-in Reveal: The currently active elements in the frame must be clearly visible/fading in to full opacity.
+  2. Background Masking: Previously active elements (or inactive elements) must be masked to a lower opacity to emphasize the active group.
+  3. Semantic Persistence (CRITICAL): Parent containers or background contextual elements must correctly persist across the frame without vanishing completely.
+  4. Opacity Maintenance (CRITICAL): Opacity levels must be stable. Transparent areas must remain transparent; masked areas must not falsely become fully opaque.
+
+adapter_colour_pop: |
+  *** COLOUR POP RULES ***
+  1. Grayscale Integrity (CRITICAL): All non-active and unrevealed areas of the diagram must be strictly greyscale.
+  2. Active Group Colorization: The active element/group in the frame must be fully colored.
+  3. Color Match: The colors appearing in the frame must match the original diagram's colors. However, don't penalize minor changes.
+  4. Cumulative Effect (CRITICAL): Any element that was colored in previous frames MUST remain colored in the current frame. It cannot revert to greyscale.
+  5. No Color Bleeding: Colors must strictly stay within the bounds of their defined elements and not bleed into the background.
+
+adapter_hopping_bounding_box: |
+  *** HOPPING BOUNDING BOX RULES ***
+  1. Discrete Placement (HIGHLY CRITICAL): The bounding box in the frame must be definitively placed over a target element. It must NOT be caught in-between two elements or on any arrows. If the bounding box is seen in between two elements or not on arrows. It would mean a sliding bounding box is implemented, and the style should immediately suffer an overall DISCARD. No need to go over the rest of the criteria.
+  2. Box Transparency (CRITICAL): The interior of the bounding box must be strictly transparent (not opaque) and must not obscure the elements beneath it.
+  3. Clean Enclosure (CRITICAL): The box must be undistorted and cleanly enclose the target elements. It should not cut through the element, and the element should not spill out.
+  4. No Text Overlap: The bounding box stroke/lines must not overlap with, strike through, or cover any textual label.
+  5. Mobile Boxes, Static Elements (CRITICAL): There should not be any displacement of any diagram element. The frames should depict only the hopping of the bounding box
+
+adapter_sliding_bounding_box: |
+  *** SLIDING BOUNDING BOX RULES ***
+  1. Smooth Transition Integrity (CRITICAL): The bounding box may be mid-slide across the canvas. While in transit, it must maintain its structural shape and not warp or distort heavily.
+  2. Box Transparency (CRITICAL): The interior of the bounding box must be strictly transparent (not opaque) and must not obscure the elements or background beneath it.
+  3. Clean Enclosure (HIGHLY CRITICAL): If the box is at rest over a target in this frame, it must cleanly enclose the target elements without cutting through them or letting them spill out.
+  4. No Text Overlap (At Rest): If the box is at rest over a target in this frame, the bounding box stroke/lines must not strike through or cover any textual label.
+  5. Hopping Boxes (HIGHLY CRITICAL): There must at least be one frame where the sliding box is shown in-between elements and not ON any element in particular. If all frames are on particular elements, then the overall style should be discarded even if all other conditions are met.
+  6. Mobile Boxes, Static Elements (CRITICAL): There should not be any displacement of any diagram element. The frames should depict only the motion of the bounding box
+
+schema_progressive_reveal: |
+  {
+    "frame_label": "string - frame filename or index",
+    "generic_quality_checks": {
+      "artifact_free": {
+        "reasoning": "Detailed rationale verifying the complete absence of blur or rendering artifacts in this frame.",
+        "followed": true
+      },
+      "visual_integrity": {
+        "reasoning": "Detailed rationale checking if text and shapes remain uncorrupted.",
+        "followed": true
+      }
+    },
+    "style_specific_checks": {
+      "cumulative_addition": {
+        "reasoning": "Detailed rationale confirming elements appear incrementally in logical groups.",
+        "followed": false
+      },
+      "absolute_persistence": {
+        "reasoning": "Detailed rationale checking if every previously revealed element is still present.",
+        "followed": true
+      },
+      "no_masking_or_hiding": {
+        "reasoning": "Detailed rationale verifying no elements are partially masked or hidden.",
+        "followed": false
+      },
+      "no_premature_floating_elements": {
+        "reasoning": "Detailed rationale confirming no arrows, text, or unrelated nodes hover in the background out of sequence.",
+        "followed": true
+      }
+    },
+    "frame_verdict": "ACCEPT"
+  }
+
+schema_alpha_masking: |
+  {
+    "frame_label": "string - frame filename or index",
+    "generic_quality_checks": {
+      "artifact_free": {
+        "reasoning": "Detailed rationale verifying the complete absence of blur or rendering artifacts in this frame.",
+        "followed": true
+      },
+      "visual_integrity": {
+        "reasoning": "Detailed rationale checking if text and shapes remain uncorrupted.",
+        "followed": true
+      }
+    },
+    "style_specific_checks": {
+      "fade_in_reveal": {
+        "reasoning": "Detailed rationale confirming active elements are properly opaque.",
+        "followed": true
+      },
+      "background_masking": {
+        "reasoning": "Detailed rationale verifying that inactive groups step down in opacity correctly.",
+        "followed": true
+      },
+      "semantic_persistence": {
+        "reasoning": "Detailed rationale observing how parent containers or logical background elements are handled.",
+        "followed": true
+      },
+      "opacity_maintenance": {
+        "reasoning": "Detailed rationale checking that masked areas do not accidentally turn opaque and transparency is stable.",
+        "followed": true
+      }
+    },
+    "frame_verdict": "ACCEPT"
+  }
+
+schema_colour_pop: |
+  {
+    "frame_label": "string - frame filename or index",
+    "generic_quality_checks": {
+      "artifact_free": {
+        "reasoning": "Detailed rationale verifying the complete absence of blur or rendering artifacts in this frame.",
+        "followed": true
+      },
+      "visual_integrity": {
+        "reasoning": "Detailed rationale checking if text and shapes remain uncorrupted.",
+        "followed": true
+      }
+    },
+    "style_specific_checks": {
+      "grayscale_integrity": {
+        "reasoning": "Detailed rationale confirming the inactive areas of the diagram are perfectly greyscale.",
+        "followed": true
+      },
+      "active_group_colorization": {
+        "reasoning": "Detailed rationale checking that active elements cleanly transition to color.",
+        "followed": true
+      },
+      "exact_color_match": {
+        "reasoning": "Detailed rationale verifying the revealed colors perfectly map to the original image.",
+        "followed": true
+      },
+      "cumulative_effect": {
+        "reasoning": "Detailed rationale confirming that previously colored elements remain colored.",
+        "followed": true
+      },
+      "no_color_bleeding": {
+        "reasoning": "Detailed rationale checking that color application respects element boundaries tightly.",
+        "followed": true
+      }
+    },
+    "frame_verdict": "ACCEPT"
+  }
+
+schema_hopping_bounding_box: |
+  {
+    "frame_label": "string - frame filename or index",
+    "generic_quality_checks": {
+      "artifact_free": {
+        "reasoning": "Detailed rationale verifying the complete absence of blur or rendering artifacts in this frame.",
+        "followed": true
+      },
+      "visual_integrity": {
+        "reasoning": "Detailed rationale checking if text and shapes remain uncorrupted.",
+        "followed": true
+      }
+    },
+    "style_specific_checks": {
+      "discrete_placement": {
+        "reasoning": "Detailed rationale confirming the box is cleanly placed on an element and not sliding through open space.",
+        "followed": true
+      },
+      "box_transparency": {
+        "reasoning": "Detailed rationale verifying the interior of the box does not artificially dim or obscure the elements beneath it.",
+        "followed": true
+      },
+      "clean_enclosure": {
+        "reasoning": "Detailed rationale checking if the box fits well without cutting into nodes or leaving parts spilling outside.",
+        "followed": true
+      },
+      "no_text_overlap": {
+        "reasoning": "Detailed rationale confirming the stroke of the bounding box never strikes through textual labels.",
+        "followed": true
+      }
+    },
+    "frame_verdict": "ACCEPT"
+  }
+
+schema_sliding_bounding_box: |
+  {
+    "frame_label": "string - frame filename or index",
+    "generic_quality_checks": {
+      "artifact_free": {
+        "reasoning": "Detailed rationale verifying the complete absence of blur or rendering artifacts in this frame.",
+        "followed": true
+      },
+      "visual_integrity": {
+        "reasoning": "Detailed rationale checking if text and shapes remain uncorrupted.",
+        "followed": true
+      }
+    },
+    "style_specific_checks": {
+      "smooth_transition_integrity": {
+        "reasoning": "Detailed rationale confirming the box maintains shape if mid-slide across the canvas.",
+        "followed": true
+      },
+      "box_transparency": {
+        "reasoning": "Detailed rationale verifying the interior of the box does not artificially dim or obscure the elements beneath it.",
+        "followed": true
+      },
+      "clean_enclosure": {
+        "reasoning": "Detailed rationale checking if the box fits well at its resting position (or marking N/A if mid-slide).",
+        "followed": true
+      },
+      "no_text_overlap": {
+        "reasoning": "Detailed rationale confirming the stroke of the bounding box avoids textual labels at its resting position.",
+        "followed": true
+      }
+    },
+    "frame_verdict": "ACCEPT"
+  }

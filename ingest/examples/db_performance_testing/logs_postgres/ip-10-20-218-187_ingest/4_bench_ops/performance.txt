@@ -1,0 +1,71 @@
+Batch size: 1,000,000
+Method: COPY
+Initial state: 0
+
+Ingestion completed in 146.93s
+Total images: 12,000,000
+DB size: 2439.85 MB
+
+============================================================
+Batch size: 1,000,000
+Method: INSERT
+Initial state: 0
+
+Ingestion completed in 282.48s
+Total images: 12,000,000
+DB size: 2441.67 MB
+
+Database health:
+   state_0 (pending): 12,000,000
+   state_1 (in-progress): 0
+   state_2 (done): 0
+   state_3 (failed): 0
+   state_4 (upstream-ready): 0
+
+============================================================
+(vllm_env) srihari.bandarupalli@ip-10-20-218-187:/code/examples/db_performance_testing$ python bench_ops.py \
+  --pg-host $PG_HOST --pg-dbname visiondb --pg-user pipeline \
+  --batch-size 1000 --n-batches 200
+
+============================================================
+Target: 200 batches x 1,000 = 200,000 paths total
+============================================================
+
+[fetch_batch]  batch_size=1,000  n_batches=200
+  batch   20/200: 21.5ms  46,472 paths/s
+  batch   40/200: 21.4ms  46,680 paths/s
+  batch   60/200: 21.1ms  47,413 paths/s
+  batch   80/200: 23.1ms  43,325 paths/s
+  batch  100/200: 22.9ms  43,581 paths/s
+  batch  120/200: 22.0ms  45,365 paths/s
+  batch  140/200: 21.5ms  46,413 paths/s
+  batch  160/200: 21.7ms  46,152 paths/s
+  batch  180/200: 22.5ms  44,541 paths/s
+  batch  200/200: 23.4ms  42,776 paths/s
+  → fetch_batch: avg 22.1ms/batch  total 4.42s  45,249 paths/s
+
+[mark_done]  100,000 paths in 100 calls
+  batch   10/100: 48.9ms  20,458 paths/s
+  batch   20/100: 47.8ms  20,902 paths/s
+  batch   30/100: 43.9ms  22,794 paths/s
+  batch   40/100: 41.9ms  23,857 paths/s
+  batch   50/100: 41.5ms  24,083 paths/s
+  batch   60/100: 39.7ms  25,169 paths/s
+  batch   70/100: 38.3ms  26,120 paths/s
+  batch   80/100: 36.8ms  27,154 paths/s
+  batch   90/100: 35.4ms  28,275 paths/s
+  batch  100/100: 37.4ms  26,770 paths/s
+  → mark_done: avg 42.4ms/batch  total 4.24s  23,584 paths/s
+
+[mark_failed]  100,000 paths in 100 calls
+  batch   10/100: 37.2ms  26,855 paths/s
+  batch   20/100: 35.0ms  28,532 paths/s
+  batch   30/100: 32.0ms  31,212 paths/s
+  batch   40/100: 30.3ms  32,986 paths/s
+  batch   50/100: 30.1ms  33,246 paths/s
+  batch   60/100: 29.4ms  34,067 paths/s
+  batch   70/100: 26.9ms  37,126 paths/s
+  batch   80/100: 25.1ms  39,763 paths/s
+  batch   90/100: 23.5ms  42,641 paths/s
+  batch  100/100: 22.9ms  43,685 paths/s
+  → mark_failed: avg 29.8ms/batch  total 2.98s  33,583 paths/s

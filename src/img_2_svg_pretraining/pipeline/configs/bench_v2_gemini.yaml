@@ -50,6 +50,27 @@ backends:
     model: gemini-3.6-flash
     max_concurrency: 4
 
+  # The animation evaluation tree's judge. The design documents name
+  # Qwen3-VL-235B-A22B for every node of the tree, which is reachable only as a
+  # served endpoint -- there is no hosted API for it here, so it runs locally
+  # under vLLM (tensor_parallel_size 8) and is spoken to over the
+  # OpenAI-compatible route, which already sends images as data URLs.
+  #
+  #   run_eval animation --config .../bench_v2_gemini.yaml \
+  #     --style progressive_reveal --judge-backend qwen_judge
+  #
+  # Deliberately a different model family from the one that generated these
+  # animations (gemini-3.6-flash): judging a model's output with itself is the
+  # circular-evaluation risk the project's own notes call out.
+  qwen_judge:
+    type: openai_compat
+    # 8010, not the vLLM default 8000: these nodes run with host networking and
+    # something else already listens on 8000.
+    base_url: http://127.0.0.1:8010/v1
+    model: Qwen/Qwen3-VL-235B-A22B-Instruct
+    api_key: EMPTY
+    max_concurrency: 8
+
 transmuter:
   code_converter:
     backend: gemini_flash

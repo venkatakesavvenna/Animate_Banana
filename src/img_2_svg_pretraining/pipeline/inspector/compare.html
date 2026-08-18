@@ -115,6 +115,63 @@
   table.score td.err { color: var(--bad); font-style: italic; text-align: left; }
   table.score tbody tr:hover td { background: #20242c; }
 
+  /* metrics explorer */
+  .xnote { background: var(--panel); border: 1px solid var(--line);
+           border-left: 3px solid var(--accent); border-radius: 4px;
+           padding: 11px 14px; margin-bottom: 14px; font-size: 12px;
+           line-height: 1.6; color: var(--dim); max-width: 78ch; }
+  .xnote p { margin: 0 0 8px; }
+  .xnote p:last-child { margin-bottom: 0; }
+  .xnote strong { color: var(--fg); font-weight: 600; }
+  .xeg { border-left-color: var(--warn); margin-top: 10px; }
+  .xeg .h { color: var(--warn); font-weight: 600; font-size: 11px;
+            text-transform: uppercase; letter-spacing: .6px; margin-bottom: 5px; }
+
+  .xsuite { background: var(--panel); border: 1px solid var(--line);
+            border-radius: 6px; padding: 14px 16px; margin-bottom: 16px; }
+  .xsuite > h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .3px;
+                 color: var(--fg); font-weight: 600; }
+
+  .xmetric { border-top: 1px solid var(--line); padding: 11px 0 9px; }
+  .xmetric:first-of-type { border-top: none; }
+  .xhead { display: flex; align-items: baseline; gap: 10px; }
+  .xhead .nm { font-size: 13px; font-weight: 600; flex: 1; }
+  .xhead .key { font-family: ui-monospace, monospace; font-size: 10.5px;
+                color: var(--dim); }
+  .xhead .v { font-family: ui-monospace, monospace; font-size: 16px;
+              font-weight: 700; }
+  .xhead .v.good { color: var(--ok); }
+  .xhead .v.mid  { color: var(--warn); }
+  .xhead .v.bad  { color: var(--bad); }
+  .xformula { font-family: ui-monospace, monospace; font-size: 11.5px;
+              background: var(--panel2); border: 1px solid var(--line);
+              border-radius: 4px; padding: 7px 10px; margin: 7px 0 0;
+              color: var(--fg); white-space: pre-wrap; overflow-x: auto; }
+  .xinst { color: var(--accent); font-weight: 600; }
+  .xwhat { color: var(--dim); font-size: 12px; margin-top: 6px;
+           line-height: 1.5; max-width: 78ch; }
+  .xev { margin-top: 7px; background: var(--panel2); border-radius: 4px;
+         padding: 9px 11px; max-height: 300px; overflow: auto; }
+  .xev.collapsed { display: none; }
+  .xev table { border-collapse: collapse; width: 100%; font-size: 11px; }
+  .xev td, .xev th { padding: 2px 8px 2px 0; text-align: left;
+                     vertical-align: top; }
+  .xev th { color: var(--dim); font-weight: 500; }
+  .xev .k { color: var(--dim); font-family: ui-monospace, monospace;
+            font-size: 10.5px; }
+  .xev pre { margin: 2px 0 8px; font-size: 10.5px; color: var(--fg);
+             white-space: pre-wrap; word-break: break-word; }
+
+  /* alignment table */
+  .xalign td, .xalign th { border-bottom: 1px solid #23272f; padding: 4px 10px 4px 0; }
+  .xalign .ids { font-family: ui-monospace, monospace; font-size: 10.5px; }
+  .xalign .gt  { color: var(--accent); }
+  .xalign .pr  { color: var(--ok); }
+  .xrow { display: grid; grid-template-columns: repeat(4, minmax(0,1fr));
+          gap: 14px; margin-bottom: 18px; }
+  @media (max-width: 1250px) { .xrow { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  @media (max-width: 700px)  { .xrow { grid-template-columns: 1fr; } }
+
   /* presentation panel */
   .talk .meta { font-size: 11px; color: var(--dim); margin-top: 6px; }
   .talk .meta a { color: var(--accent); }
@@ -134,6 +191,7 @@
     <div class="tabs">
       <button class="tab active" id="tab-panels" onclick="showView('panels')">Panels</button>
       <button class="tab" id="tab-table" onclick="showView('table')">Scoreboard</button>
+      <button class="tab" id="tab-explain" onclick="showView('explain')">Metrics</button>
     </div>
   </div>
 </header>
@@ -147,6 +205,13 @@
     </div>
     <div class="tblwrap"><table class="score" id="scoreboard"></table></div>
   </div>
+  <div id="view-explain" class="view">
+    <div class="controls" style="margin-bottom:14px">
+      <span><label>Model</label><select id="xp-model" onchange="loadExplain()"></select></span>
+      <span id="xp-status" class="sub" style="margin:0"></span>
+    </div>
+    <div id="xp-body"></div>
+  </div>
 </main>
 
 <script>
@@ -159,22 +224,26 @@ async function boot() {
     .map(s => `<option value="${s.id}">${s.id}${s.has_reference ? "" : " (no reference)"}</option>`)
     .join("");
   $("#style").innerHTML = INDEX.styles.map(s => `<option value="${s}">${s}</option>`).join("");
-  $("#tbl-model").innerHTML = INDEX.models
+  const modelOpts = INDEX.models
     .map(m => `<option value="${esc(m.label)}">${esc(m.label)}</option>`).join("");
+  $("#tbl-model").innerHTML = modelOpts;
+  $("#xp-model").innerHTML = modelOpts;
   load();
 }
 
 function onSampleOrStyleChange() {
   load();
   if ($("#view-table").classList.contains("active")) loadTable();
+  if ($("#view-explain").classList.contains("active")) loadExplain();
 }
 
 function showView(name) {
-  ["panels", "table"].forEach(v => {
+  ["panels", "table", "explain"].forEach(v => {
     $(`#view-${v}`).classList.toggle("active", v === name);
     $(`#tab-${v}`).classList.toggle("active", v === name);
   });
   if (name === "table") loadTable();
+  if (name === "explain") loadExplain();
 }
 
 function panelCell(title, tag, videoUrl, stats, note, scriptId, metrics) {
@@ -326,6 +395,258 @@ async function loadTable() {
   $("#tbl-status").textContent = `${d.rows.length} sample(s) &middot; ${model} &middot; ${style}`;
 }
 
+/* ---- Metrics explorer -------------------------------------------------
+   Every number is shown beside the formula that produced it, instantiated on
+   this sample's own terms, and beside the evidence the metric stored. The
+   point is to be able to disagree with a score: if the formula and the
+   evidence do not justify the number, the metric is wrong, not the sample. */
+
+function evidenceTable(ev) {
+  const rows = Object.entries(ev).map(([k, v]) => {
+    let body;
+    if (Array.isArray(v) && v.length && typeof v[0] === "object") {
+      const cols = [...new Set(v.flatMap(o => Object.keys(o)))];
+      body = `<table><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr>` +
+        v.map(o => `<tr>${cols.map(c =>
+          `<td class="k">${esc(fmtCell(o[c]))}</td>`).join("")}</tr>`).join("") +
+        `</table>`;
+    } else if (typeof v === "object") {
+      body = `<table>${Object.entries(v).map(([kk, vv]) =>
+        `<tr><td class="k">${esc(kk)}</td><td>${esc(fmtCell(vv))}</td></tr>`
+      ).join("")}</table>`;
+    } else if (Array.isArray(v)) {
+      body = `<pre>${esc(v.join(", "))}</pre>`;
+    } else {
+      body = `<pre>${esc(String(v))}</pre>`;
+    }
+    return `<div><div class="k">${esc(k)}</div>${body}</div>`;
+  });
+  return rows.join("");
+}
+
+function fmtCell(v) {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "object") return JSON.stringify(v);
+  if (typeof v === "number" && !Number.isInteger(v)) return v.toFixed(3);
+  return String(v);
+}
+
+function explainMetric(m, uid) {
+  const hasEv = m.evidence && Object.keys(m.evidence).length;
+  return `
+    <div class="xmetric">
+      <div class="xhead">
+        <span class="nm">${esc(m.label || m.key)}</span>
+        <span class="key">${esc(m.key)}${m.doc ? " · " + esc(m.doc) : ""}</span>
+        <span class="v ${metricClass(m)}">${fmtMetric(m.value)}</span>
+      </div>
+      ${m.formula ? `<div class="xformula">${esc(m.formula)}${
+        m.instantiated
+          ? `\n<span class="xinst">${esc(m.instantiated)}</span>` : ""}</div>` : ""}
+      ${m.what ? `<div class="xwhat">${esc(m.what)}</div>` : ""}
+      ${m.caveat ? `<div class="caveat">${esc(m.caveat)}</div>` : ""}
+      ${hasEv ? `<button class="toggle" onclick="toggleScript('${uid}')"
+                   id="btn-${uid}">&#9662; evidence</button>
+                 <div class="xev collapsed" id="${uid}">${evidenceTable(m.evidence)}</div>`
+              : ""}
+    </div>`;
+}
+
+function alignmentBlock(a) {
+  const keys = Object.keys(a.groups || {});
+  if (!keys.length)
+    return `<div class="xsuite"><h2>Stage-2 mapping</h2>
+              <div class="sub" style="margin:0">no alignment recorded</div></div>`;
+  const rows = keys.sort().map(k => {
+    const g = a.groups[k];
+    return `<tr>
+      <td class="k">${esc(k)}</td>
+      <td class="ids gt">${esc((g.gt || []).join(", "))}</td>
+      <td class="ids pr">${esc((g.pred || []).join(", "))}</td>
+      <td>${esc(g.label || "")}</td></tr>`;
+  }).join("");
+  const unmatched = (name, list, cls) => (list && list.length)
+    ? `<div class="xwhat"><span class="${cls}">${name}</span>:
+         <span class="ids">${esc(list.join(", "))}</span></div>` : "";
+  return `
+    <div class="xsuite">
+      <h2>Stage-2 mapping &mdash; GT &harr; prediction alignment</h2>
+      <div class="xnote">
+        <p>Every ground-truth metric on this page reads element identity from
+        this one artifact, judged once per sample and validated mechanically.
+        It is a grouping, <strong>not a 1:1 pairing</strong> &mdash; the
+        reference may draw three thumbnails where the prediction has one
+        image, so a group can hold several ids on either side.</p>
+        <p>Ids listed as unmatched are excluded from coverage ratios and
+        reported separately: they are structure gaps, already scored by match
+        coverage, not sequencing mistakes.</p>
+      </div>
+      <table class="xalign" style="width:100%">
+        <tr><th>group</th><th class="gt">ground truth</th>
+            <th class="pr">prediction</th><th>what it is</th></tr>
+        ${rows}
+      </table>
+      ${unmatched("unmatched in reference", a.gt_unmatched, "gt")}
+      ${unmatched("unmatched in prediction", a.pred_unmatched, "pr")}
+      ${(a.notes && a.notes.length)
+        ? `<div class="caveat">validation notes: ${esc(a.notes.join("; "))}</div>` : ""}
+    </div>`;
+}
+
+/* ---- the animation evaluation tree -------------------------------------
+   Six judged nodes, each of which sent one call per frame or per timestep.
+   The point of this block is auditability: the prompt shown is rendered
+   server-side through the metric's own assembly, and the trace is the judge's
+   actual reply for each call -- so a prompt can be tuned against what the
+   model really saw and really said, not against a paraphrase. */
+function animTrace(node) {
+  const t = node.trace || [];
+  if (!t.length) return `<div class="sub">no per-call detail recorded</div>`;
+  const rows = t.map((c, i) => {
+    const who = esc(c.frame || (c.timestep != null ? "t" + c.timestep : "#" + (i + 1)));
+    let verdict = "", body = "";
+    if (c.score_raw != null) { verdict = c.score_raw + "/10"; body = JSON.stringify(c.assessment || {}, null, 1); }
+    else if (c.verdict) { verdict = c.verdict; body = JSON.stringify({generic: c.generic_quality_checks, style: c.style_specific_checks}, null, 1); }
+    else if (c.final_band != null) { verdict = "band " + c.final_band + (c.label ? " · " + c.label : ""); body = c.rationale || ""; }
+    else if (c.popped) { const n = Object.values(c.popped).flat().length; verdict = n + " popped"; body = (c.reasoning || "") + "\n\n" + JSON.stringify(c.popped, null, 1); }
+    else if (c.state_changes) { verdict = (c.state_changes || []).length + " changed"; body = c.justification_reasoning || ""; }
+    else { body = JSON.stringify(c, null, 1); }
+    return `<tr><td class="k">${who}</td><td>${esc(verdict)}</td>
+      <td><details><summary>reply</summary><pre>${esc(String(body).slice(0, 4000))}</pre></details></td></tr>`;
+  }).join("");
+  return `<table class="ev"><thead><tr><th>call</th><th>verdict</th><th>judge reply</th></tr></thead>
+          <tbody>${rows}</tbody></table>`;
+}
+
+function animNode(node) {
+  const m = node.manifest || {};
+  const bits = [];
+  if (node.calls) bits.push(`<b>${node.calls}</b> call(s)`);
+  if (m.frame_policy) bits.push(`policy <code>${esc(m.frame_policy)}</code>`);
+  if (m.frames_judged != null) bits.push(`${m.frames_judged}/${m.frames_available} frames`);
+  if (m.frame_long_edge) bits.push(`${m.frame_long_edge}px`);
+  if ((node.errors || []).length) bits.push(`<span class="bad">${node.errors.length} error(s)</span>`);
+
+  let state = "";
+  if (node.status === "not_specified")
+    state = `<div class="xnote">Not specified for this style — recorded as unscored, not as zero. ${esc(node.note || "")}</div>`;
+  else if (node.skipped)
+    state = `<div class="xnote">skipped: ${esc(node.skipped)}</div>`;
+
+  const pr = node.prompt || {};
+  const prompt = pr.error
+    ? `<div class="xnote">prompt unavailable: ${esc(pr.error)}</div>`
+    : `<details><summary>prompt sent to the judge — ${esc(pr.file)}#${esc(pr.key)}
+         (${pr.chars} chars)</summary><pre>${esc(pr.text || "")}</pre></details>
+       <details><summary>style adapter only</summary><pre>${esc(pr.adapter || "")}</pre></details>`;
+
+  return `<div class="xmetric">
+    <div class="xhead"><b>${esc(node.title)}</b>
+      <span class="sub">${bits.join(" &middot; ") || "did not run"}</span></div>
+    ${state}${prompt}
+    <details><summary>call trace (${node.calls})</summary>${animTrace(node)}</details>
+  </div>`;
+}
+
+async function loadAnimation(model, id, style) {
+  let d;
+  try {
+    d = await (await fetch(`/api/animation/${encodeURIComponent(model)}/${id}/${style}`)).json();
+  } catch (e) { return ""; }
+  if (!d || !d.scored) return "";
+  const head = [`<b>${d.total_calls}</b> judged call(s) for this cell`];
+  if ((d.would_eliminate || []).length)
+    head.push(`<span class="bad">would eliminate at: ${d.would_eliminate.join(", ")}</span>`);
+  const cl = d.checklist ? `
+    <div class="xmetric"><div class="xhead"><b>Shared step · Element checklist</b>
+      <span class="sub">1 call &middot; ${(d.checklist.blocks||[]).length} blocks,
+      ${(d.checklist.nodes||[]).length} nodes, ${(d.checklist.edges||[]).length} edges</span></div>
+      <div class="xwhat">Built once and shared by omission and repetition, so the two
+      cannot disagree about what "the elements" are. Derived from the animation
+      sequence, not the XML — an element the sequencer never scheduled can never be
+      flagged as omitted.</div>
+      ${d.checklist_prompt && !d.checklist_prompt.error
+        ? `<details><summary>prompt — ${esc(d.checklist_prompt.file)}</summary><pre>${esc(d.checklist_prompt.text)}</pre></details>` : ""}
+      <details><summary>checklist contents</summary><pre>${esc(JSON.stringify(d.checklist, null, 1))}</pre></details>
+    </div>` : "";
+  const unenf = (d.unenforced_rules || []).length ? `
+    <div class="xnote"><b>Rules no single-frame call can enforce:</b><br>
+      ${d.unenforced_rules.map(esc).join("<br>")}</div>` : "";
+  return `<div class="xsuite"><h2>Animation evaluation tree</h2>
+    <div class="sub">${head.join(" &middot; ")}</div>${unenf}${cl}
+    ${(d.nodes || []).map(animNode).join("")}</div>`;
+}
+
+async function loadExplain() {
+  const id = $("#sample").value, style = $("#style").value,
+        model = $("#xp-model").value;
+  if (!id || !style || !model) return;
+  $("#xp-status").textContent = "loading…";
+  const d = await (await fetch(
+    `/api/explain/${encodeURIComponent(model)}/${id}/${style}`)).json();
+
+  const media = (title, tag, inner) => `
+    <div class="cell"><h3><span>${title}</span><span class="tag">${tag}</span></h3>
+      ${inner}</div>`;
+  const vid = u => u ? `<video controls preload="metadata" loop src="${u}"></video>`
+                     : `<div class="missing">not generated</div>`;
+
+  const out = [`
+    <div class="xrow">
+      ${media("Source figure", "input", `<img src="${d.figure}">`)}
+      ${media("Compiled diagram", "stage 1",
+              `<img src="${d.render}" onerror="this.outerHTML='<div class=missing>does not compile</div>'">`)}
+      ${media("Reference animation", "ground truth", vid(d.reference_video))}
+      ${media("Our animation", esc(d.model || ""), vid(d.pipeline_video))}
+    </div>`];
+
+  if (!d.scored) {
+    out.push(`<div class="xnote"><p>This sample has not been scored for
+      <strong>${esc(style)}</strong>. Run
+      <code>python -m img_2_svg_pretraining.animatebench.run_eval all
+      --config &lt;cfg&gt; --style ${esc(style)}</code>, then restart the
+      viewer &mdash; records are read once at startup.</p></div>`);
+  }
+
+  let n = 0;
+  for (const s of d.suites) {
+    const metrics = s.metrics.map(m => explainMetric(m, `ev${n++}`)).join("");
+    out.push(`
+      <div class="xsuite">
+        <h2>${esc(s.title || s.label)}</h2>
+        ${s.note ? `<div class="xnote">${
+          s.note.split("\n\n").map(p => `<p>${mdBold(p)}</p>`).join("")}</div>` : ""}
+        ${s.example ? `<div class="xnote xeg">
+          <div class="h">${esc(s.example.title)}</div>
+          <p>${mdBold(s.example.body)}</p></div>` : ""}
+        ${s.error ? `<div class="caveat">error: ${esc(s.error)}</div>` : ""}
+        ${s.skipped ? `<div class="caveat">coverage skipped: ${esc(s.skipped)}</div>` : ""}
+        ${metrics}
+      </div>`);
+  }
+
+  if (d.scored) out.push(alignmentBlock(d.alignment || {}));
+
+  const animBlock = await loadAnimation(model, id, style);
+  if (animBlock) out.push(animBlock);
+
+  const p = d.provenance;
+  if (p) out.push(`<div class="sub">scored by ${esc(p.judge_model || "—")}
+    &middot; config ${esc(p.config || "—")}
+    &middot; fingerprint <code>${esc(p.config_fingerprint || "—")}</code>
+    &middot; ${esc(p.timestamp || "")}</div>`);
+
+  $("#xp-body").innerHTML = out.join("");
+  $("#xp-status").textContent = d.scored
+    ? `${d.suites.length} suite(s) · ${d.frames} frame(s)` : "not scored";
+}
+
+/* The suite notes use **bold** for the one or two phrases that carry the
+   point; everything else is escaped. */
+function mdBold(s) {
+  return esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
 async function load() {
   const id = $("#sample").value, style = $("#style").value;
   if (!id || !style) return;
@@ -415,7 +736,10 @@ async function loadScript(elId, url, pick) {
   }
 }
 
-const vids = () => Array.from(document.querySelectorAll("video"));
+/* Scoped to the visible tab: play-all must not start videos the reviewer
+   cannot see on another tab. */
+const vids = () => Array.from(
+  document.querySelectorAll(".view.active video"));
 function playAll()    { vids().forEach(v => v.play().catch(() => {})); }
 function pauseAll()   { vids().forEach(v => v.pause()); }
 function restartAll() { vids().forEach(v => { v.currentTime = 0; v.play().catch(() => {}); }); }

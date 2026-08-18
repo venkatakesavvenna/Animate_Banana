@@ -1,0 +1,127 @@
+# Score Contributor 3: Unnecessary Repetition
+#
+# Transcribed from
+#   2765f025-1aee-4e1b-adfa-22b14f5dd023_Score_Contributor_3_Unnecessary_Repetition.pdf
+# The source document specifies THREE styles only: alpha_masking,
+# hopping_bounding_box, sliding_bounding_box. progressive_reveal and
+# colour_pop are not specified there.
+#
+# Adaptation: the document shows the judge every frame at once and asks for a
+# `timestep_reasoning` array plus cumulative `final_unjustified_repetitions`
+# and two counts. Here the judge is called ONCE PER FRAME with the original
+# figure, one frame, and the running frequency table; running frequencies and
+# the final counts are accumulated in Python.
+#
+# The numbered GENERIC INSTRUCTIONS block is NOT byte-identical across the
+# three styles in the source (rules 1-5 all diverge somewhere), so the whole
+# numbered list lives in the per-style adapter, verbatim per style, and the
+# `frames` body holds only what is genuinely shared.
+
+frames: |
+  You are an expert Diagram Animation Repetition Detector. Your objective is to track the frequency of appearances of elements from a precomputed checklist and verify if any elements or arrows are erroneously repeated/re-highlighted in the animation sequence.
+
+  You are provided with:
+  1. The Original Diagram Image.
+  2. ONE Animation Frame, drawn from a chronologically ordered animation sequence.
+  3. The Initial Animation Checklist containing "blocks", "nodes", and "edges".
+  4. The Current Frequency Table, holding the frequency every checklist entry has accumulated across all frames that came BEFORE this one.
+
+  You are evaluating THIS SINGLE FRAME. The Current Frequency Table is your memory of everything that happened earlier in the sequence: read an element's prior frequency from it, decide whether this frame causes a state change, and report the resulting new frequency. Report ONLY the frequency changes caused by this frame and ONLY the unjustified repetitions this frame itself introduces. Do not restate frequencies that did not change, and do not produce cumulative totals or counts — those are accumulated outside this call.
+
+  {style_adapter}
+
+  --- CURRENT FREQUENCY TABLE ---
+  Frequencies accumulated over every frame before this one. Any checklist entry that does not appear in this table is still at `0`.
+
+  {frequencies}
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below.
+
+  ```json
+  {output_schema}
+  ```
+
+adapter_alpha_masking: |
+  *** GENERIC INSTRUCTIONS ***
+  1. Frequency Counter: Treat the checklist as a frequency counter where every block, node, and edge starts at `0`.
+  2. The State Change Rule (CRITICAL): An element's frequency increases by +1 ONLY when it undergoes a state change (e.g., from masked to unmasked). Simply persisting in an unmasked state across multiple frames DOES NOT increase the frequency.
+  3. Repetition Justification: If an element's frequency reaches 2 or more, you MUST reason if it is justified before flagging it. Justified repetitions include cyclic edges, overview-first traversals (where a parent container is shown, then masked for children, then unmasked again), or returning to a central node. If unjustified, flag it.
+  4. Semantic Mapping: Use the Original Image to logically map descriptive names in the checklist to visual shapes. Do not rely solely on exact text matches.
+  5. Track All: You must track and update frequencies for blocks, nodes, AND edges.
+
+  *** STYLE ADAPTER: ALPHA MASKING ***
+  In Alpha Masking, active elements fade in to opaque, while inactive elements are masked to a lower opacity.
+  - State Change Trigger: Increase frequency (+1) the exact moment an element transitions from masked (transparent/low opacity) to fully opaque/active.
+
+adapter_hopping_bounding_box: |
+  *** GENERIC INSTRUCTIONS ***
+  1. Frequency Counter: Treat the checklist as a frequency counter where every block and node starts at `0`.
+  2. The State Change Rule (CRITICAL): An element's frequency increases by +1 ONLY when the bounding box *newly arrives* on it. If the box rests on the same element for multiple frames, DO NOT increase the frequency again.
+  3. Repetition Justification: If an element's frequency reaches 2 or more (meaning the box left and came back), you MUST reason if it is justified before flagging it. Justified repetitions include returning to a central hub node, or a parent container re-highlighted after scanning its children. If unjustified, flag it.
+  4. Semantic Mapping: Use the Original Image to logically map descriptive names in the checklist to visual shapes.
+
+  *** STYLE ADAPTER: HOPPING BOUNDING BOX ***
+  In Hopping Bounding Box, a transparent highlight box discretely jumps from one element to the next.
+  - State Change Trigger: Increase frequency (+1) the exact moment the bounding box lands on and encloses an element.
+  - SPECIAL EDGE EXCEPTION: Bounding boxes DO NOT highlight arrows. You must COMPLETELY IGNORE the "edges" list. Never update edge frequencies.
+  - You must always output empty lists for arrow tracking.
+
+adapter_sliding_bounding_box: |
+  *** GENERIC INSTRUCTIONS ***
+  1. Frequency Counter: Treat the checklist as a frequency counter where every block and node starts at `0`.
+  2. The State Change Rule (CRITICAL): An element's frequency increases by +1 ONLY when the bounding box *comes to rest* on it. If the box rests on the same element for multiple frames, DO NOT increase the frequency again. Ignore the box while it is mid-slide.
+  3. Repetition Justification: If an element's frequency reaches 2 or more (meaning the box left and came back), you MUST reason if it is justified before flagging it. Justified repetitions include returning to a central hub node, or a parent container re-highlighted after scanning its children. If unjustified, flag it.
+  4. Semantic Mapping: Use the Original Image to logically map descriptive names in the checklist to visual shapes.
+
+  *** STYLE ADAPTER: SLIDING BOUNDING BOX ***
+  In Sliding Bounding Box, a transparent highlight box smoothly slides across the canvas.
+  - State Change Trigger: Increase frequency (+1) the exact moment the bounding box finishes its slide and comes to rest enclosing an element.
+  - SPECIAL EDGE EXCEPTION: Bounding boxes DO NOT highlight arrows. You must COMPLETELY IGNORE the "edges" list. Never update edge frequencies.
+  - You must always output empty lists for arrow tracking.
+
+schema_alpha_masking: |
+  {
+    "frame_label": "string - the frame being evaluated",
+    "general_frame_reasoning": "Detailed rationale of what newly became opaque this frame based on the state change rule.",
+    "frequency_updates_this_frame": {
+      "blocks": [{"name": "Block Name", "new_frequency": 1}],
+      "nodes": [{"name": "Node Name", "new_frequency": 1}],
+      "edges": [{"name": "Edge Name", "new_frequency": 1}]
+    },
+    "repetition_evaluation": {
+      "justification_reasoning": "Deeply reason about ANY element whose frequency is now >= 2. Is this a cyclic edge? A parent container revisit? Or a glitch? If no elements reached frequency >= 2, state 'No repetitions to evaluate'.",
+      "unjustified_freq_increase_element": ["List of block/node names whose unjustified frequency increased this frame"],
+      "unjustified_freq_increase_arrow": ["List of edge names whose unjustified frequency increased this frame"]
+    }
+  }
+
+schema_hopping_bounding_box: |
+  {
+    "frame_label": "string - the frame being evaluated",
+    "general_frame_reasoning": "Detailed rationale of what the box newly landed on this frame based on the state change rule.",
+    "frequency_updates_this_frame": {
+      "blocks": [{"name": "Block Name", "new_frequency": 1}],
+      "nodes": [{"name": "Node Name", "new_frequency": 1}]
+    },
+    "repetition_evaluation": {
+      "justification_reasoning": "Deeply reason about ANY element whose frequency is now >= 2. Is returning to this node a logical traversal choice (e.g., returning to a hub/parent)? Or a glitch? If no elements reached frequency >= 2, state 'No repetitions to evaluate'.",
+      "unjustified_freq_increase_element": ["List of block/node names whose unjustified frequency increased this frame"],
+      "unjustified_freq_increase_arrow": []
+    }
+  }
+
+schema_sliding_bounding_box: |
+  {
+    "frame_label": "string - the frame being evaluated",
+    "general_frame_reasoning": "Detailed rationale of what the box newly came to rest on this frame based on the state change rule.",
+    "frequency_updates_this_frame": {
+      "blocks": [{"name": "Block Name", "new_frequency": 1}],
+      "nodes": [{"name": "Node Name", "new_frequency": 1}]
+    },
+    "repetition_evaluation": {
+      "justification_reasoning": "Deeply reason about ANY element whose frequency is now >= 2. Is returning to this node a logical traversal choice (e.g., returning to a hub/parent)? Or a glitch? If no elements reached frequency >= 2, state 'No repetitions to evaluate'.",
+      "unjustified_freq_increase_element": ["List of block/node names whose unjustified frequency increased this frame"],
+      "unjustified_freq_increase_arrow": []
+    }
+  }

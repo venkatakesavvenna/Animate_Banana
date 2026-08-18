@@ -101,16 +101,13 @@ def find_placeholders(code: str) -> list[RasterPlaceholder]:
             continue                      # nothing to address it by
         xml_id = id_match.group(1)
 
-        # An already-filled raster is not a placeholder. The group keeps its
-        # id and class after a splice -- downstream stages address elements by
-        # id, so it has to -- which means the only thing distinguishing filled
-        # from empty is the content. Without this check a second detection
-        # pass would try to re-fill filled rasters, and with the `<rect>` gone
-        # there would be no geometry left to guide the crop. TikZ gets this
-        # for free because its splice rewrites the node body.
-        if "<image" in raw:
-            continue
-
+        # A filled raster (its group holds an `<image>` from an earlier
+        # splice) is still a placeholder: the group keeps its id and class,
+        # and the `<image>` carries the same x/y/width/height geometry the
+        # original `<rect>` did, so a re-splice can swap the crop exactly the
+        # way the TikZ side re-splices a filled node body. Skipping filled
+        # groups -- the old behaviour -- made every spliced SVG invisible to
+        # the raster screen: zero boxes, nothing editable, ever again.
         x = y = width = height = None
         label = ""
         try:
@@ -120,7 +117,7 @@ def find_placeholders(code: str) -> list[RasterPlaceholder]:
         if element is not None:
             for child in element.iter():
                 name = _local(child.tag)
-                if name == "rect" and x is None:
+                if name in ("rect", "image") and x is None:
                     try:
                         x = float(child.get("x", "0"))
                         y = float(child.get("y", "0"))

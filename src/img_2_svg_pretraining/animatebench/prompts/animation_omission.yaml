@@ -1,0 +1,155 @@
+# Omitted Elements/Arrows -- Elimination 3.
+#
+# The source document shows the judge every frame at once and asks it for a
+# per-timestep reasoning array, a final omission set and the two counts. We call
+# it once per FRAME instead: each call sees the original figure, ONE animation
+# frame, and the checklist items still outstanding at that point. It reports only
+# what that frame popped.
+#
+# The running state (outstanding set) is threaded in Python, and the counts
+# -- element_omission_count = remaining blocks + remaining nodes,
+#    arrow_omission_count = remaining edges --
+# are computed in Python from the checklist minus everything ever popped. The
+# model never sees or produces them.
+#
+# `frames` is the generic body; `{style_adapter}` takes one `adapter_*` value and
+# `{output_schema}` takes the matching `schema_*` value. The bounding-box styles
+# get a schema with no `edges` key, because those animations never highlight
+# arrows (the doc's SPECIAL EDGE EXCEPTION).
+
+frames: |
+  You are an expert Diagram Animation Omission Detector. Your objective is to track elements from
+  a precomputed checklist and verify if they actually make an appearance in the animation
+  sequence.
+
+  You are provided with:
+  1. The Original Diagram Image.
+  2. A SINGLE Animation Frame, taken from that sequence.
+  3. The list of checklist elements ("blocks", "nodes", "edges") that are STILL OUTSTANDING --
+  everything that has not already been popped by an earlier frame.
+
+  *** GENERIC INSTRUCTIONS ***
+  1. Checklist Popping: Observe which of the still-outstanding elements make an appearance in THIS
+  frame. Report every element that appears here as popped. Consider only the outstanding list;
+  anything already popped by an earlier frame is not your concern.
+  2. Semantic Mapping for Unlabeled Elements (CRITICAL): Some items in the checklist do not have
+  explicit text labels in the image; they were given descriptive, semantic names (e.g., "Watermark
+  Decoder" for an empty blue box). Do NOT assume an element is missing just because its text isn't
+  written on the canvas. You MUST use the Original Diagram to logically map these semantic names
+  to their corresponding visual shapes (using color, layout, context, and nearby arrows). Track
+  the appearance of those specific shapes, not just text.
+  3. Lenient Text Matching: When matching elements that do have text, be highly lenient. Ignore
+  exact math notations, LaTeX symbols (e.g., $I_{1:K}$), brackets, and minor text variations.
+  4. No Final Pass Here: This is one frame out of many, not the last word. An outstanding element
+  that does not appear in this frame is NOT an omission -- it may still appear in a later frame.
+  Simply leave it out of your report. Deciding what was ultimately omitted happens after every
+  frame has been seen, and is not your job.
+  5. Report Pops Only: Do not score, do not count, and do not list what remains. Your entire
+  output is the set of elements THIS frame popped. The running state and the omission counts are
+  computed outside this call.
+
+  {style_adapter}
+
+  --- ELEMENTS STILL OUTSTANDING ---
+  {remaining}
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below.
+
+  ```json
+  {output_schema}
+  ```
+
+adapter_progressive_reveal: |
+  *** STYLE ADAPTER: PROGRESSIVE REVEAL ***
+  In Progressive Reveal, elements are cumulatively added to a blank or partially blank canvas.
+  - Appearance Rule: An element (node, block, or edge) is considered to have "appeared" and should
+  be popped from the list the moment it is visually rendered on the canvas.
+  - You MUST track and pop blocks, nodes, AND edges.
+
+adapter_alpha_masking: |
+  *** STYLE ADAPTER: ALPHA MASKING ***
+  In Alpha Masking, active elements are emphasized by fading in from transparent to fully opaque,
+  while other elements are kept at a lower opacity.
+  - Appearance Rule: An element (node, block, or edge) is considered to have "appeared" and should
+  be popped from the list the moment it becomes fully opaque/highlighted.
+  - You MUST track and pop blocks, nodes, AND edges.
+
+adapter_colour_pop: |
+  *** STYLE ADAPTER: COLOUR POP ***
+  In Colour Pop, the entire diagram starts in greyscale, and elements transition to full color
+  when active.
+  - Appearance Rule: An element (node, block, or edge) is considered to have "appeared" and should
+  be popped from the list the moment it transitions from greyscale to full color.
+  - You MUST track and pop blocks, nodes, AND edges.
+
+adapter_hopping_bounding_box: |
+  *** STYLE ADAPTER: HOPPING BOUNDING BOX ***
+  In Hopping Bounding Box, a transparent highlight box discretely jumps from one element to the
+  next.
+  - Appearance Rule: An element (node or block) is considered to have "appeared" and should be
+  popped from the list the moment the bounding box encloses it or highlights it.
+  - SPECIAL EDGE EXCEPTION: Bounding box animations DO NOT highlight arrows. You must COMPLETELY
+  IGNORE the "edges" list. Do not attempt to pop edges.
+
+adapter_sliding_bounding_box: |
+  *** STYLE ADAPTER: SLIDING BOUNDING BOX ***
+  In Sliding Bounding Box, a transparent highlight box smoothly slides across the canvas from one
+  element to the next.
+  - Appearance Rule: An element (node or block) is considered to have "appeared" and should be
+  popped from the list the moment the bounding box comes to rest and encloses/highlights it.
+  - SPECIAL EDGE EXCEPTION: Bounding box animations DO NOT highlight arrows. You must COMPLETELY
+  IGNORE the "edges" list. Do not attempt to pop edges.
+
+schema_progressive_reveal: |
+  {
+    "frame_label": "string - the frame being evaluated",
+    "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
+    "elements_popped_in_this_frame": {
+      "blocks": ["List of block names popped"],
+      "nodes": ["List of node names popped"],
+      "edges": ["List of edge names popped"]
+    }
+  }
+
+schema_alpha_masking: |
+  {
+    "frame_label": "string - the frame being evaluated",
+    "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
+    "elements_popped_in_this_frame": {
+      "blocks": ["List of block names popped"],
+      "nodes": ["List of node names popped"],
+      "edges": ["List of edge names popped"]
+    }
+  }
+
+schema_colour_pop: |
+  {
+    "frame_label": "string - the frame being evaluated",
+    "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
+    "elements_popped_in_this_frame": {
+      "blocks": ["List of block names popped"],
+      "nodes": ["List of node names popped"],
+      "edges": ["List of edge names popped"]
+    }
+  }
+
+schema_hopping_bounding_box: |
+  {
+    "frame_label": "string - the frame being evaluated",
+    "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
+    "elements_popped_in_this_frame": {
+      "blocks": ["List of block names popped"],
+      "nodes": ["List of node names popped"]
+    }
+  }
+
+schema_sliding_bounding_box: |
+  {
+    "frame_label": "string - the frame being evaluated",
+    "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
+    "elements_popped_in_this_frame": {
+      "blocks": ["List of block names popped"],
+      "nodes": ["List of node names popped"]
+    }
+  }

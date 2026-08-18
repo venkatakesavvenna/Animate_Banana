@@ -1,0 +1,31 @@
+---
+config:
+  theme: redux-dark-color
+---
+sequenceDiagram
+    participant D as DB (State)
+    participant O as Orchestrator (Cli)
+    participant P as Predictor (Model)
+    participant W as Writer (Async)
+    participant S as Storage (JSONL)
+    autonumber
+
+    Note over D,S: 1. NORMAL PROCESSING FLOW
+    D->>D: Ingestion: INSERT (State 0)
+    O->>D: fetch_batch() [Atomic 0→1]
+    D-->>O: Return [photo_001.jpg]
+
+    Note left of P: Internal Parallelism:<br/>CPU prepares next<br/>GPU infers current        
+    O->>P: vlm_predict(path)
+    P-->>W: enqueue(success_results)
+    Note left of W: Non Blocking Call
+    P-->>O: return failed_objects
+    O->>D: mark_failed() [State 1→State 3]
+
+    Note over D,S: 2. ATOMIC PERSISTENCE
+    W->>W: Buffer fills (Wait for 250 items)
+    rect rgb(20, 50, 20)
+        Note right of W: THE CRASH-SAFE BOUNDARY
+        W->>S: write() + fsync() [Durability]
+        W->>D: mark_done() [State 1→2]
+    end

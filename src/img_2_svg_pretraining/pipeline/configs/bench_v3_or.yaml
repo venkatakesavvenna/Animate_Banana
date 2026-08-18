@@ -1,0 +1,157 @@
+# AnimateBench v3 -- Gemini 3.7 Flash through OpenRouter.
+#
+# Same bench, same stages, same critics as bench_v3_gemini.yaml. The only
+# difference is where the model calls go, which is the point: the free-tier
+# Gemini keys are capped at 20 requests per DAY per key
+# (GenerateRequestsPerDayPerProjectPerModel-FreeTier), and that cap -- not
+# latency, not concurrency -- is what stretched a one-afternoon sweep across
+# two days. A paid endpoint removes it outright.
+#
+# WHY 3.7 AND NOT 3.6
+# -------------------
+# OpenRouter prices them very differently:
+#
+#   google/gemini-3.7-flash    $0.375 / $1.875  per 1M in/out
+#   google/gemini-3.6-flash    $0.750 / $3.750  <- double
+#
+# A full sweep is ~3.8M in / 1.7M out, so 3.6 would cost ~$9.20 against a $10
+# budget and 3.7 costs ~$4.60. Cheaper AND newer; there is no case for 3.6
+# here. This does mean the baseline is no longer the model bench_v2 used, and
+# the two are not directly comparable -- a fresh lineage, not a continuation.
+#
+# REASONING TOKENS ARE BILLED AS OUTPUT, AND OPENROUTER COUNTS THEM
+# -----------------------------------------------------------------
+# A probe with max_tokens=16 came back completion_tokens=13, reasoning_tokens
+# =13, content EMPTY. The native Gemini API reports reasoning separately
+# (candidates_token_count excludes it); OpenRouter folds it into
+# completion_tokens. Two consequences:
+#
+#   1. Cost estimates built from native-API usage numbers UNDERCOUNT here.
+#      OpenRouter returns an exact per-call `cost`, so measure, do not model.
+#   2. Thinking spends max_tokens before a single content token is emitted.
+#      This repo already has that scar -- 4096 truncated a response mid-JSON
+#      and the error read "detection response was not a JSON object", not
+#      anything about length. Every generation limit below is raised
+#      accordingly.
+#
+# Cache root is shared with bench_v3_gemini.yaml deliberately: lineage is
+# keyed by model, so `google-gemini-3.7-flash` artifacts sit beside the 3.6
+# ones without collision, and one viewer instance sees both.
+#
+#   set -a; . ./.env; set +a          # OPEN_ROUTER_KEY is not auto-loaded
+#   docker exec -u $(id -u):$(id -g) -e OPEN_ROUTER_KEY \
+#     img-2-svg-pretraining-singlenode-venkat.kesav bash -lc 'cd /code && ...'
+
+dataset:
+  root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v3
+  limit: 0
+
+cache_root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v3_cache
+
+animation_style: progressive_reveal
+target: tikz
+
+backends:
+  openrouter_flash:
+    type: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    model: google/gemini-3.7-flash
+    # Read from the environment, never inlined -- this file is tracked and
+    # api_keys.csv is not. `.env` is NOT auto-loaded (python-dotenv is absent),
+    # so the caller must export it.
+    api_key_env: OPEN_ROUTER_KEY
+    # Billing is per token, not per request, so there is no per-day cliff to
+    # pace around any more. Kept moderate so a runaway loop cannot empty a
+    # $10 balance before anyone notices.
+    max_concurrency: 4
+
+transmuter:
+  code_converter:
+    backend: openrouter_flash
+    prompt: diagram_transmuter/tikz_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      # 16384 on the native API; doubled because reasoning now comes out of
+      # this same budget before any TikZ is emitted.
+      max_tokens: 32768
+
+  raster_integrator:
+    enabled: true
+    backend: openrouter_flash
+    params:
+      temperature: 0.0
+      max_tokens: 32768
+
+  diagram_critic:
+    enabled: true
+    backend: openrouter_flash
+    prompt: diagram_transmuter/critic.yaml
+    fidelity_threshold: 0.7
+    max_rounds: 3
+    params:
+      temperature: 0.1
+      max_tokens: 32768
+
+planner:
+  strategizer:
+    backend: openrouter_flash
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+    params:
+      temperature: 0.3
+
+  parser:
+    backend: openrouter_flash
+    prompt: animation_planner/tikz_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 32768
+
+  sequencer:
+    backend: openrouter_flash
+    prompt: animation_planner/tikz_sequencer.yaml#seq_with_narration
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    enabled: true
+    backend: openrouter_flash
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  narrative_writer:
+    backend: openrouter_flash
+    prompt: animation_planner/narrative_writer.yaml
+    context_tier: full
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+animator:
+  designer:
+    backend: openrouter_flash
+    prompt: animation_designer/designer.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  critic:
+    enabled: true
+    backend: openrouter_flash
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  exporter:
+    # mp4 is what writes exports/frames/, which the animation tree needs later
+    # ("frames" is its own output token but config validation rejects it).
+    outputs: [pdf, mp4]
+    fps: 2
+    dpi: 300

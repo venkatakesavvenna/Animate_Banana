@@ -40,6 +40,12 @@ Suites: `stage1` · `xml` · `sequence` · `stage3` · `all` · `report`.
 | `stage3` | Animation Compilation Success Rate | 2.3.1 | programmatic | no |
 | | Animation Code Quality | 2.3.3 | judge | no |
 | | Animation Integration Footprint | 2.3.3 | programmatic | no |
+| `animation` | Visual Fidelity Score | VFS | judge | no |
+| | Ani-Style Compliance | ASCS | judge | no |
+| | Omitted Elements / Arrows | — | judge | no |
+| | Selection Sensibility | SSS | judge | no |
+| | Granularity & Pacing | GPS | judge | no |
+| | Unnecessary Repetition | — | judge | no |
 
 Everything in the "no GT / programmatic" rows runs with **no API key**, which is most of the
 suite. Judge metrics degrade to `null` with a recorded error rather than failing the run.
@@ -107,6 +113,23 @@ single base depth reported the reference's own hand-authored XML as 19% invalid.
 parent relation (`depth == parent.depth + 1`) is checked, which holds under either convention.
 Result on pipe00041: GT 0.148, prediction 0.175 — the same phenomenon on both sides (composite
 parts declared at their parent's depth), now comparable.
+
+**The animation tree's gates are recorded, not enforced.** Its six nodes come
+from six design documents that specify every prompt, input and output schema —
+and not one threshold, normalisation, or combination rule. So `run_eval
+animation` scores every node it can and writes `would_eliminate` rather than
+gating. Only style compliance can answer today, because its verdict is
+categorical. A gate closed on an invented cutoff would zero every metric
+beneath it, and nothing downstream could tell that from a genuine failure; the
+thresholds are better chosen against the distribution the first sweep produces.
+
+**Its frames are never batched.** Each gate walks the animation forward one
+judged call per frame, carrying the state the previous call produced. Counts
+are then computed from those per-frame reports rather than asked of the model:
+a judge asked to total thirty frames of its own work is doing arithmetic nobody
+can check, while a judge asked "what appeared in this frame" is being asked
+what it can see. It also means a hallucinated name cannot shrink the
+outstanding list — only names actually still outstanding are allowed to pop.
 
 **SSCR scores the bucket contract, not our action vocabulary.** The bench dialect has no
 `action` field, so `AnimationSequence` defaults every step to `"reveal"`. Running the native

@@ -1,0 +1,186 @@
+# AnimateBench v3 -- the 32-sample "completed" bench, Gemini 3.6 Flash baseline.
+#
+# The paper's primary table. Source bundle: data/32-bench-completed.zip
+# (extracted to data/_bench_32_raw, imported to data/animatebench_v3 by
+# pipeline.import_bench, whose v2 reader already matches this layout).
+#
+# GT COVERAGE IS SPARSE, AND IT DECIDES THE RUN PLAN
+# ---------------------------------------------------
+# Unlike v2 (6 samples x 5 styles), this bench gives most samples exactly ONE
+# reference style. Four samples carry all five; the other 28 carry one each:
+#
+#   progressive_reveal    16      colour_pop             7
+#   hopping_bounding_box  11      alpha_masking          5
+#   sliding_bounding_box   9      -> 48 (sample, style) cells over 32 samples
+#
+# So there is no 32x5 grid to fill. Running a sample in a style it has no
+# reference for produces a `sequence` record whose GT-derived numbers are all
+# null -- it looks like a measurement and is not one. Each style is therefore
+# run over its own sample list; scripts/bench_v3_styles.py prints them.
+#
+# Stages 1a/1b/1c/2b are style-independent and their lineage has no style
+# component, so the four all-style samples pay for diagram code and XML once
+# and reuse it across five sequence runs.
+#
+# WHY THE CACHE LIVES BESIDE THE DATA
+# -----------------------------------
+# The default pipeline/cache tree is root-owned -- a root container wrote it
+# first and there is no passwordless sudo here, so an ordinary user cannot
+# write a record into it. This run goes to its own tree and every container
+# command runs with `docker exec -u $(id -u):$(id -g)`, which is what keeps
+# the artifacts writable by the eval, the viewer, and the next person.
+#
+# HOW IT IS RUN
+# -------------
+# LaTeX (pdflatex, pdftoppm) exists only inside the container, and the stage-1
+# and stage-3 eval suites compile too, so the pipeline AND run_eval both run
+# there:
+#
+#   docker exec -u $(id -u):$(id -g) img-2-svg-pretraining-singlenode-venkat.kesav \
+#     bash -lc 'cd /code && PYTHONPATH=src /environments/img_2_svg_pretraining/bin/python \
+#       -m img_2_svg_pretraining.pipeline.run_pipeline all \
+#       --config src/img_2_svg_pretraining/pipeline/configs/bench_v3_gemini.yaml \
+#       --style progressive_reveal --only <ids>'
+
+# Host-absolute, not /code. The container bind-mounts /fsxvision_new at the
+# identical path as well as at /code, so these resolve in both -- verified same
+# inode. That matters because the comparison viewer runs on the HOST (the
+# container is on a bridge network and its published ports were fixed at
+# `docker run`, so a port opened inside it now is unreachable), while the
+# pipeline runs INSIDE (pdflatex and pdftoppm exist nowhere else). One config
+# has to satisfy both, and the eval records are keyed by this file's stem, so
+# a second host-path copy of the config would look for records under a name
+# nothing writes.
+dataset:
+  root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v3
+  limit: 0
+
+cache_root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v3_cache
+
+animation_style: progressive_reveal
+target: tikz
+
+backends:
+  # Concurrency 4, and it is measured, not guessed. The pool is 75 keys of
+  # which ~20 answer 200 and ~43 are out of daily quota, so most attempts
+  # rotate before they land. At 8 concurrent, eight threads walk the SAME
+  # KeyRing at once, each marking keys exhausted as it goes; the ring hits
+  # "all exhausted", clears every mark (it must, or a quota reset could never
+  # be noticed), and the threads start over on the same dead keys. That run
+  # produced ZERO successful calls in 30 minutes. One thread alone -- the
+  # smoke test -- finished a whole sample in 22. Fewer threads contend for
+  # fewer keys and actually land.
+  # 4, deliberately. At 8 against the FULL 75-key pool this landed zero calls
+  # in 30 minutes: eight threads walked one KeyRing, each marking keys
+  # exhausted, the ring hit "all marked", cleared every mark (it must, or a
+  # quota reset could never be noticed) and they started over on dead keys.
+  # 4 against the live-only pool sustains ~0.53 calls/min, which is below what
+  # a 53s median latency would suggest -- the critics spend minutes in local
+  # pdflatex between rounds while the API sits idle -- but the binding limit
+  # here is the per-day request quota, not wall clock, so buying parallelism
+  # at the risk of re-running the thrash is a bad trade.
+  gemini_flash:
+    type: gemini
+    model: gemini-3.6-flash
+    max_concurrency: 4
+
+  # Held for the second baseline. Pro is slower and rate-limits harder, so it
+  # is not what the first full sweep runs on.
+  gemini_pro:
+    type: gemini
+    model: gemini-3-pro-preview
+    max_concurrency: 2
+
+transmuter:
+  code_converter:
+    backend: gemini_flash
+    prompt: diagram_transmuter/tikz_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  raster_integrator:
+    enabled: true
+    backend: gemini_flash
+    params:
+      temperature: 0.0
+      # 4096 truncated the response mid-JSON on a 7-placeholder figure: these
+      # are thinking models, so reasoning tokens come out of the same budget
+      # before any JSON is emitted.
+      max_tokens: 16384
+
+  diagram_critic:
+    enabled: true
+    backend: gemini_flash
+    prompt: diagram_transmuter/critic.yaml
+    fidelity_threshold: 0.7
+    max_rounds: 3
+    params:
+      temperature: 0.1
+      max_tokens: 32768
+
+planner:
+  strategizer:
+    backend: gemini_flash
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+    params:
+      temperature: 0.3
+
+  parser:
+    backend: gemini_flash
+    prompt: animation_planner/tikz_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 16384
+
+  sequencer:
+    backend: gemini_flash
+    prompt: animation_planner/tikz_sequencer.yaml#seq_with_narration
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    enabled: true
+    backend: gemini_flash
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  narrative_writer:
+    backend: gemini_flash
+    prompt: animation_planner/narrative_writer.yaml
+    context_tier: full
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+animator:
+  designer:
+    backend: gemini_flash
+    prompt: animation_designer/designer.yaml#prompt
+    params:
+      temperature: 0.2
+      max_tokens: 16384
+
+  critic:
+    enabled: true
+    backend: gemini_flash
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+
+  exporter:
+    # No narrated_mp4: it needs TTS and google-genai >= 2.0, and nothing in
+    # the primary table reads it. `mp4` is what writes exports/frames/, which
+    # the animation tree will need when it runs on Qwen later -- `frames` is
+    # its own output token but config validation rejects it (EXPORT_FORMATS
+    # omits it), so mp4 is how the frames get written today.
+    outputs: [pdf, mp4]
+    fps: 2
+    dpi: 300

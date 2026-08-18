@@ -15,7 +15,9 @@ from pathlib import Path
 
 from filelock import FileLock
 
-SCHEMA_VERSION = 3
+from ..cache import CODE_SUFFIX
+
+SCHEMA_VERSION = 4
 
 # Stages a reviewer signs off on. Narration (2e) is deliberately absent: it is
 # written into an already-valid sequence and only touches the `narrative`
@@ -76,17 +78,33 @@ def _empty(sample_id: str) -> dict:
             "status": "unreviewed",
             "code_lineage_at_review": None,
             "comments": [],
+            # Legacy single-slot fields, kept in sync with the *last saved*
+            # target so old readers keep working. The authoritative store is
+            # `by_target`: 1a/1b/2b artifacts are target-keyed files (.tex vs
+            # .svg under different lineages), and a single slot meant saving
+            # an SVG override silently replaced the TikZ one everywhere --
+            # the sample then showed SVG code under the tikz target and the
+            # original edit looked lost.
             "human_code_path": None,
             "human_code_source": None,
             "human_code_updated_at": None,
+            # target -> {path, source, updated_at}
+            "human_code_by_target": {},
             "promoted_to_code_final": False,
+            # Which targets have been promoted, so discard can revert the
+            # promoted copy under the lineage it actually landed in.
+            "promoted_targets": [],
         },
         "stage1b": {
             "status": "unreviewed",
             "code_lineage_at_review": None,
             "boxes": [],
             "code_final_human_path": None,
+            # target -> {path, boxes}; box ids are per-target (the TikZ and
+            # SVG documents name their raster placeholders differently).
+            "by_target": {},
             "promoted_to_code_final": False,
+            "promoted_targets": [],
         },
         # Stage 2b -- the parsed structure XML.
         "stage2b": {
@@ -96,12 +114,15 @@ def _empty(sample_id: str) -> dict:
             "human_xml_path": None,
             "human_xml_source": None,     # "pasted" | "tree_edit"
             "human_xml_updated_at": None,
+            # target -> {path, source, updated_at, ids_added, ids_removed}
+            "human_xml_by_target": {},
             # Against the machine XML at save time. Load-bearing: these ids are
             # what every downstream `focus` entry is validated against, so a
             # removal here breaks sequence steps elsewhere.
             "ids_added": [],
             "ids_removed": [],
             "promoted_to_xml": False,
+            "promoted_targets": [],
         },
         # Stage 2c -- the sequencer's own output, before the critic sees it.
         # Distinct from 2d: this one swaps over `sequence()`, so the critic
@@ -172,7 +193,105 @@ def _migrate(record: dict, sample_id: str) -> dict:
             for sub, sub_default in default.items():
                 record[key].setdefault(sub, sub_default)
     record["schema_version"] = SCHEMA_VERSION
+    _migrate_targets(record)
     return _with_approval(record)
+
+
+def _target_of_path(path: str | None) -> str | None:
+    """Which target a legacy override file was saved for, from its name.
+
+    The artifact suffix is the reliable marker for code (.tex vs .svg). XML is
+    .xml under both targets, but the SVG xml lineage always carries a `__svg`
+    component (cache.py appends the target for non-tikz), so the directory
+    decides there.
+    """
+    if not path:
+        return None
+    p = str(path)
+    if p.endswith(CODE_SUFFIX["svg"]):
+        return "svg"
+    if p.endswith(CODE_SUFFIX["tikz"]):
+        return "tikz"
+    if p.endswith(".xml"):
+        return "svg" if "__svg" in p else "tikz"
+    return None
+
+
+def _migrate_targets(record: dict) -> None:
+    """Lift legacy single-slot override fields into their `by_target` entry.
+
+    Only when the target entry is still empty: a record that has already been
+    written per-target is authoritative, and re-lifting the legacy field over
+    it would resurrect exactly the last-save-wins clobbering this fixes.
+    """
+    s1a = record.get("stage1a") or {}
+    legacy = s1a.get("human_code_path")
+    target = _target_of_path(legacy)
+    if legacy and target and not (s1a.get("human_code_by_target") or {}).get(target):
+        s1a.setdefault("human_code_by_target", {})[target] = {
+            "path": legacy,
+            "source": s1a.get("human_code_source"),
+            "updated_at": s1a.get("human_code_updated_at"),
+        }
+
+    s1b = record.get("stage1b") or {}
+    legacy = s1b.get("code_final_human_path")
+    target = _target_of_path(legacy)
+    if legacy and target and not (s1b.get("by_target") or {}).get(target):
+        s1b.setdefault("by_target", {})[target] = {
+            "path": legacy,
+            "boxes": s1b.get("boxes") or [],
+        }
+
+    s2b = record.get("stage2b") or {}
+    legacy = s2b.get("human_xml_path")
+    target = _target_of_path(legacy)
+    if legacy and target and not (s2b.get("human_xml_by_target") or {}).get(target):
+        s2b.setdefault("human_xml_by_target", {})[target] = {
+            "path": legacy,
+            "source": s2b.get("human_xml_source"),
+            "updated_at": s2b.get("human_xml_updated_at"),
+            "ids_added": s2b.get("ids_added") or [],
+            "ids_removed": s2b.get("ids_removed") or [],
+        }
+
+
+# -- per-target override readers ------------------------------------------
+#
+# The one place the "which override applies under this target" rule lives.
+# Every reader (screens, gates, run swaps, promote) goes through these; a
+# direct read of the legacy flat field is how the cross-target clobbering
+# went unnoticed.
+
+def human_code_entry(record: dict, target: str) -> dict:
+    """Stage-1a override for `target`: {path, source, updated_at} or {}."""
+    return (record.get("stage1a", {}).get("human_code_by_target") or {}).get(target) or {}
+
+
+def human_code_path(record: dict, target: str) -> str | None:
+    return human_code_entry(record, target).get("path")
+
+
+def human_code_final_entry(record: dict, target: str) -> dict:
+    """Stage-1b override for `target`: {path, boxes} or {}."""
+    return (record.get("stage1b", {}).get("by_target") or {}).get(target) or {}
+
+
+def human_code_final_path(record: dict, target: str) -> str | None:
+    return human_code_final_entry(record, target).get("path")
+
+
+def human_boxes(record: dict, target: str) -> list:
+    return human_code_final_entry(record, target).get("boxes") or []
+
+
+def human_xml_entry(record: dict, target: str) -> dict:
+    """Stage-2b override for `target`."""
+    return (record.get("stage2b", {}).get("human_xml_by_target") or {}).get(target) or {}
+
+
+def human_xml_path(record: dict, target: str) -> str | None:
+    return human_xml_entry(record, target).get("path")
 
 
 def load(cache_root: Path, sample_id: str) -> dict:

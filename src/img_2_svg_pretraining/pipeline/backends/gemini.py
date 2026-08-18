@@ -13,7 +13,18 @@ from .keys import KeyRing
 from .types import GenerationResult, ImagePart, Message, TextPart
 
 _RETRIABLE_MARKERS = ("429", "500", "502", "503", "504",
-                      "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE_EXCEEDED")
+                      "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE_EXCEEDED",
+                      "401", "UNAUTHENTICATED", "403", "PERMISSION_DENIED")
+
+# Errors that condemn the *key*, not the request. A disabled service account
+# or a project denied access answers identically however many times it is
+# asked, so the only useful response is to move to another key -- exactly what
+# a quota error already does. These were missing, and the cost was not
+# theoretical: with roughly a third of the pool dead, a run would reach a bad
+# key, raise a non-retriable error without ever rotating, and lose every
+# remaining call. An animation eval died at step 10 of 17 that way.
+_DEAD_KEY_MARKERS = ("401", "UNAUTHENTICATED", "403", "PERMISSION_DENIED")
+_QUOTA_MARKERS = ("429", "RESOURCE_EXHAUSTED")
 
 
 class GeminiBackend(ChatBackend):
@@ -110,7 +121,10 @@ class GeminiBackend(ChatBackend):
                 # Quotas are per key, so move to the next one before the base
                 # class retries -- otherwise every retry hits the same limit.
                 error = RetriableError(message)
-                if any(m in message for m in ("429", "RESOURCE_EXHAUSTED")):
+                if any(m in message for m in _QUOTA_MARKERS + _DEAD_KEY_MARKERS):
+                    # Quotas are per key, and so is a disabled account, so move
+                    # to the next one before the base class retries -- otherwise
+                    # every retry hits the same limit or the same dead key.
                     self._ring.mark_exhausted()
                     self._rotate_key()
                     # Tell the retry loop not to back off: a different key is
