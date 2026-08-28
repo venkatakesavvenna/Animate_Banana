@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,10 +39,17 @@ class FakeRender:
 
 
 class FakeCtx:
-    """Just enough AgentContext for refine()."""
+    """Just enough AgentContext for refine().
 
-    def __init__(self):
+    `cfg.target` is not optional: `refine()` reads it to pick the renderer, so
+    a fake without it fails every test in this module with an AttributeError
+    rather than anything about critic behaviour. Defaults to tikz, which is
+    what these tests' fixtures produce; pass "svg" to exercise that path.
+    """
+
+    def __init__(self, target: str = "tikz"):
         self.calls: list[str] = []
+        self.cfg = SimpleNamespace(target=target)
 
     def params(self):
         return {}
@@ -64,10 +72,14 @@ def patched(monkeypatch):
         "repair": None,              # code returned by repair()
         "diagnose_calls": 0,
         "repair_calls": 0,
+        "render_targets": [],        # every target _render was asked for
     }
 
-    def fake_render(code, cache_dir):
+    def fake_render(code, cache_dir, target):
         # The baseline always compiles; candidates obey the flag.
+        # `target` is accepted because `_render` became target-aware when SVG
+        # was added; recording it keeps the fake honest about the real signature.
+        state["render_targets"].append(target)
         ok = True if code == CODE else state["renders_ok"]
         return FakeRender(ok=ok, png_path=Path("/tmp/r.png") if ok else None)
 
@@ -141,7 +153,7 @@ def test_repair_that_drops_xml_ids_is_rejected(patched):
     code, info = run(patched)
     assert code == CODE
     assert info["final_score"] == 0.40
-    assert any("dropped xml id" in (r["notes"] or "") for r in info["rounds"])
+    assert any("dropped element id" in (r["notes"] or "") for r in info["rounds"])
 
 
 def test_repair_that_does_not_compile_is_rejected(patched):
@@ -200,7 +212,7 @@ def test_non_compiling_baseline_is_repaired_first(patched, monkeypatch):
     fixed = CODE.replace("{A}", "{A repaired}")
     state = {"n": 0}
 
-    def render(code, cache):
+    def render(code, cache, target):
         # The original never compiles; the repaired version does.
         ok = code == fixed
         return FakeRender(ok=ok, png_path=Path("/tmp/r.png") if ok else None,
@@ -221,7 +233,7 @@ def test_compile_repair_that_drops_ids_is_rejected(patched, monkeypatch):
     """Silencing an error by deleting the offending element loses content."""
     stripped = CODE.replace("\\node[xml id=b, xml class=child_node] (b) {B};", "")
     monkeypatch.setattr(critic, "_render",
-                        lambda code, cache: FakeRender(
+                        lambda code, cache, target: FakeRender(
                             ok=False, png_path=None, log="! error"))
     monkeypatch.setattr(critic, "fix_compile",
                         lambda ctx, s, code, log, params: stripped)
@@ -229,13 +241,13 @@ def test_compile_repair_that_drops_ids_is_rejected(patched, monkeypatch):
     code, info = run(patched)
     assert code == CODE                        # the stripped version is refused
     assert "does not compile" in info["skipped"]
-    assert any("dropped xml id" in r.get("notes", "")
+    assert any("dropped element id" in r.get("notes", "")
                for r in info["compile_rounds"])
 
 
 def test_gives_up_after_budget_when_repair_never_compiles(patched, monkeypatch):
     monkeypatch.setattr(critic, "_render",
-                        lambda code, cache: FakeRender(
+                        lambda code, cache, target: FakeRender(
                             ok=False, png_path=None, log="! error"))
     monkeypatch.setattr(critic, "fix_compile",
                         lambda ctx, s, code, log, params: code + "\n% try")

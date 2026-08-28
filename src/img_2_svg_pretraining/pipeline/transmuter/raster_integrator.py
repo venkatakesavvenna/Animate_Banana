@@ -33,13 +33,14 @@ from ..cache import write_text
 from ..runner import AgentContext, SampleOutcome, StageReport
 from ..samples import PaperSample
 from ..vision.gemini_boxes import detect_regions, dump, write_overlay
-from .rasters import find_placeholders, splice
+from .rasters import document_extent, find_placeholders, splice
 from .tikz_rasters import RasterPlaceholder
 
 AGENT = "raster_integrator"
 
 
-def _expand_to_placeholder(bbox, placeholder_box, image_size) -> tuple:
+def _expand_to_placeholder(bbox, placeholder_box, image_size,
+                           doc_extent=None) -> tuple:
     """Grow a detected box toward the placeholder's aspect ratio when it under-covers.
 
     A detector asked for "the region that belongs here" can still return one
@@ -51,6 +52,23 @@ def _expand_to_placeholder(bbox, placeholder_box, image_size) -> tuple:
     The placeholder's declared box says how much space the transmuter expected
     the graphic to occupy, so it is a usable prior for how much was missed.
     Only ever grows, never shrinks, and stays inside the image.
+
+    THE TWO BOXES ARE NOT IN THE SAME SPACE
+    ---------------------------------------
+    `bbox` is in **source-image pixels** (the detector's output, decoded by
+    `vision.gemini_boxes.to_pixels`). `placeholder_box` is in the **document's
+    own units** -- SVG user units, TikZ pt. Comparing them directly only works
+    when the document's aspect happens to equal the image's, and nothing
+    guarantees that: `WACV_2023_set5_000024` is a 995x441 figure (2.256) drawn
+    into `viewBox="0 0 1000 350"` (2.857), a 27% anisotropic difference fed
+    straight into the band below. That is enough to make this fire on a
+    correctly-detected box, or stay silent on a genuinely truncated one.
+
+    `doc_extent` closes the gap: scaling the placeholder into pixel space is
+    exactly multiplying its aspect by `(img_w/img_h) / (doc_w/doc_h)`. When the
+    two agree the factor is 1 and nothing changes, which is why passing `None`
+    (TikZ, or an SVG with no parseable viewBox) is a safe no-op rather than a
+    silent approximation.
     """
     if not bbox or not placeholder_box:
         return bbox
@@ -61,6 +79,11 @@ def _expand_to_placeholder(bbox, placeholder_box, image_size) -> tuple:
     pw, ph = max(1.0, px1 - px0), max(1.0, py1 - py0)
 
     target = pw / ph
+    iw, ih = image_size
+    if doc_extent:
+        dw, dh = doc_extent
+        if dw > 0 and dh > 0 and ih > 0:
+            target *= (float(iw) / float(ih)) / (dw / dh)
     current = w / h
     # Only act on a clear mismatch; small differences are just crop padding
     # and differing margins. The observed sub-panel failure came in at 1.55x
@@ -74,7 +97,6 @@ def _expand_to_placeholder(bbox, placeholder_box, image_size) -> tuple:
         w = h * target
     else:                     # too wide/short -> heighten
         h = w / target
-    iw, ih = image_size
     return (max(0.0, cx - w / 2), max(0.0, cy - h / 2),
             min(float(iw), cx + w / 2), min(float(ih), cy + h / 2))
 
@@ -126,11 +148,13 @@ def _integrate(ctx: AgentContext, sample: PaperSample, code: str,
 
     by_id = {p.xml_id: p for p in placeholders}
     image_size = Image.open(sample.image_path).size
+    # Read once: it is a property of the document, not of any one placeholder.
+    doc_extent = document_extent(code, ctx.cfg.target)
 
     replacements: dict[str, str] = {}
     for region in regions:
         bbox = _expand_to_placeholder(
-            region.bbox, by_id[region.xml_id].bbox(), image_size)
+            region.bbox, by_id[region.xml_id].bbox(), image_size, doc_extent)
         crop_path = _crop(sample.image_path, bbox, work_dir / f"crop_{region.xml_id}.png")
         if crop_path:
             # Absolute path. A relative one would be tempting for portability,

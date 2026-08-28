@@ -102,29 +102,70 @@ def sequence_view(seq: AnimationSequence, xml: DiagramXml) -> str:
 
 
 @dataclass
+class Entry:
+    """One checklist label and how many physically distinct elements carry it.
+
+    Frequency exists because a diagram routinely contains several distinct
+    elements with the same text ("Layer Norm" three times over). Deduplicating
+    by label alone collapsed them into one, so an animation that showed one of
+    the three scored as having shown all of them, and two real omissions
+    vanished. `source_ids` is what makes the count auditable -- it names which
+    ids the judge counted.
+    """
+    label: str
+    frequency: int = 1
+    source_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {"label": self.label, "frequency": self.frequency,
+                "source_ids": list(self.source_ids)}
+
+
+@dataclass
 class Checklist:
-    blocks: list[str] = field(default_factory=list)
-    nodes: list[str] = field(default_factory=list)
-    edges: list[str] = field(default_factory=list)
+    blocks: list[Entry] = field(default_factory=list)
+    nodes: list[Entry] = field(default_factory=list)
+    edges: list[Entry] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     provenance: dict = field(default_factory=dict)
 
-    def items(self, include_edges: bool = True) -> list[str]:
+    def items(self, include_edges: bool = True) -> list[Entry]:
         out = list(self.blocks) + list(self.nodes)
         return out + list(self.edges) if include_edges else out
 
     def total(self, include_edges: bool = True) -> int:
-        return len(self.items(include_edges))
+        """Total INSTANCES, not distinct labels.
+
+        The omission rate divides by this, and an animation is responsible for
+        every instance it promised -- three "Layer Norm" nodes are three things
+        that have to appear, not one.
+        """
+        return sum(e.frequency for e in self.items(include_edges))
 
     def to_dict(self) -> dict:
-        return {"blocks": self.blocks, "nodes": self.nodes, "edges": self.edges,
+        return {"blocks": [e.to_dict() for e in self.blocks],
+                "nodes": [e.to_dict() for e in self.nodes],
+                "edges": [e.to_dict() for e in self.edges],
                 "notes": self.notes, "provenance": self.provenance}
 
     @classmethod
     def from_dict(cls, data: dict) -> "Checklist":
-        return cls(blocks=list(data.get("blocks") or []),
-                   nodes=list(data.get("nodes") or []),
-                   edges=list(data.get("edges") or []),
+        def entries(bucket: str) -> list[Entry]:
+            out: list[Entry] = []
+            for value in (data.get(bucket) or []):
+                # Plain strings are checklists cached before frequencies
+                # existed; they read back as one instance each rather than
+                # forcing every stored checklist to be rebuilt.
+                if isinstance(value, str):
+                    out.append(Entry(label=value))
+                elif isinstance(value, dict) and value.get("label"):
+                    out.append(Entry(label=str(value["label"]),
+                                     frequency=int(value.get("frequency") or 1),
+                                     source_ids=list(value.get("source_ids") or [])))
+            return out
+
+        return cls(blocks=entries("blocks"), nodes=entries("nodes"),
+                   edges=entries("edges"),
                    notes=list(data.get("notes") or []),
                    provenance=dict(data.get("provenance") or {}))
 
@@ -146,7 +187,13 @@ def validate(raw: dict) -> Checklist:
         payload = raw if any(b in raw for b in BUCKETS) else {}
 
     checklist = Checklist()
-    seen: set[str] = set()
+    # Duplicate labels are rejected only WITHIN a bucket. Across buckets they
+    # are legitimate and the prompt says so explicitly: a node and a block may
+    # share a label and are distinct entities. Rejecting a cross-bucket repeat
+    # would delete a real element the animation is on the hook for.
+    seen: dict[str, set[str]] = {b: set() for b in BUCKETS}
+    any_kept = False
+
     for bucket in BUCKETS:
         values = payload.get(bucket)
         if values is None:
@@ -156,18 +203,49 @@ def validate(raw: dict) -> Checklist:
                                    f"{type(values).__name__}; ignored")
             continue
         for value in values:
-            if not isinstance(value, str) or not value.strip():
-                checklist.notes.append(f"{bucket}: dropped a non-string entry")
+            if isinstance(value, str):
+                label, frequency, source_ids = value.strip(), 1, []
+            elif isinstance(value, dict):
+                label = str(value.get("label") or "").strip()
+                raw_freq = value.get("frequency", 1)
+                try:
+                    frequency = int(raw_freq)
+                except (TypeError, ValueError):
+                    checklist.notes.append(
+                        f"{bucket}: {label!r} had a non-integer frequency "
+                        f"{raw_freq!r}; treated as 1")
+                    frequency = 1
+                source_ids = [str(i) for i in (value.get("source_ids") or [])
+                              if isinstance(i, (str, int))]
+            else:
+                checklist.notes.append(f"{bucket}: dropped a non-string, "
+                                       f"non-object entry")
                 continue
-            name = value.strip()
-            # One name in two buckets would be popped twice and counted twice.
-            if name in seen:
-                checklist.notes.append(f"{bucket}: dropped duplicate {name!r}")
-                continue
-            seen.add(name)
-            getattr(checklist, bucket).append(name)
 
-    if not seen:
+            if not label:
+                checklist.notes.append(f"{bucket}: dropped an entry with no label")
+                continue
+            if frequency < 1:
+                checklist.notes.append(f"{bucket}: {label!r} had frequency "
+                                       f"{frequency}; treated as 1")
+                frequency = 1
+            # A frequency claiming more instances than ids the judge can name
+            # is unfalsifiable padding -- every unnamed instance would count as
+            # an omission forever. Trust the ids when they contradict it.
+            if source_ids and frequency > len(source_ids):
+                checklist.notes.append(
+                    f"{bucket}: {label!r} claimed frequency {frequency} but "
+                    f"named only {len(source_ids)} id(s); used {len(source_ids)}")
+                frequency = len(source_ids)
+            if label in seen[bucket]:
+                checklist.notes.append(f"{bucket}: dropped duplicate {label!r}")
+                continue
+            seen[bucket].add(label)
+            any_kept = True
+            getattr(checklist, bucket).append(
+                Entry(label=label, frequency=frequency, source_ids=source_ids))
+
+    if not any_kept:
         checklist.notes.append("judge returned no usable checklist entries")
     return checklist
 

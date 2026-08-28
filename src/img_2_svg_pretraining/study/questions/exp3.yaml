@@ -1,0 +1,48 @@
+# Experiment 3 -- Context utility. Two animations of the same figure, one
+# generated with the paper's caption/abstract/methods available and one without.
+# Blinded: the participant is never told which is which, and left/right is
+# randomised per trial.
+
+experiment: exp3
+title: Which of these two presentations is better?
+intro: >
+  Two presentations of the same figure. Step both all the way to the end, then
+  compare them. There is no right answer -- say which works better for you, and
+  if they are genuinely equal, say so.
+
+questions:
+  - id: pref_aligned
+    prompt: Which narration fits what is happening on screen better?
+    type: choice_ab
+    metric: alignment
+  - id: pref_informative
+    prompt: Which one tells you more about the figure?
+    type: choice_ab
+    metric: informativeness
+  - id: pref_coherent
+    prompt: Which one is easier to follow from start to finish?
+    type: choice_ab
+    metric: coherence
+  - id: pref_understand
+    prompt: Which one leaves you understanding the figure better?
+    type: choice_ab
+    metric: understanding
+  - id: pref_overall
+    prompt: Taking the animation and narration together, which is better overall?
+    type: choice_ab
+    metric: Overall
+  - id: pref_reason
+    prompt: What decided it for you?
+    type: select
+    options:
+      - {value: coverage, label: What it covered}
+      - {value: animation, label: The animation itself}
+      - {value: flow, label: How it was ordered and paced}
+      - {value: narration, label: The narration}
+      - {value: style, label: How well it kept to the style}
+      - {value: all, label: Everything together}
+      - {value: other, label: Something else}
+  - id: pref_comment
+    prompt: Anything you want to add? (optional)
+    type: text
+    optional: true

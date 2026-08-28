@@ -1,3 +1,33 @@
+<style>
+  /* Judge rationales are prose. Without this the evidence tables inherit the
+     nowrap used for id-like values and a six-criterion rationale becomes one
+     unreadable horizontal scroll. */
+  .xev table { table-layout: fixed; width: 100%; }
+  .xev td, .xev th { white-space: normal; word-break: break-word;
+                     vertical-align: top; font-size: 12px; line-height: 1.45; }
+  .xev pre { white-space: pre-wrap; word-break: break-word; }
+
+  /* All-models overview. Inherits table.score, so only the differences live
+     here: a sticky header (the table runs long), left-aligned identity columns,
+     and the per-metric sort controls. */
+  table.score.ov thead th { position: sticky; top: 0; z-index: 2;
+    background: var(--panel2); }
+  table.score.ov thead th:first-child { z-index: 3; }
+  table.score.ov th.mcol { text-align: right; white-space: nowrap; }
+  table.score.ov td.mdl { text-align: left; font-weight: 600; }
+  table.score.ov td.smp { text-align: left; color: var(--dim);
+    font-family: ui-monospace, monospace; font-size: 11px; }
+  table.score.ov td.sty { text-align: left; color: var(--dim); font-size: 11px; }
+
+  .sortbtns { display: inline-flex; gap: 1px; margin-left: 5px;
+              vertical-align: middle; }
+  .sortb { font: 8px/1 ui-monospace, monospace; padding: 2px 3px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--panel);
+           color: var(--dim); border-radius: 2px; }
+  .sortb:hover { color: var(--fg); border-color: var(--dim); }
+  .sortb.on { color: var(--bg); background: var(--accent);
+              border-color: var(--accent); font-weight: 700; }
+</style>
 <title>AnimateBench — side by side</title>
 <style>
   :root {
@@ -172,6 +202,68 @@
   @media (max-width: 1250px) { .xrow { grid-template-columns: repeat(2, minmax(0,1fr)); } }
   @media (max-width: 700px)  { .xrow { grid-template-columns: 1fr; } }
 
+  /* Metrics sub-tabs: one per target, identical layout underneath. */
+  .xtargets { display: flex; align-items: center; gap: 6px; margin-bottom: 14px;
+              padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .xtab { background: var(--panel2); color: var(--dim); border: 1px solid var(--line);
+          border-radius: 4px; padding: 5px 16px; cursor: pointer; font-size: 12.5px;
+          font-family: inherit; text-transform: uppercase; letter-spacing: .6px; }
+  .xtab:hover { border-color: var(--accent); }
+  .xtab.active { background: var(--accent); color: #10131a; border-color: var(--accent);
+                 font-weight: 600; }
+  .xtargets .hintline { color: var(--dim); font-size: 11px; margin-left: 6px; }
+  /* The inactive target's figure, kept as a quiet annotation so switching
+     tabs is a comparison rather than a memory test. */
+  .xhead .othertgt { font-family: ui-monospace, monospace; font-size: 10.5px;
+                     color: var(--dim); margin-right: 10px; white-space: nowrap; }
+
+  /* A SECOND JUDGE's number for the same metric on the same cell -- not the
+     other target's. Deliberately styled apart from .othertgt: those two
+     annotations answer different questions ("what does SVG score?" vs "what
+     does the other judge score?") and reading one as the other would be a
+     silent misattribution. */
+  .xhead .judge2 { font-family: ui-monospace, monospace; font-size: 10.5px;
+                   color: var(--dim); margin-right: 10px; white-space: nowrap;
+                   border-left: 2px solid var(--line); padding-left: 7px; }
+  .xhead .judge2 b { color: var(--fg); font-weight: 600; }
+
+  /* Second judge inside a scoreboard cell: subordinate to the primary figure,
+     on its own line so a scanning eye reads one column of primaries. */
+  td.val .j2 { display: block; font-size: 10px; color: var(--dim);
+               margin-top: 1px; }
+
+  /* Panels: a model's targets forced onto one row, side by side. */
+  .pairrow { grid-column: 1 / -1; display: grid; gap: 16px; }
+
+  /* Scoreboard: the second target of a sample reads as a continuation. */
+  table.score td.tgtcell { font-family: ui-monospace, monospace; font-size: 10.5px;
+                           color: var(--accent); text-align: left; }
+  table.score tr.contd td:first-child { border-bottom-color: transparent; }
+  table.score tr.contd td { border-top: none; }
+
+  /* frame slideshow (metrics tab only) -- the video plays at 2fps and
+     cannot be stepped; judging a per-frame metric means looking at the
+     frame the judge was actually shown. */
+  .xslides { background: var(--panel); border: 1px solid var(--line);
+             border-radius: 6px; padding: 12px 14px; margin-bottom: 18px; }
+  .xslides h3 { margin: 0 0 9px; font-size: 12px; font-weight: 600;
+                color: var(--fg); display: flex; align-items: baseline; gap: 10px; }
+  .xslides h3 .tag { font-size: 10px; color: var(--dim); font-weight: 500; }
+  .xslides .stage { background: var(--panel2); border: 1px solid var(--line);
+                    border-radius: 4px; display: flex; align-items: center;
+                    justify-content: center; min-height: 260px; overflow: hidden; }
+  .xslides .stage img { max-width: 100%; max-height: 62vh; display: block; }
+  .xslides .ctl { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .xslides .ctl button { background: var(--panel2); color: var(--fg);
+                         border: 1px solid var(--line); border-radius: 4px;
+                         padding: 4px 10px; font-size: 12px; cursor: pointer;
+                         font-family: inherit; }
+  .xslides .ctl button:hover { border-color: var(--accent); }
+  .xslides .ctl input[type=range] { flex: 1; accent-color: var(--accent); }
+  .xslides .ctl .pos { font-family: ui-monospace, monospace; font-size: 11.5px;
+                       color: var(--dim); min-width: 8ch; text-align: right; }
+  .xslides .hint { font-size: 11px; color: var(--dim); margin-top: 7px; }
+
   /* presentation panel */
   .talk .meta { font-size: 11px; color: var(--dim); margin-top: 6px; }
   .talk .meta a { color: var(--accent); }
@@ -191,6 +283,7 @@
     <div class="tabs">
       <button class="tab active" id="tab-panels" onclick="showView('panels')">Panels</button>
       <button class="tab" id="tab-table" onclick="showView('table')">Scoreboard</button>
+      <button class="tab" id="tab-overview" onclick="showView('overview')">All models</button>
       <button class="tab" id="tab-explain" onclick="showView('explain')">Metrics</button>
     </div>
   </div>
@@ -202,10 +295,20 @@
     <div class="controls" style="margin-bottom:12px">
       <span><label>Model</label><select id="tbl-model" onchange="loadTable()"></select></span>
       <span id="tbl-status" class="sub" style="margin:0"></span>
+      <label id="j2-wrap" class="sub" style="margin:0; display:none;
+             align-items:center; gap:5px; cursor:pointer;">
+        <input type="checkbox" id="j2-toggle"
+               onchange="toggleJudge2(this.checked)"> <span id="j2-label"></span>
+      </label>
     </div>
     <div class="tblwrap"><table class="score" id="scoreboard"></table></div>
   </div>
-  <div id="view-explain" class="view">
+  <div id="view-overview" class="view">
+    <div id="ov-status" class="sub"></div>
+    <div class="tblwrap"><table class="score ov" id="ov-table"></table></div>
+  </div>
+
+<div id="view-explain" class="view">
     <div class="controls" style="margin-bottom:14px">
       <span><label>Model</label><select id="xp-model" onchange="loadExplain()"></select></span>
       <span id="xp-status" class="sub" style="margin:0"></span>
@@ -217,6 +320,8 @@
 <script>
 const $ = s => document.querySelector(s);
 let INDEX = null;
+// sample id -> its one style, in a study view. Empty for a full-bench view.
+let CELL_STYLE = null;
 
 async function boot() {
   INDEX = await (await fetch("/api/index")).json();
@@ -224,6 +329,19 @@ async function boot() {
     .map(s => `<option value="${s.id}">${s.id}${s.has_reference ? "" : " (no reference)"}</option>`)
     .join("");
   $("#style").innerHTML = INDEX.styles.map(s => `<option value="${s}">${s}</option>`).join("");
+  // STUDY VIEW: each sample was generated for exactly one style, so the style
+  // selector follows the sample instead of being a free choice. Leaving it free
+  // lets a reader select a (sample, style) cell nobody ever ran and read the
+  // empty panels as a pipeline failure rather than as "not part of this study".
+  if (INDEX.cells) {
+    CELL_STYLE = Object.fromEntries(INDEX.cells.map(c => [c.id, c.style]));
+    pinStyle();
+    // The style follows the sample, so the control has exactly one option and
+    // changing it is impossible. Hidden rather than disabled: a greyed-out
+    // dropdown still reads as "there are other styles here", and there are not.
+    const sel = $("#style");
+    if (sel && sel.parentElement) sel.parentElement.style.display = "none";
+  }
   const modelOpts = INDEX.models
     .map(m => `<option value="${esc(m.label)}">${esc(m.label)}</option>`).join("");
   $("#tbl-model").innerHTML = modelOpts;
@@ -231,19 +349,37 @@ async function boot() {
   load();
 }
 
+// Narrow the style selector to the current sample's own style. The option is
+// still rendered (rather than the control being hidden) so the reader can see
+// WHICH style this cell is, which is part of what the comparison is about.
+function pinStyle() {
+  if (!CELL_STYLE) return;
+  const style = CELL_STYLE[$("#sample").value];
+  if (!style) return;
+  $("#style").innerHTML = `<option value="${style}">${style}</option>`;
+  $("#style").value = style;
+}
+
 function onSampleOrStyleChange() {
+  pinStyle();
   load();
   if ($("#view-table").classList.contains("active")) loadTable();
   if ($("#view-explain").classList.contains("active")) loadExplain();
+  if ($("#view-overview") && $("#view-overview").classList.contains("active")) loadOverview();
 }
 
 function showView(name) {
-  ["panels", "table", "explain"].forEach(v => {
+  ["panels", "table", "explain", "overview"].forEach(v => {
     $(`#view-${v}`).classList.toggle("active", v === name);
     $(`#tab-${v}`).classList.toggle("active", v === name);
   });
+  // The slideshow lives only in the Metrics tab; leaving it running while
+  // hidden would keep pulling full-resolution frames for a view nobody is
+  // looking at.
+  if (name !== "explain") stopSlides();
   if (name === "table") loadTable();
   if (name === "explain") loadExplain();
+  if (name === "overview") loadOverview();
 }
 
 function panelCell(title, tag, videoUrl, stats, note, scriptId, metrics) {
@@ -299,6 +435,13 @@ function metricClass(m) {
     if (m.key === "aif") return v <= 0.1 ? "good" : (v <= 0.5 ? "mid" : "bad");
     return v <= 0.05 ? "good" : (v <= 0.25 ? "mid" : "bad");
   }
+  // The video judge uses the 0-1 range far more conservatively than the frame
+  // judge: over 64 scored cells it never went above 0.73, while the frame
+  // judge returned exactly 1.0 on 55 of them. Sharing the 0.8/0.5 cutoffs
+  // would paint every video score amber and read as "everything is mediocre",
+  // which is a statement about the two judges' calibration, not the
+  // animations. Banded against its own observed distribution instead.
+  if (m.key === "vfs_video") return v >= 0.68 ? "good" : (v >= 0.55 ? "mid" : "bad");
   return v >= 0.8 ? "good" : (v >= 0.5 ? "mid" : "bad");
 }
 
@@ -360,6 +503,12 @@ function seqPills(seq) {
   ].join("");
 }
 
+/* Whether the scoreboard also prints the second judge's number. Off by
+   default: the table is read as one model's scoreboard, and two figures per
+   cell by default would change what it means without being asked for. */
+let SHOW_JUDGE2 = false;
+function toggleJudge2(on) { SHOW_JUDGE2 = on; loadTable(); }
+
 async function loadTable() {
   const model = $("#tbl-model").value, style = $("#style").value;
   if (!model || !style) return;
@@ -367,8 +516,17 @@ async function loadTable() {
   const d = await (await fetch(`/api/table/${encodeURIComponent(model)}/${style}`)).json();
 
   const groups = d.groups;
-  const grpRow = ['<th rowspan="2">sample</th>'].concat(
-    groups.map(g => `<th colspan="${g.columns.length || 1}">${esc(g.label)}</th>`)).join("");
+  const multi = (d.targets || []).length > 1;
+  // In unified mode every row can be a different style, so the style becomes a
+  // column. Outside it, the table already IS one style and a column repeating
+  // it on every row would be noise.
+  const uni = !!d.unified;
+  // A target column only when there is more than one, so a single-target
+  // bench keeps the table it had.
+  const grpRow = ['<th rowspan="2">sample</th>']
+    .concat(uni ? ['<th rowspan="2">style</th>'] : [])
+    .concat(multi ? ['<th rowspan="2">target</th>'] : [])
+    .concat(groups.map(g => `<th colspan="${g.columns.length || 1}">${esc(g.label)}</th>`)).join("");
   const colRow = groups.flatMap(g =>
     g.columns.length
       ? g.columns.map(c => `<th title="${esc(c.what || "")}">${esc(c.label || c.key)}</th>`)
@@ -383,16 +541,47 @@ async function loadTable() {
       return g.columns.map(c => {
         const v = cell.values[c.key];
         if (v === undefined) return `<td class="val">&mdash;</td>`;
-        return `<td class="val ${metricClass({ key: c.key, value: v, better: c.better })}">${fmtMetric(v)}</td>`;
+        // The second judge's figure for the same metric, shown only when the
+        // toggle is on. Kept visually subordinate: this table is one model's
+        // scoreboard, and an unlabelled second number in it would read as the
+        // primary's.
+        const sv = (cell.second || {})[c.key];
+        const j2 = (SHOW_JUDGE2 && sv !== undefined && sv !== null)
+          ? `<span class="j2">${esc(fmtMetric(sv))}</span>` : "";
+        return `<td class="val ${metricClass({ key: c.key, value: v, better: c.better })}">${fmtMetric(v)}${j2}</td>`;
       }).join("");
     }).join("");
-    return `<tr><td title="${esc(r.title || "")}">${esc(r.id)}</td>${cells}</tr>`;
+    // Blank the id on the second target so the pair reads as one sample.
+    const idCell = `<td title="${esc(r.title || "")}">${
+      r.first_of_sample === false ? "" : esc(r.id)}</td>`;
+    const styCell = uni ? `<td class="tgtcell">${esc(r.style || "")}</td>` : "";
+    const tgtCell = multi ? `<td class="tgtcell">${esc(r.target || "")}</td>` : "";
+    const cls = r.first_of_sample === false ? ' class="contd"' : "";
+    return `<tr${cls}>${idCell}${styCell}${tgtCell}${cells}</tr>`;
   }).join("");
 
   $("#scoreboard").innerHTML =
     `<thead><tr class="grp">${grpRow}</tr><tr class="cols">${colRow}</tr></thead>
      <tbody>${bodyRows}</tbody>`;
-  $("#tbl-status").textContent = `${d.rows.length} sample(s) &middot; ${model} &middot; ${style}`;
+  // `textContent`, so an HTML entity would be shown literally -- and rows are
+  // no longer samples now that each sample contributes one row per target.
+  // Only offer the toggle when a second judge really scored these cells --
+  // a dead checkbox is worse than no checkbox.
+  const j2name = (() => {
+    for (const r of d.rows) for (const k in (r.cells || {}))
+      if (r.cells[k] && r.cells[k].second_judge) return r.cells[k].second_judge;
+    return null;
+  })();
+  const wrap = $("#j2-wrap");
+  if (wrap) {
+    wrap.style.display = j2name ? "inline-flex" : "none";
+    const lab = $("#j2-label");
+    if (lab && j2name) lab.textContent = "also show " + j2name.split("/").pop();
+  }
+  const nSamples = new Set(d.rows.map(r => r.id)).size;
+  $("#tbl-status").textContent =
+    `${nSamples} sample(s)` + (multi ? ` × ${d.targets.length} targets` : "") +
+    ` · ${model} · ${style}`;
 }
 
 /* ---- Metrics explorer -------------------------------------------------
@@ -400,6 +589,73 @@ async function loadTable() {
    this sample's own terms, and beside the evidence the metric stored. The
    point is to be able to disagree with a score: if the formula and the
    evidence do not justify the number, the metric is wrong, not the sample. */
+
+/* ALL-MODELS OVERVIEW.
+   One row per (model, cell) for every metric at once, so a sort ranks across
+   the whole study rather than within one model's table.
+
+   Ordering NEVER uses the displayed value. It uses the server's normalised
+   `sort` key, which is always higher-is-better -- `vfs_band` stores 0=BAND A
+   (best) while descriptions.py declares better="higher", so sorting the raw
+   value would put BAND D on top and look perfectly plausible. */
+let OV = null, OV_SORT = {key: null, dir: -1};
+
+async function loadOverview() {
+  $("#ov-status").textContent = "loading…";
+  OV = await (await fetch("/api/overview")).json();
+  renderOverview();
+}
+
+function ovSort(key, dir) {
+  OV_SORT = {key, dir};
+  renderOverview();
+}
+
+function renderOverview() {
+  if (!OV) return;
+  const cols = OV.columns;
+  const rows = OV.rows.slice();
+  const k = OV_SORT.key;
+  if (k) {
+    rows.sort((a, b) => {
+      const av = a.sort[k], bv = b.sort[k];
+      // Unrankable rows always sink, whichever direction is chosen -- they must
+      // never occupy the "best" end of the table by accident.
+      if (av === undefined && bv === undefined) return 0;
+      if (av === undefined) return 1;
+      if (bv === undefined) return -1;
+      return OV_SORT.dir * (av - bv);
+    });
+  }
+  const head = ['<th>model</th>', '<th>sample</th>', '<th>style</th>']
+    .concat(cols.map(c => {
+      const on = k === c.key;
+      const lbl = esc(c.label || c.key);
+      return `<th class="mcol" title="${esc(c.what || "")}">${lbl}
+        <span class="sortbtns">
+          <button class="sortb ${on && OV_SORT.dir === -1 ? "on" : ""}"
+                  title="best first" onclick="ovSort('${c.key}',-1)">&#9650;</button>
+          <button class="sortb ${on && OV_SORT.dir === 1 ? "on" : ""}"
+                  title="worst first" onclick="ovSort('${c.key}',1)">&#9660;</button>
+        </span></th>`;
+    })).join("");
+  const body = rows.map(r => {
+    const cells = cols.map(c => {
+      const v = r.values[c.key];
+      if (v === undefined) return '<td class="val">&mdash;</td>';
+      return `<td class="val ${metricClass({key: c.key, value: v, better: c.better})}"
+                  title="${esc(String(v))}">${fmtMetric(v)}</td>`;
+    }).join("");
+    return `<tr><td class="mdl">${esc(r.model)}</td>`
+         + `<td class="smp" title="${esc(r.sample)}">${esc(r.sample)}</td>`
+         + `<td class="sty">${esc(r.style)}</td>${cells}</tr>`;
+  }).join("");
+  $("#ov-table").innerHTML =
+    `<thead><tr class="cols">${head}</tr></thead><tbody>${body}</tbody>`;
+  $("#ov-status").textContent =
+    `${rows.length} row(s) · ${OV.models.length} model(s) · ${OV.cells} cell(s)`
+    + (k ? ` · sorted by ${k} (${OV_SORT.dir === -1 ? "best first" : "worst first"})` : "");
+}
 
 function evidenceTable(ev) {
   const rows = Object.entries(ev).map(([k, v]) => {
@@ -431,14 +687,41 @@ function fmtCell(v) {
   return String(v);
 }
 
-function explainMetric(m, uid) {
+/* The value for the target currently selected by the Metrics sub-tabs.
+   One number per row, in the same place for every target, so switching
+   between TikZ and SVG compares like with like instead of asking the reader
+   to track two figures crammed onto one line. `delta` carries the other
+   target's number as a quiet annotation rather than a competing headline. */
+function targetValues(m, targets) {
+  const active = XP_TARGET;
+  const has = m.by_target && Object.prototype.hasOwnProperty.call(m.by_target, active);
+  const v = has ? m.by_target[active] : m.value;
+  const cls = (v === null || v === undefined)
+    ? "" : metricClass({ key: m.key, value: v, better: m.better });
+  let other = "";
+  if (targets && targets.length > 1 && m.by_target) {
+    const others = targets.filter(tg => tg !== active)
+      .map(tg => `${tg} ${fmtMetric(m.by_target[tg])}`);
+    if (others.length) other = `<span class="othertgt">${esc(others.join("  "))}</span>`;
+  }
+  // The second judge's number for the SAME target, when one scored this cell.
+  let j2 = "";
+  if (m.second_by_target) {
+    const sv = m.second_by_target[active];
+    if (sv !== null && sv !== undefined)
+      j2 = `<span class="judge2">2nd <b>${esc(fmtMetric(sv))}</b></span>`;
+  }
+  return `${j2}${other}<span class="v ${cls}">${fmtMetric(v)}</span>`;
+}
+
+function explainMetric(m, uid, targets) {
   const hasEv = m.evidence && Object.keys(m.evidence).length;
   return `
     <div class="xmetric">
       <div class="xhead">
         <span class="nm">${esc(m.label || m.key)}</span>
         <span class="key">${esc(m.key)}${m.doc ? " · " + esc(m.doc) : ""}</span>
-        <span class="v ${metricClass(m)}">${fmtMetric(m.value)}</span>
+        ${targetValues(m, targets)}
       </div>
       ${m.formula ? `<div class="xformula">${esc(m.formula)}${
         m.instantiated
@@ -548,10 +831,16 @@ function animNode(node) {
   </div>`;
 }
 
-async function loadAnimation(model, id, style) {
+async function loadAnimation(model, id, style, target) {
   let d;
   try {
-    d = await (await fetch(`/api/animation/${encodeURIComponent(model)}/${id}/${style}`)).json();
+    // `target` is not optional in a multi-target view: without it this block
+    // answers for the primary target while the sub-tab above says "svg", and
+    // every prompt, call count and per-frame verdict below belongs to the
+    // other representation with nothing on screen to say so.
+    const q = target ? `?target=${encodeURIComponent(target)}` : "";
+    d = await (await fetch(
+      `/api/animation/${encodeURIComponent(model)}/${id}/${style}${q}`)).json();
   } catch (e) { return ""; }
   if (!d || !d.scored) return "";
   const head = [`<b>${d.total_calls}</b> judged call(s) for this cell`];
@@ -572,10 +861,18 @@ async function loadAnimation(model, id, style) {
   const unenf = (d.unenforced_rules || []).length ? `
     <div class="xnote"><b>Rules no single-frame call can enforce:</b><br>
       ${d.unenforced_rules.map(esc).join("<br>")}</div>` : "";
-  return `<div class="xsuite"><h2>Animation evaluation tree</h2>
+  return `<div class="xsuite"><h2>Animation evaluation tree${
+      target ? ` <span class="key">${esc(target)}</span>` : ""}</h2>
     <div class="sub">${head.join(" &middot; ")}</div>${unenf}${cl}
     ${(d.nodes || []).map(animNode).join("")}</div>`;
 }
+
+/* Which target the Metrics tab is showing. Sub-tabs switch it; the layout
+   underneath is identical for every target, which is the point -- a metric
+   sits in the same place whichever representation you are reading. */
+let XP_TARGET = "tikz";
+
+function setXpTarget(tg) { XP_TARGET = tg; loadExplain(); }
 
 async function loadExplain() {
   const id = $("#sample").value, style = $("#style").value,
@@ -591,14 +888,39 @@ async function loadExplain() {
   const vid = u => u ? `<video controls preload="metadata" loop src="${u}"></video>`
                      : `<div class="missing">not generated</div>`;
 
-  const out = [`
+  // Keep the selection valid when the sample or model changes.
+  if (!(d.targets || []).includes(XP_TARGET)) XP_TARGET = d.primary_target || (d.targets || ["tikz"])[0];
+
+  const out = [];
+  if ((d.targets || []).length > 1) {
+    out.push(`<div class="xtargets">` + d.targets.map(tg =>
+      `<button class="xtab ${tg === XP_TARGET ? "active" : ""}"
+               onclick="setXpTarget('${tg}')">${esc(tg)}</button>`).join("") +
+      `<span class="hintline">same layout for every target &mdash; switch to
+        compare the same metric in the same place</span></div>`);
+  }
+  // Media follows the active sub-tab, falling back to the top-level fields
+  // for a single-target model.
+  const mt = (d.media_by_target || {})[XP_TARGET] || {};
+  const render = mt.render || d.render;
+  const pipeVid = mt.pipeline_video !== undefined ? mt.pipeline_video : d.pipeline_video;
+  const refVid = mt.reference_video !== undefined ? mt.reference_video : d.reference_video;
+  out.push(`
     <div class="xrow">
       ${media("Source figure", "input", `<img src="${d.figure}">`)}
-      ${media("Compiled diagram", "stage 1",
-              `<img src="${d.render}" onerror="this.outerHTML='<div class=missing>does not compile</div>'">`)}
-      ${media("Reference animation", "ground truth", vid(d.reference_video))}
-      ${media("Our animation", esc(d.model || ""), vid(d.pipeline_video))}
-    </div>`];
+      ${media("Compiled diagram", "stage 1 · " + esc(XP_TARGET),
+              `<img src="${render}" onerror="this.outerHTML='<div class=missing>does not compile</div>'">`)}
+      ${media("Reference animation", "ground truth · " + esc(XP_TARGET), vid(refVid))}
+      ${media("Our animation", esc(d.model || "") + " · " + esc(XP_TARGET),
+              vid(pipeVid))}
+    </div>`);
+
+  // Frame slideshow. The mp4 plays at 2fps and cannot be stepped, but every
+  // per-frame metric below (ASCS, omission, repetition) was computed on ONE
+  // frame at a time -- so reading a per-frame verdict means being able to
+  // stop on the exact frame the judge was shown.
+  out.push(slideshow({ ...d, frames: mt.frames !== undefined ? mt.frames : d.frames },
+                     model, id, style, XP_TARGET));
 
   if (!d.scored) {
     out.push(`<div class="xnote"><p>This sample has not been scored for
@@ -610,10 +932,11 @@ async function loadExplain() {
 
   let n = 0;
   for (const s of d.suites) {
-    const metrics = s.metrics.map(m => explainMetric(m, `ev${n++}`)).join("");
+    const metrics = s.metrics.map(m => explainMetric(m, `ev${n++}`, d.targets)).join("");
     out.push(`
       <div class="xsuite">
-        <h2>${esc(s.title || s.label)}</h2>
+        <h2>${esc(s.title || s.label)}${s.second_judge
+          ? ` <span class="key">2nd = ${esc(s.second_judge)}</span>` : ""}</h2>
         ${s.note ? `<div class="xnote">${
           s.note.split("\n\n").map(p => `<p>${mdBold(p)}</p>`).join("")}</div>` : ""}
         ${s.example ? `<div class="xnote xeg">
@@ -627,7 +950,7 @@ async function loadExplain() {
 
   if (d.scored) out.push(alignmentBlock(d.alignment || {}));
 
-  const animBlock = await loadAnimation(model, id, style);
+  const animBlock = await loadAnimation(model, id, style, XP_TARGET);
   if (animBlock) out.push(animBlock);
 
   const p = d.provenance;
@@ -639,6 +962,76 @@ async function loadExplain() {
   $("#xp-body").innerHTML = out.join("");
   $("#xp-status").textContent = d.scored
     ? `${d.suites.length} suite(s) · ${d.frames} frame(s)` : "not scored";
+}
+
+/* ---- Frame slideshow (Metrics tab only) -----------------------------
+   Steppable frames, which the 2fps mp4 is not. Every per-frame metric in
+   this tab -- ASCS verdicts, omission pops, repetition counts -- was judged
+   on a single frame, so the evidence is only checkable if you can stop on
+   that frame.
+
+   Frames are served one at a time by /api/frame/<label>/<id>/<style>/<i>
+   rather than preloaded: a 26-frame deck at full resolution is tens of MB,
+   and the browser only ever needs the one on screen. */
+const SLIDES = { timer: null, i: 0, n: 0, base: "", q: "" };
+
+function slideshow(d, label, id, style, target) {
+  stopSlides();
+  SLIDES.n = d.frames || 0;
+  SLIDES.i = 0;
+  SLIDES.base = `/api/frame/${encodeURIComponent(label)}/${id}/${style}`;
+  SLIDES.q = target ? `?target=${encodeURIComponent(target)}` : "";
+  if (!SLIDES.n) {
+    return `<div class="xslides"><h3>Frames <span class="tag">slideshow</span></h3>
+      <div class="missing">no exported frames for this cell</div></div>`;
+  }
+  return `
+    <div class="xslides">
+      <h3>Frames <span class="tag">${SLIDES.n} frame(s) &middot; what the
+        per-frame judges each saw</span></h3>
+      <div class="stage"><img id="sl-img" src="${SLIDES.base}/0${SLIDES.q}" alt="frame 1"></div>
+      <div class="ctl">
+        <button onclick="stepSlide(-1)" title="previous frame">&#9664;</button>
+        <button id="sl-play" onclick="toggleSlides()">&#9654; play</button>
+        <button onclick="stepSlide(1)" title="next frame">&#9654;&#9654;</button>
+        <input id="sl-range" type="range" min="0" max="${SLIDES.n - 1}" value="0"
+               oninput="showSlide(+this.value)">
+        <span class="pos" id="sl-pos">1 / ${SLIDES.n}</span>
+      </div>
+      <div class="hint">Frames are in playback order, the same order the judges
+        walked. A node that samples a subset (sliding bounding box scores
+        omission and repetition on every 4th frame) names the frames it
+        actually saw in its own <code>frame</code> field below.</div>
+    </div>`;
+}
+
+function showSlide(i) {
+  if (!SLIDES.n) return;
+  SLIDES.i = (i + SLIDES.n) % SLIDES.n;
+  const img = document.getElementById("sl-img");
+  const range = document.getElementById("sl-range");
+  const pos = document.getElementById("sl-pos");
+  if (!img) return stopSlides();          // view was re-rendered underneath us
+  img.src = `${SLIDES.base}/${SLIDES.i}${SLIDES.q || ""}`;
+  img.alt = `frame ${SLIDES.i + 1}`;
+  if (range) range.value = SLIDES.i;
+  if (pos) pos.textContent = `${SLIDES.i + 1} / ${SLIDES.n}`;
+}
+
+function stepSlide(delta) { stopSlides(); showSlide(SLIDES.i + delta); }
+
+function stopSlides() {
+  if (SLIDES.timer) { clearInterval(SLIDES.timer); SLIDES.timer = null; }
+  const b = document.getElementById("sl-play");
+  if (b) b.innerHTML = "&#9654; play";
+}
+
+function toggleSlides() {
+  if (SLIDES.timer) return stopSlides();
+  // 2fps, matching the exporter's own fps so the pacing matches the mp4.
+  SLIDES.timer = setInterval(() => showSlide(SLIDES.i + 1), 500);
+  const b = document.getElementById("sl-play");
+  if (b) b.innerHTML = "&#10073;&#10073; pause";
 }
 
 /* The suite notes use **bold** for the one or two phrases that carry the
@@ -681,28 +1074,47 @@ async function load() {
       </div>`);
   }
 
-  // 3. The benchmark's own animation for this style.
+  // 3. The benchmark's own animation for this style -- one per target
+  // actually in play among the panels below, so a tikz model is paired
+  // against the tikz reference and an svg model against the svg one rather
+  // than everything being compared to a single hardcoded tikz video.
   const revs = (d.reference.reviews || [])
     .filter(r => (r.questionnaire || []).length)
     .map(r => `v${r.version}: ${r.questionnaire.join(", ")}`).join(" · ");
-  cells.push(panelCell(
-    "Reference (AnimateBench)", "tikz · full context",
-    d.reference.video,
-    revs ? `<span class="pill warn">human review: ${revs}</span>` : "",
-    d.reference.available_keys.length
-      ? "no tikz/full-context video for this style"
-      : "no reference videos imported",
-    "script-ref"));
+  const refTargets = Object.keys(d.references || {}).sort();
+  refTargets.forEach(target => {
+    const ref = d.references[target];
+    cells.push(panelCell(
+      `Reference (AnimateBench)`, `${target} · full context`,
+      ref.video,
+      revs ? `<span class="pill warn">human review: ${revs}</span>` : "",
+      d.reference.available_keys.length
+        ? `no ${target}/full-context video for this style`
+        : "no reference videos imported",
+      `script-ref-${target}`));
+  });
 
   // 3-5. One per model.
-  d.panels.forEach((p, i) => {
+  // Group a model's targets into ONE full-width row so tikz and svg sit
+  // literally side by side. Left to the 2-column grid they land on separate
+  // rows whenever the count ahead of them is odd, which is exactly the
+  // comparison the pair exists to make.
+  const byModel = {};
+  d.panels.forEach((p, i) => { (byModel[p.model_label || p.label] ||= []).push({ p, i }); });
+  Object.entries(byModel).forEach(([, group]) => {
+    if (group.length > 1) {
+      cells.push(`<div class="pairrow" style="grid-template-columns:repeat(${group.length},minmax(0,1fr))">`);
+    }
+    group.forEach(({ p, i }) => {
     cells.push(panelCell(
-      p.label, p.model, p.video,
+      p.label, `${p.model} · ${p.target}`, p.video,
       seqPills(p.sequence) +
         (p.frames ? `<span class="pill">${p.frames} frames</span>` : "") +
         (!p.video && p.code ? `<span class="pill warn">code, no render</span>` : ""),
       p.code ? "animation code exists but did not render" : "not generated yet",
       `script-${i}`, p.metrics));
+    });
+    if (group.length > 1) cells.push(`</div>`);
   });
 
   $("#grid").innerHTML = cells.join("");
@@ -710,15 +1122,22 @@ async function load() {
   $("#status").textContent = `${done}/${d.panels.length} model outputs ready`;
 
   // Narration is fetched per panel after the grid renders, so a slow or
-  // missing script never delays the videos appearing.
-  loadScript("script-ref", `/api/reference-sequence/${id}/${style}`, j => j);
+  // missing script never delays the videos appearing. One reference
+  // narration fetch per target shown, matching the reference cells above.
+  refTargets.forEach(target => {
+    loadScript(`script-ref-${target}`,
+      `/api/reference-sequence/${id}/${style}?target=${target}`, j => j);
+  });
   d.panels.forEach((p, i) => {
     if (!p.sequence) {
       renderScript(document.getElementById(`script-${i}`), null, "no sequence generated");
       return;
     }
+    // p.label may read "Model · svg"; the endpoint wants the bare label plus
+    // an explicit target, so send p.target rather than parsing the caption.
     loadScript(`script-${i}`,
-      `/api/sequence/${encodeURIComponent(p.label)}/${id}/${style}`, j => j.bench);
+      `/api/sequence/${encodeURIComponent(p.model_label || p.label)}/${id}/${style}` +
+      `?target=${encodeURIComponent(p.target || "")}`, j => j.bench);
   });
 }
 

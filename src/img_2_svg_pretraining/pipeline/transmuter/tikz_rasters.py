@@ -155,3 +155,21 @@ def splice(code: str, replacements: dict[str, str]) -> tuple[str, list[str]]:
             code = code[: end + 1] + "\\usepackage{graphicx}\n" + code[end + 1:]
 
     return code, list(reversed(replaced))
+
+
+def document_extent(code: str) -> tuple[float, float] | None:
+    """TikZ has no declared drawing extent, and that is the honest answer.
+
+    An SVG states its coordinate space up front in `viewBox`. A TikZ picture's
+    extent is whatever the compiled result happens to occupy -- it emerges from
+    every node, path and label in the document and is not knowable without
+    running LaTeX. Guessing it from the union of raster placeholders would be
+    wrong in the one direction that matters, since placeholders are by
+    definition a subset of the drawing.
+
+    Returning `None` is not a gap here. The rendered figure is a crop of the
+    finished picture, so the picture's aspect and the image's aspect already
+    agree, and the caller's correction factor collapses to 1 -- which is exactly
+    the behaviour that was correct for TikZ all along.
+    """
+    return None

@@ -41,7 +41,33 @@ class ImagePart:
         return f"data:{self.media_type()};base64,{self.to_base64()}"
 
 
-Part = TextPart | ImagePart
+@dataclass
+class VideoPart:
+    """A video referenced by path.
+
+    Same path-not-bytes rationale as ImagePart. Note that unlike an image, a
+    video's bytes ARE hashed into the response-cache fingerprint (see
+    `base._fingerprint`): two cells can share a prompt and a source image and
+    differ only in the video, and without hashing it they would collide on one
+    cache entry and the second cell would be served the first one's verdict.
+    """
+    path: Path
+
+    def read_bytes(self) -> bytes:
+        return Path(self.path).read_bytes()
+
+    def media_type(self) -> str:
+        guessed, _ = mimetypes.guess_type(str(self.path))
+        return guessed or "video/mp4"
+
+    def to_base64(self) -> str:
+        return base64.b64encode(self.read_bytes()).decode("ascii")
+
+    def to_data_url(self) -> str:
+        return f"data:{self.media_type()};base64,{self.to_base64()}"
+
+
+Part = TextPart | ImagePart | VideoPart
 
 
 @dataclass
@@ -50,10 +76,17 @@ class Message:
     content: list[Part]
 
     @classmethod
-    def user(cls, text: str, images: list[Path] | None = None) -> "Message":
+    def user(cls, text: str, images: list[Path] | None = None,
+             videos: list[Path] | None = None) -> "Message":
         """Build a user turn. Images precede text, which is what the chat VLMs
-        in this project were prompted with in benchmark/infer.py and edges.py."""
+        in this project were prompted with in benchmark/infer.py and edges.py.
+
+        Videos sit between the two, so a prompt reading "the original diagram
+        as a still image, followed by a video" describes the actual part order.
+        That ordering is load-bearing for the video fidelity prompt.
+        """
         parts: list[Part] = [ImagePart(Path(p)) for p in (images or [])]
+        parts.extend(VideoPart(Path(p)) for p in (videos or []))
         parts.append(TextPart(text))
         return cls(role="user", content=parts)
 
@@ -71,6 +104,9 @@ class Message:
 
     def images(self) -> list[ImagePart]:
         return [p for p in self.content if isinstance(p, ImagePart)]
+
+    def videos(self) -> list[VideoPart]:
+        return [p for p in self.content if isinstance(p, VideoPart)]
 
 
 @dataclass

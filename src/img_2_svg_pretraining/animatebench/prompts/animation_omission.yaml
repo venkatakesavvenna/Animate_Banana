@@ -29,9 +29,14 @@ frames: |
   everything that has not already been popped by an earlier frame.
 
   *** GENERIC INSTRUCTIONS ***
-  1. Checklist Popping: Observe which of the still-outstanding elements make an appearance in THIS
-  frame. Report every element that appears here as popped. Consider only the outstanding list;
-  anything already popped by an earlier frame is not your concern.
+  1. Frequency-Aware Popping (CRITICAL): Each outstanding entry carries a count -- how many
+  physically distinct elements still bear that label and have not yet been seen (e.g.
+  `Layer Norm (x2)` means two distinct instances remain outstanding). Observe what visually
+  appears in THIS frame and report, for each label, how many DISTINCT instances of it you can see
+  appearing in this frame. Report that as `instances_seen`. If a label has 2 outstanding and you
+  can see only one instance in this frame, report `instances_seen: 1` -- the other may appear in a
+  later frame. Never report more instances than are outstanding for that label. Consider only the
+  outstanding list; anything already fully popped by an earlier frame is not your concern.
   2. Semantic Mapping for Unlabeled Elements (CRITICAL): Some items in the checklist do not have
   explicit text labels in the image; they were given descriptive, semantic names (e.g., "Watermark
   Decoder" for an empty blue box). Do NOT assume an element is missing just because its text isn't
@@ -106,9 +111,9 @@ schema_progressive_reveal: |
     "frame_label": "string - the frame being evaluated",
     "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
     "elements_popped_in_this_frame": {
-      "blocks": ["List of block names popped"],
-      "nodes": ["List of node names popped"],
-      "edges": ["List of edge names popped"]
+      "blocks": [{"label": "Block Name", "instances_seen": 1}],
+      "nodes": [{"label": "Node Name", "instances_seen": 1}],
+      "edges": [{"label": "Edge Name", "instances_seen": 1}]
     }
   }
 
@@ -117,9 +122,9 @@ schema_alpha_masking: |
     "frame_label": "string - the frame being evaluated",
     "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
     "elements_popped_in_this_frame": {
-      "blocks": ["List of block names popped"],
-      "nodes": ["List of node names popped"],
-      "edges": ["List of edge names popped"]
+      "blocks": [{"label": "Block Name", "instances_seen": 1}],
+      "nodes": [{"label": "Node Name", "instances_seen": 1}],
+      "edges": [{"label": "Edge Name", "instances_seen": 1}]
     }
   }
 
@@ -128,9 +133,9 @@ schema_colour_pop: |
     "frame_label": "string - the frame being evaluated",
     "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
     "elements_popped_in_this_frame": {
-      "blocks": ["List of block names popped"],
-      "nodes": ["List of node names popped"],
-      "edges": ["List of edge names popped"]
+      "blocks": [{"label": "Block Name", "instances_seen": 1}],
+      "nodes": [{"label": "Node Name", "instances_seen": 1}],
+      "edges": [{"label": "Edge Name", "instances_seen": 1}]
     }
   }
 
@@ -139,8 +144,8 @@ schema_hopping_bounding_box: |
     "frame_label": "string - the frame being evaluated",
     "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
     "elements_popped_in_this_frame": {
-      "blocks": ["List of block names popped"],
-      "nodes": ["List of node names popped"]
+      "blocks": [{"label": "Block Name", "instances_seen": 1}],
+      "nodes": [{"label": "Node Name", "instances_seen": 1}]
     }
   }
 
@@ -149,7 +154,7 @@ schema_sliding_bounding_box: |
     "frame_label": "string - the frame being evaluated",
     "reasoning": "Detailed rationale of what newly appeared in THIS frame. Explicitly state how you visually identified any unlabeled/semantically-named blocks.",
     "elements_popped_in_this_frame": {
-      "blocks": ["List of block names popped"],
-      "nodes": ["List of node names popped"]
+      "blocks": [{"label": "Block Name", "instances_seen": 1}],
+      "nodes": [{"label": "Node Name", "instances_seen": 1}]
     }
   }

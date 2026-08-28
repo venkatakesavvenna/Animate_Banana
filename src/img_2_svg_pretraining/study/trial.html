@@ -1,0 +1,432 @@
+<meta charset="utf-8">
+<title>AnimateBanana study</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#ffffff;--panel2:#eef1f5;--line:#d8dee6;--fg:#1a1d23;
+      --dim:#5f6b7a;--accent:#2563eb;--ok:#0f9d6e;--warn:#b7791f;--bad:#d13438}
+*{box-sizing:border-box}
+/* The page scrolls as one document. An earlier version was a fixed 100vh
+   shell with overflow:hidden, which let the players eat the viewport and
+   left the questions squeezed into whatever remained, with no way to reach
+   the rest. The figure is pinned instead -- it has to stay visible while
+   answering, but nothing else needs to be trapped. */
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+#top{height:46px;display:flex;align-items:center;gap:14px;padding:0 16px;
+     border-bottom:1px solid var(--line);background:var(--panel);
+     position:sticky;top:0;z-index:20}
+#top .t{font-weight:600}
+#top .style{color:var(--dim);font-size:13px}
+#prog{margin-left:auto;color:var(--dim);font-size:13px}
+#bar{position:fixed;top:46px;left:0;height:2px;background:var(--accent);
+     width:0;transition:width .3s;z-index:21}
+/* Above the fold, before the media -- the instruction has to be read before
+   the participant starts scrolling, not discovered after. */
+#unlockbar{position:sticky;top:46px;z-index:22;display:flex;align-items:center;
+           gap:12px;padding:10px 18px;background:#fff7e6;color:#7a5b12;
+           border-bottom:1px solid #f0d9a8;font-size:14px;font-weight:600}
+#unlockprog{margin-left:auto;font-weight:400;font-variant-numeric:tabular-nums}
+#unlockbar.done{background:#e8f7f0;color:#0f6b4d;border-bottom-color:#bfe6d5}
+
+#main{display:flex;align-items:flex-start}
+/* Full height, not max-height: the panel and its border used to stop at the
+   height of a small figure, leaving a dead column below it. And wide enough to
+   read -- this is the thing every answer is judged against, so it must not be
+   a thumbnail beside a huge animation. */
+#figure{width:38%;min-width:300px;max-width:560px;border-right:1px solid var(--line);
+        display:flex;flex-direction:column;background:var(--panel);
+        position:sticky;top:87px;height:calc(100vh - 87px)}
+body.unlocked #figure{top:46px;height:calc(100vh - 46px)}
+#figure h3{margin:0;padding:10px 14px;font-size:12px;text-transform:uppercase;
+           letter-spacing:.06em;color:var(--dim);border-bottom:1px solid var(--line)}
+#figwrap{flex:1;overflow:auto;padding:14px 12px;display:flex;flex-direction:column;
+         align-items:center;justify-content:flex-start;gap:10px;min-height:0}
+#figimg{max-width:100%;background:#fff;border-radius:4px;cursor:zoom-in}
+#figimg.zoom{cursor:zoom-out;width:220%;max-width:none}
+/* Inside the scroll area, directly under the image. Pinned to the bottom of a
+   full-height column it read as belonging to nothing. */
+#figcap{font-size:12px;color:var(--dim);text-align:center;max-width:46ch}
+
+#right{flex:1;min-width:0;display:flex;flex-direction:column}
+/* The animations stay put while the questions scroll beneath them. You are
+   judging the stimulus, so it must never be the thing that scrolls away. */
+#players{display:flex;gap:14px;padding:14px 18px 4px;
+         position:sticky;top:87px;z-index:5;background:var(--bg)}
+body.unlocked #players{top:46px}   /* the bar is gone once unlocked */
+#players > div{flex:1;min-width:0}
+#qwrap{border-top:1px solid var(--line);padding:18px 18px 120px}
+#intro{color:var(--dim);font-size:12.5px;margin-bottom:16px;max-width:78ch;
+       line-height:1.45;opacity:.8}
+
+/* ---- player ---- */
+.player{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px}
+.pl-tabs{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.pl-tab{background:var(--panel2);color:var(--dim);border:1px solid var(--line);
+        border-radius:5px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer}
+.pl-tab.pl-on{background:var(--accent);color:#ffffff;border-color:var(--accent);font-weight:600}
+.pl-badge{margin-left:auto;font-size:11px;color:var(--warn);
+          border:1px solid var(--warn);border-radius:10px;padding:1px 9px}
+.pl-badge.pl-ok{color:var(--ok);border-color:var(--ok)}
+.pl-stage{position:relative;background:#fff;border-radius:5px;overflow:hidden;display:flex;
+          align-items:center;justify-content:center;min-height:180px;
+          /* Capped: a tall figure would otherwise push every question below
+             the fold before the participant has read one. */
+          max-height:34vh}
+.pl-frame{width:100%;height:100%;object-fit:contain;display:block}
+/* Progressive reveal starts with an all-but-empty canvas, so without this the
+   participant's first sight of the stimulus is a blank white rectangle that
+   looks like a load failure. The hint says nothing about the content -- a
+   poster frame would have shown the finished diagram before they watched it. */
+.pl-hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);
+         pointer-events:none;background:rgba(26,29,35,.86);color:#e6e8ec;
+         font-size:12px;letter-spacing:.02em;padding:4px 12px;border-radius:12px;
+         white-space:nowrap}
+.pl-started .pl-hint{display:none}
+/* Narration is the thing being rated in Exp2/3/5, so it gets its own voice:
+   a serif face at reading size, clearly not UI chrome. */
+.pl-cue{min-height:52px;padding:12px 14px;margin-top:8px;
+        background:#fffdf6;border:1px solid #ece3cd;border-left:3px solid var(--accent);
+        border-radius:5px;font-size:16px;line-height:1.6;color:#2a2f38;
+        font-family:Georgia,"Iowan Old Style","Times New Roman",serif}
+.pl-controls{display:flex;align-items:center;gap:8px;margin-top:8px}
+.pl-play{background:var(--accent);color:#ffffff;border:0;border-radius:5px;
+         padding:7px 16px;font:inherit;font-weight:600;cursor:pointer;min-width:88px}
+.pl-seek{flex:1}
+.pl-seek:disabled{opacity:.35}
+.pl-time{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+.pl-speed{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px;color:var(--dim)}
+.pl-speed input{flex:1;max-width:150px}
+.pl-replay{margin-left:auto;background:var(--panel2);color:var(--fg);
+           border:1px solid var(--line);border-radius:5px;padding:5px 12px;
+           font:inherit;font-size:12px;cursor:pointer}
+.pl-label{font-size:12px;color:var(--dim);font-weight:600;letter-spacing:.03em}
+.pl-stage{cursor:zoom-in}
+.pl-step{position:absolute;right:8px;top:8px;background:rgba(26,29,35,.72);
+         color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;
+         font-variant-numeric:tabular-nums}
+.pl-controls{padding:0 2px}
+
+/* ---- fullscreen ---- */
+body.fs-locked{overflow:hidden}
+#fsview{position:fixed;inset:0;background:rgba(12,14,18,.94);z-index:200;
+        display:none;flex-direction:column;padding:18px 22px 22px}
+#fsview.fs-on{display:flex}
+.fs-bar{display:flex;align-items:center;gap:14px;color:#e6e8ec;margin-bottom:12px}
+.fs-title{font-weight:600}
+.fs-step{color:#9aa3af;font-size:13px;font-variant-numeric:tabular-nums}
+.fs-close{margin-left:auto;background:#2b313b;color:#e6e8ec;border:1px solid #3a424f;
+          border-radius:6px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer}
+.fs-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+          background:#fff;border-radius:8px;overflow:auto}
+.fs-stage img{max-width:100%;max-height:100%;object-fit:contain}
+.fs-cue{margin-top:12px;padding:12px 16px;background:#fffdf6;border-radius:6px;
+        border-left:3px solid var(--accent);font-size:17px;line-height:1.6;color:#2a2f38;
+        font-family:Georgia,"Iowan Old Style","Times New Roman",serif;max-width:110ch}
+.fs-controls{display:flex;align-items:center;gap:12px;margin-top:12px}
+.fs-seek{flex:1}
+#fsview.fs-still .fs-controls,#fsview.fs-still .fs-cue{display:none}
+#figimg{cursor:zoom-in}
+.pl-keys{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:var(--dim)}
+.pl-key{display:inline-flex;align-items:center;justify-content:center;min-width:26px;
+        height:24px;border:1px solid var(--line);border-radius:5px;background:var(--panel2);
+        font-size:13px;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
+.pl-key-on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.pl-keyhint{margin-left:2px}
+.pl-progress{margin-left:auto;font-variant-numeric:tabular-nums}
+
+.qf-locked{color:var(--dim);background:var(--panel2);border:1px dashed var(--line);
+           border-radius:8px;padding:26px;text-align:center;font-size:14.5px}
+.qf-nav{display:flex;gap:8px;margin-top:18px}
+.qf-move{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+         border-radius:6px;padding:7px 15px;font:inherit;font-size:13px;cursor:pointer}
+.qf-move:disabled{opacity:.4;cursor:not-allowed}
+
+/* ---- questions ---- */
+.qf-strip{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:22px}
+.qf-chip{background:var(--panel2);color:var(--dim);border:1px solid var(--line);
+         border-radius:11px;padding:2px 10px;font:inherit;font-size:11.5px;cursor:pointer}
+.qf-chip b{color:var(--fg)}
+.qf-chip-on{border-color:var(--accent);color:var(--accent)}
+.qf-meta{font-size:11.5px;color:var(--dim);text-transform:uppercase;
+         letter-spacing:.05em;margin-bottom:10px}
+.qf-count{float:right;text-transform:none;letter-spacing:0}
+.qf-prompt{font-size:19px;line-height:1.4;margin-bottom:8px;max-width:62ch}
+.qf-help{font-size:13.5px;color:var(--dim);margin-bottom:20px;max-width:62ch}
+.qf-scale{display:flex;gap:9px;flex-wrap:wrap;max-width:720px}
+.qf-scale .qf-opt{flex:1;min-width:112px;flex-direction:column;gap:5px;padding:14px 8px}
+.qf-scale .qf-opt b{font-size:16px}
+.qf-scale .qf-opt span{font-size:11.5px;color:var(--dim);text-align:center}
+.qf-row{display:flex;gap:8px;flex-wrap:wrap}
+.qf-col{display:flex;flex-direction:column;gap:6px;max-width:520px}
+.qf-opt{display:flex;align-items:center;justify-content:center;background:var(--panel2);
+        color:var(--fg);border:1px solid var(--line);border-radius:6px;
+        padding:10px 16px;font:inherit;cursor:pointer;text-align:left}
+.qf-opt:hover{border-color:var(--accent)}
+.qf-opt.qf-sel{border-color:var(--accent);background:#dbe7fe}
+.qf-opt.qf-sel span{color:var(--fg)}
+.qf-col .qf-opt{justify-content:flex-start}
+.qf-text{width:100%;max-width:520px;background:var(--panel2);color:var(--fg);
+         border:1px solid var(--line);border-radius:6px;padding:9px;font:inherit}
+.qf-skip{margin-top:10px}
+.qf-skip button{background:none;border:0;color:var(--dim);font:inherit;
+                font-size:13px;text-decoration:underline;cursor:pointer}
+.qf-done{color:var(--ok);font-size:15px;padding:10px 0}
+.qf-foot{display:flex;align-items:center;gap:14px;margin-top:32px;
+         padding-top:18px;border-top:1px solid var(--line)}
+.qf-submit{background:var(--ok);color:#ffffff;border:0;border-radius:6px;
+           padding:11px 22px;font:inherit;font-weight:600;cursor:pointer}
+.qf-submit:disabled{background:var(--line);color:var(--dim);cursor:not-allowed}
+.qf-note{font-size:12.5px;color:var(--dim)}
+
+/* Narrow laptops: a 32% figure column plus two side-by-side players leaves
+   each player a few hundred pixels. Stack instead -- the figure stops being
+   pinned and simply scrolls with the page, which is the honest trade when
+   there is no room to pin it. */
+@media (max-width:1100px){
+  #figure{height:auto}
+  #main{flex-direction:column}
+  #figure{position:static;width:100%;max-width:none;max-height:46vh;
+          border-right:0;border-bottom:1px solid var(--line)}
+  #players{flex-direction:column}
+  .pl-stage{max-height:52vh}
+}
+
+/* Between experiments the task changes -- what is being judged, and whether
+   narration is shown. Running straight on makes people answer the new
+   questions with the old task in mind. */
+#between{position:fixed;inset:0;background:var(--bg);z-index:60;display:flex;
+         align-items:center;justify-content:center}
+.bt-inner{max-width:520px;text-align:center;padding:30px}
+.bt-kicker{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);
+           margin-bottom:10px}
+.bt-inner h2{font-size:25px;margin:0 0 12px}
+.bt-inner p{color:var(--dim);font-size:15px;margin:0 0 26px}
+#btGo{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:12px 26px;
+      font:inherit;font-weight:600;cursor:pointer}
+#done,#loading{padding:60px;text-align:center;color:var(--dim)}
+#done h2{color:var(--fg)}
+</style>
+
+<div id="top">
+  <span class="t" id="expname">…</span>
+  <span class="style" id="stylename"></span>
+  <span id="prog"></span>
+</div>
+<div id="bar"></div>
+
+<div id="unlockbar" style="display:none">
+  <span id="unlocktext">Move the slider all the way to the end to unlock the questions.</span>
+  <span id="unlockprog"></span>
+</div>
+
+<div id="main" style="display:none">
+  <div id="figure">
+    <h3>Original figure</h3>
+    <div id="figwrap">
+      <img id="figimg" alt="Source figure">
+      <div id="figcap">Click to zoom</div>
+    </div>
+  </div>
+  <div id="right">
+    <div id="players"></div>
+    <div id="qwrap">
+      <div id="intro"></div>
+      <div id="form"></div>
+    </div>
+  </div>
+</div>
+
+<div id="loading">Loading…</div>
+<div id="between" style="display:none">
+  <div class="bt-inner">
+    <div class="bt-kicker" id="btKicker"></div>
+    <h2 id="btTitle"></h2>
+    <p id="btBody"></p>
+    <button id="btGo">Continue</button>
+  </div>
+</div>
+<div id="done" style="display:none">
+  <h2>That's everything — thank you.</h2>
+  <p>Your responses are saved. You can close this tab.</p>
+</div>
+
+<script src="/study.js"></script>
+<script src="/player.js"></script>
+<script src="/forms.js"></script>
+<script>
+let players = [], form = null, trial = null, openedAt = 0;
+// Keyed BY PARTICIPANT. A single global key meant the second person to use a
+// browser inherited the first one's "already seen" list and got no section
+// intros at all -- which is why they appeared only sometimes.
+function seenKey() { return "animatebanana_seen_sections:" + Session.get(); }
+function seenSections() {
+  try { return JSON.parse(localStorage.getItem(seenKey()) || "[]"); }
+  catch (e) { return []; }
+}
+function markSeen(experiment) {
+  const seen = seenSections();
+  if (!seen.includes(experiment)) {
+    seen.push(experiment);
+    try { localStorage.setItem(seenKey(), JSON.stringify(seen)); } catch (e) {}
+  }
+}
+
+// What changes between experiments, in the participant's terms. They are never
+// told which condition they are seeing -- only what they are now being asked.
+const STAGE_COPY = {
+  exp1: {title: "Judging the animation",
+         body: "You will see a figure and an animated version of it, with no "
+             + "narration. Judge the visuals only."},
+  exp2: {title: "Now judging the narration",
+         body: "Same kind of animation, but this time the narration is shown. "
+             + "Judge the words and how well they fit what is on screen."},
+  exp3: {title: "Now comparing two presentations",
+         body: "From here on you will see two presentations of the same figure "
+             + "side by side, and choose between them."},
+  exp4: {title: "Another comparison",
+         body: "Two more presentations of the same figure. Same task: say which "
+             + "one works better."},
+  exp5: {title: "One last comparison",
+         body: "Two presentations of the same figure. Say which one works better."},
+};
+
+function showBetween(experiment, index, total) {
+  return new Promise((resolve) => {
+    const c = STAGE_COPY[experiment] || {title: "Next section", body: ""};
+    el("#btKicker").textContent = `Section ${index} of ${total}`;
+    el("#btTitle").textContent = c.title;
+    el("#btBody").textContent = c.body;
+    el("#between").style.display = "flex";
+    el("#btGo").onclick = () => { el("#between").style.display = "none"; resolve(); };
+    el("#btGo").focus();
+  });
+}
+
+if (!Session.get()) location.href = "/";
+
+function allWatched() {
+  return players.length > 0 && players.every((p) => p.watched());
+}
+
+// The unlock bar is the single place the participant is told what to do next,
+// and it disappears the moment the questions become available.
+function refreshUnlockBar() {
+  const bar = el("#unlockbar");
+  if (!players.length) { bar.style.display = "none"; return; }
+  const done = allWatched();
+  document.body.classList.toggle("unlocked", done);
+  if (done) { bar.style.display = "none"; return; }
+  bar.style.display = "flex";
+  bar.classList.remove("done");
+  const total = players.length;
+  const ready = players.filter((p) => p.watched()).length;
+  el("#unlocktext").textContent = total > 1
+    ? "Move BOTH sliders all the way to the end to unlock the questions."
+    : "Move the slider all the way to the end to unlock the questions.";
+  const pct = Math.round(100 * players.reduce(
+    (a, p) => a + (p.count() > 1 ? p.maxSeen() / (p.count() - 1) : 1), 0) / total);
+  el("#unlockprog").textContent = total > 1
+    ? `${ready} of ${total} viewed \u00b7 ${pct}%` : `${pct}%`;
+}
+
+async function load() {
+  el("#loading").style.display = "block";
+  el("#main").style.display = "none";
+  el("#unlockbar").style.display = "none";
+  document.body.classList.remove("unlocked");
+  players.forEach((p) => p.destroy());
+  players = [];
+
+  let data;
+  try { data = await api("/api/trial/current"); }
+  catch (e) {
+    if (e.status === 401) { Session.clear(); location.href = "/"; return; }
+    el("#loading").textContent = "Could not load a trial: " + e.message;
+    return;
+  }
+
+  if (data.needs_calibration) { location.href = "/prepare"; return; }
+
+  if (data.done) {
+    el("#loading").style.display = "none";
+    el("#done").style.display = "block";
+    el("#top").style.display = "none";
+    return;
+  }
+
+  const state = await api("/api/state");
+
+  // A blank interstitial whenever the task changes, so nobody carries the
+  // previous section's question into the new one.
+  // Show it the first time this participant meets each section, including
+  // after a reload. Keyed in localStorage rather than a variable, because the
+  // in-memory version silently skipped the interstitial for anyone resuming.
+  if (!seenSections().includes(data.experiment)) {
+    el("#main").style.display = "none";
+    el("#loading").style.display = "none";
+    // Count only sections this participant will actually be served -- a dark
+    // arm must not appear in "section 2 of 5".
+    const live = (state.live_experiments || Object.keys(STAGE_COPY));
+    await showBetween(data.experiment, live.indexOf(data.experiment) + 1, live.length);
+  }
+  markSeen(data.experiment);
+
+  trial = data;
+  openedAt = Date.now();
+  Events.trialId = data.trial_id;
+  el("#expname").textContent = data.questions.title;
+  el("#stylename").textContent = data.show_captions ? "" : "· visuals only";
+  el("#prog").textContent = `${state.completed + 1} of ${state.target}`;
+  el("#bar").style.width = (100 * state.completed / state.target) + "%";
+
+  if (data.figure) {
+    el("#figimg").src = `/media/${data.figure.media_id}`;
+    el("#figcap").textContent = data.figure.title || "Click to zoom";
+  }
+
+  el("#players").innerHTML = "";
+  data.slots.forEach((slot) => {
+    const holder = document.createElement("div");
+    el("#players").appendChild(holder);
+    const mount = document.createElement("div");
+    holder.appendChild(mount);
+    slot.label = data.slots.length > 1
+      ? (slot.slot === "A" ? "Left (A)" : "Right (B)") : "Animation";
+    players.push(mountPlayer(mount, slot, {
+      onEvent: (e) => { Events.push(e); refreshUnlockBar(); },
+      onWatched: () => { if (form) form.refreshGate(); refreshUnlockBar(); },
+    }));
+  });
+
+  el("#intro").textContent = data.questions.intro || "";
+  form = mountForm(el("#form"), data.questions, {
+    canSubmit: allWatched,
+    onAnswer: async (qid, value) => {
+      try {
+        await api(`/api/trial/${trial.trial_id}/answer`, { method: "POST",
+          body: JSON.stringify({ question_id: qid, value,
+                                 ms_since_open: Date.now() - openedAt })});
+      } catch (e) { console.warn("answer failed", e); }
+    },
+    onComplete: async () => {
+      Events.flush();
+      try {
+        await api(`/api/trial/${trial.trial_id}/submit`, { method: "POST" });
+      } catch (e) {
+        // The server is the rule, not the disabled button. If it refuses,
+        // say why rather than silently doing nothing.
+        alert("Could not submit: " + e.message);
+        return;
+      }
+      load();
+    },
+  });
+
+  el("#loading").style.display = "none";
+  el("#main").style.display = "flex";
+  refreshUnlockBar();
+}
+
+el("#figimg").onclick = () =>
+  openFullscreenImage(el("#figimg").src, el("#figcap").textContent);
+load();
+</script>

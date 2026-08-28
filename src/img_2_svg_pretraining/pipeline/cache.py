@@ -94,6 +94,19 @@ class CachePaths:
 
     @property
     def strategy_lineage(self) -> str:
+        """VESTIGIAL. Stage 2a is deprecated and cannot run (see
+        `run_pipeline.DEPRECATED_STAGES`), so nothing is stored at this
+        lineage any more.
+
+        It is still computed, and still feeds `sequence_lineage`, purely to
+        keep existing artifacts addressable: dropping it would rewrite the
+        path of every sequence, animation and export ever produced, orphaning
+        a fully scored 48-cell bench to gain nothing but a shorter directory
+        name. The `__<model>__<tier>` it contributes is now a constant in
+        practice, since no config changes a stage it cannot run.
+
+        Delete it only alongside a deliberate, announced cache migration.
+        """
         agent = self.cfg.agent("strategizer")
         tier = agent.option("context_tier", "full")
         return f"{self.code_lineage}__{self._model_for('strategizer')}__{tier}"
@@ -104,9 +117,20 @@ class CachePaths:
 
     @property
     def sequence_lineage(self) -> str:
-        """Where the two Stage-2 lineages merge."""
-        return (f"{self.strategy_lineage}__{self._model_for('parser')}"
-                f"__{self._model_for('sequencer')}__{self.cfg.style}")
+        """Where the two Stage-2 lineages merge.
+
+        The sequencer's `context_tier` is appended ONLY when it is set, the
+        same trick `code_lineage` uses for a non-tikz target: a sequencer run
+        with paper context and one without must not share a cache entry, but
+        every artifact produced before the option existed keeps its path.
+        """
+        parts = [self.strategy_lineage, self._model_for("parser"),
+                 self._model_for("sequencer"), self.cfg.style]
+        sequencer = self.cfg.agents.get("sequencer")
+        tier = sequencer.option("context_tier", None) if sequencer else None
+        if tier:
+            parts.append(f"ctx-{_slug(str(tier))}")
+        return "__".join(parts)
 
     @property
     def narrative_lineage(self) -> str:

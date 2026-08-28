@@ -16,6 +16,7 @@ Wraps a pipeline ChatBackend (Gemini 3.6 Flash by default) behind a single
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -40,6 +41,12 @@ class Judge:
         self._backend = make_backend(backend_name, backend_cfg, cache_root=cache_root)
         self.raw_dir = Path(raw_dir) if raw_dir else None
         self._raw_count = 0
+        # `_save_raw` is called from the banded drivers' worker threads, and
+        # `+= 1` is not atomic. Two threads reading the same value write the
+        # same filename and one transcript silently overwrites the other --
+        # which is worst precisely when it matters, debugging a judge whose
+        # replies stopped parsing.
+        self._raw_lock = threading.Lock()
 
     def provenance(self) -> dict:
         return {"judge_backend": self.backend_name, "judge_model": self.model,
@@ -48,14 +55,17 @@ class Judge:
     def _save_raw(self, tag: str, text: str) -> str | None:
         if self.raw_dir is None:
             return None
-        self._raw_count += 1
-        path = self.raw_dir / f"{self._raw_count:03d}_{tag}.txt"
+        with self._raw_lock:
+            self._raw_count += 1
+            index = self._raw_count
+        path = self.raw_dir / f"{index:03d}_{tag}.txt"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         return str(path)
 
     def ask_json(self, prompt: str, images: list[Path] | None = None,
-                 tag: str = "judge", **params) -> dict:
+                 tag: str = "judge", videos: list[Path] | None = None,
+                 **params) -> dict:
         """One judged question -> parsed JSON object, or JudgeError."""
         merged = {**DEFAULT_PARAMS, **params}
         attempt_prompt = prompt
@@ -63,7 +73,8 @@ class Judge:
 
         for attempt in range(2):
             result = self._backend.generate(
-                [Message.user(attempt_prompt, images=list(images or []))], **merged)
+                [Message.user(attempt_prompt, images=list(images or []),
+                              videos=list(videos or []))], **merged)
             if not result.ok:
                 last_error = result.error or "call failed"
                 continue
@@ -84,7 +95,8 @@ class Judge:
         raise JudgeError(f"judge failed after 2 attempts: {last_error}")
 
     def ask_text(self, prompt: str, images: list[Path] | None = None,
-                 tag: str = "judge", accept=None,
+                 tag: str = "judge", videos: list[Path] | None = None,
+                 accept=None,
                  retry_note: str = "Your previous reply did not follow the "
                                    "required output format. Respond again using "
                                    "exactly the section headers specified.",
@@ -107,7 +119,8 @@ class Judge:
 
         for _ in range(2):
             result = self._backend.generate(
-                [Message.user(attempt_prompt, images=list(images or []))], **merged)
+                [Message.user(attempt_prompt, images=list(images or []),
+                              videos=list(videos or []))], **merged)
             if not result.ok:
                 last_error = result.error or "call failed"
                 continue

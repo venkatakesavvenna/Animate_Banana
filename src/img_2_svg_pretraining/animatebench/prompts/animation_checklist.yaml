@@ -33,37 +33,64 @@ prompt: |
   5. Exclude Standalone Text: Do not create a checklist category for raw textual labels. We only
   care if the structural components (blocks, nodes, arrows) are influenced by the style. Use the
   text labels *only* to name the blocks and nodes they belong to.
+  6. Semantic Class Separation (CRITICAL): A "node" and a "block" may share the exact same text
+  label, but they are distinct semantic entities. They must be tracked completely separately in
+  their respective lists (`nodes` vs `blocks`).
+  7. ID-Aware Frequency Tracking (CRITICAL): Diagrams often contain multiple physically distinct
+  elements that share the exact same text label (e.g., multiple nodes called "Layer Norm").
+     - Do NOT naively deduplicate by text label alone.
+     - For every text label, you must maintain a `frequency` counter and an array of `source_ids`.
+     - As you iterate through the timestamps, check the raw ID of the element.
+     - If you encounter a NEW raw ID that maps to an existing text label in that semantic class,
+       increment the `frequency` counter by 1 and append the new ID to the `source_ids` array.
+     - If you encounter a raw ID that is *already present* in the `source_ids` array (meaning this
+       exact element is just reappearing or persisting in a later timestamp), do NOT increment the
+       frequency.
 
   *** TASK ***
   Iterate through EVERY timestamp in the Animation Sequence JSON. Accumulate all the resolved,
-  human-readable labels for `nodes`, `blocks`, and `arrows`. Deduplicate the lists so each element
-  only appears once.
+  human-readable labels for `nodes`, `blocks`, and `arrows`, tracking their unique occurrences via
+  their source IDs.
 
   *** OUTPUT REQUIREMENT ***
   Output ONLY valid JSON matching the exact schema below. Do not output conversational text.
 
   ### EXAMPLE LOGIC ###
-  If the JSON has a block `"G_box"`, and the code shows this box has the text label "Generator".
-  If the JSON has an arrow from `"I_stack_1"` (labeled "Input Images") to `"G_box"`.
-  Your output arrays will store: "Generator" in blocks, and "from: 'Input Images' to: 'Generator'"
-  in edges.
+  If the JSON contains two distinct node IDs (`node_norm1`, `node_norm2`) and one block ID
+  (`block_norm`) across various timestamps, all sharing the text label "Layer Norm":
+  The `nodes` array will have one entry for "Layer Norm" with a frequency of 2 and `source_ids`:
+  ["node_norm1", "node_norm2"].
+  The `blocks` array will have one entry for "Layer Norm" with a frequency of 1 and `source_ids`:
+  ["block_norm"].
 
   ```json
   {
     "animation_checklist": {
       "blocks": [
-        "Generator",
-        "Projection Box P1",
-        "Feature Extractor (Unlabeled Blue Box)"
+        {
+          "label": "Generator",
+          "frequency": 1,
+          "source_ids": ["G_box"]
+        }
       ],
       "nodes": [
-        "Input Image Stack",
-        "Depth Map D1",
-        "Mask M1"
+        {
+          "label": "Input Image Stack",
+          "frequency": 1,
+          "source_ids": ["I_stack_1"]
+        },
+        {
+          "label": "Layer Norm",
+          "frequency": 2,
+          "source_ids": ["node_norm1", "node_norm2"]
+        }
       ],
       "edges": [
-        "from: 'Input Image Stack' to: 'Generator'",
-        "from: 'Projection Box P1' to: 'Feature Extractor (Unlabeled Blue Box)'"
+        {
+          "label": "from: 'Input Image Stack' to: 'Generator'",
+          "frequency": 1,
+          "source_ids": ["edge_in_to_g"]
+        }
       ]
     }
   }

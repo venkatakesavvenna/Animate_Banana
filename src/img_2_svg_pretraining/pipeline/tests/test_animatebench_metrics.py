@@ -429,8 +429,9 @@ class StubJudge:
         self._replies = list(replies)
         self.calls = []
 
-    def _next(self, prompt, images):
-        self.calls.append({"prompt": prompt, "images": list(images or [])})
+    def _next(self, prompt, images, videos=None):
+        self.calls.append({"prompt": prompt, "images": list(images or []),
+                           "videos": list(videos or [])})
         if not self._replies:
             raise AssertionError("stub judge ran out of replies")
         reply = self._replies.pop(0)
@@ -438,14 +439,33 @@ class StubJudge:
             raise reply
         return reply
 
-    def ask_json(self, prompt, images=None, tag="judge", **kw):
-        return self._next(prompt, images)
+    def ask_json(self, prompt, images=None, tag="judge", videos=None, **kw):
+        return self._next(prompt, images, videos)
 
-    def ask_text(self, prompt, images=None, tag="judge", accept=None, **kw):
-        return self._next(prompt, images)
+    def ask_text(self, prompt, images=None, tag="judge", videos=None,
+                 accept=None, **kw):
+        return self._next(prompt, images, videos)
 
     def provenance(self):
         return {"judge_model": "stub"}
+
+
+def _checklist(blocks=(), nodes=(), edges=()):
+    """A Checklist from plain labels, one instance each.
+
+    Entries carry a frequency now (several distinct elements routinely share
+    one label). These tests are about the fold's behaviour rather than about
+    frequency, so they name labels and let this fill in the rest; the
+    frequency-specific cases build Entries directly.
+    """
+    from img_2_svg_pretraining.animatebench.checklist import Checklist, Entry
+
+    def entries(labels):
+        return [Entry(label=lbl) if isinstance(lbl, str) else lbl
+                for lbl in labels]
+
+    return Checklist(blocks=entries(blocks), nodes=entries(nodes),
+                     edges=entries(edges))
 
 
 def _frame_set(tmp, n, policy="all"):
@@ -487,7 +507,9 @@ def test_every_style_renders_every_prompt_without_leftover_placeholders():
     leftover = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
     cases = [("animation_omission.yaml", aq.STYLES, {"remaining": "-"}),
              ("animation_style.yaml", aq.STYLES,
-              {"style_name": "S", "frame_context": "c"}),
+              # {previous_note} arrived when ASCS started sending the previous
+              # frame as evidence for its temporal rules.
+              {"style_name": "S", "frame_context": "c", "previous_note": "n"}),
              ("animation_repetition.yaml", aq.REPETITION_STYLES,
               {"frequencies": "-"})]
     for prompt_file, styles, extra in cases:
@@ -521,10 +543,9 @@ def test_fidelity_prompt_body_is_identical_across_styles():
 
 def test_omission_sends_one_image_per_frame_and_counts_what_never_popped(tmp_path):
     """The invariant the whole design rests on: frames are never batched."""
-    from img_2_svg_pretraining.animatebench.checklist import Checklist
     from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
 
-    checklist = Checklist(blocks=["Generator"], nodes=["Input Stack", "Depth Map"],
+    checklist = _checklist(blocks=["Generator"], nodes=["Input Stack", "Depth Map"],
                           edges=["from: 'Input Stack' to: 'Generator'"])
     judge = StubJudge([
         {"reasoning": "a", "elements_popped_in_this_frame":
@@ -540,18 +561,76 @@ def test_omission_sends_one_image_per_frame_and_counts_what_never_popped(tmp_pat
     for call in judge.calls:                      # figure + exactly one frame
         assert len(call["images"]) == 2
     assert out["element_omission_count"] == 1     # "Depth Map" never appeared
-    assert out["omission_elements_remaining"] == ["Depth Map"]
+    assert out["omission_elements_remaining"] == [
+        {"label": "Depth Map", "unseen_count": 1}]
     assert out["arrow_omission_count"] == 1
     assert out["omission_rate"] == 1 / 3
+
+
+def test_omission_decrements_per_instance_not_per_label(tmp_path):
+    """Three nodes sharing the label "Layer Norm" are three things the
+    animation owes. Seeing one must leave two outstanding, not clear all
+    three -- that was how real omissions used to disappear."""
+    from img_2_svg_pretraining.animatebench.checklist import Entry
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    checklist = _checklist(nodes=[Entry("Layer Norm", 3, ["n1", "n2", "n3"])])
+    judge = StubJudge([
+        {"elements_popped_in_this_frame":
+            {"nodes": [{"label": "Layer Norm", "instances_seen": 1}]}},
+        {"elements_popped_in_this_frame":
+            {"nodes": [{"label": "Layer Norm", "instances_seen": 1}]}},
+    ])
+    out = aq.omitted_elements(judge, tmp_path / "fig.png",
+                              _frame_set(tmp_path, 2), "progressive_reveal",
+                              checklist)
+    assert out["element_omission_count"] == 1          # 3 owed, 2 seen
+    assert out["omission_elements_remaining"] == [
+        {"label": "Layer Norm", "unseen_count": 1}]
+    assert out["omission_rate"] == 1 / 3               # denominator is instances
+
+
+def test_omission_cannot_pop_more_instances_than_are_owed(tmp_path):
+    """A judge claiming five sightings of a label with two instances must not
+    drive the count negative and manufacture a perfect score."""
+    from img_2_svg_pretraining.animatebench.checklist import Entry
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    checklist = _checklist(nodes=[Entry("Norm", 2, ["n1", "n2"])],
+                           blocks=["Never Shown"])
+    judge = StubJudge([
+        {"elements_popped_in_this_frame":
+            {"nodes": [{"label": "Norm", "instances_seen": 5}]}},
+    ])
+    out = aq.omitted_elements(judge, tmp_path / "fig.png",
+                              _frame_set(tmp_path, 1), "progressive_reveal",
+                              checklist)
+    # Norm is fully popped (clamped at 2); the untouched block still counts.
+    assert out["element_omission_count"] == 1
+    assert out["omission_elements_remaining"] == [
+        {"label": "Never Shown", "unseen_count": 1}]
+
+
+def test_omission_still_reads_bare_string_pops(tmp_path):
+    """The frequency-aware schema is new; a model that answers in the older
+    bare-string shape means one sighting, not zero."""
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    judge = StubJudge([
+        {"elements_popped_in_this_frame": {"blocks": ["B"]}},
+    ])
+    out = aq.omitted_elements(judge, tmp_path / "fig.png",
+                              _frame_set(tmp_path, 1), "progressive_reveal",
+                              _checklist(blocks=["B"]))
+    assert out["element_omission_count"] == 0
 
 
 def test_omission_ignores_names_that_were_never_outstanding(tmp_path):
     """A judge naming something already popped, or never on the list, must not
     shrink it -- otherwise a hallucination silently improves the score."""
-    from img_2_svg_pretraining.animatebench.checklist import Checklist
     from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
 
-    checklist = Checklist(blocks=["Generator"], nodes=["Input Stack"])
+    checklist = _checklist(blocks=["Generator"], nodes=["Input Stack"])
     judge = StubJudge([
         {"elements_popped_in_this_frame": {"blocks": ["Generator"]}},
         {"elements_popped_in_this_frame":
@@ -561,15 +640,15 @@ def test_omission_ignores_names_that_were_never_outstanding(tmp_path):
                               _frame_set(tmp_path, 2), "progressive_reveal",
                               checklist)
     assert out["element_omission_count"] == 1
-    assert out["omission_elements_remaining"] == ["Input Stack"]
+    assert out["omission_elements_remaining"] == [
+        {"label": "Input Stack", "unseen_count": 1}]
 
 
 def test_omission_ignores_edges_for_bounding_box_styles(tmp_path):
     """Boxes never highlight arrows, so 0 there means 'not applicable'."""
-    from img_2_svg_pretraining.animatebench.checklist import Checklist
     from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
 
-    checklist = Checklist(blocks=["B"], edges=["from: 'B' to: 'C'"])
+    checklist = _checklist(blocks=["B"], edges=["from: 'B' to: 'C'"])
     judge = StubJudge([{"elements_popped_in_this_frame": {"blocks": ["B"]}}])
     out = aq.omitted_elements(judge, tmp_path / "fig.png",
                               _frame_set(tmp_path, 1), "hopping_bounding_box",
@@ -581,7 +660,6 @@ def test_omission_ignores_edges_for_bounding_box_styles(tmp_path):
 def test_a_failed_frame_does_not_lose_the_fold(tmp_path):
     """Losing one frame of thirty degrades the evidence; aborting loses the
     cell. The failure is recorded, not swallowed."""
-    from img_2_svg_pretraining.animatebench.checklist import Checklist
     from img_2_svg_pretraining.animatebench.judge import JudgeError
     from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
 
@@ -591,7 +669,7 @@ def test_a_failed_frame_does_not_lose_the_fold(tmp_path):
     ])
     out = aq.omitted_elements(judge, tmp_path / "fig.png",
                               _frame_set(tmp_path, 2), "progressive_reveal",
-                              Checklist(blocks=["B"]))
+                              _checklist(blocks=["B"]))
     assert len(out["omission_errors"]) == 1
     assert out["element_omission_count"] == 0
 
@@ -608,16 +686,55 @@ def test_style_compliance_discards_on_any_discarded_frame(tmp_path):
     assert out["ascs_frames_judged"] == 3
 
 
+def test_style_compliance_sends_the_previous_frame_as_temporal_evidence(tmp_path):
+    """Every style has a rule phrased as "compare to the PREVIOUS frame".
+    Asking that while showing one frame invites an invented answer: the judge
+    cannot see what changed, but nothing stops it asserting that something
+    did. Frame 1 has no predecessor and is told so instead."""
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    frames = _frame_set(tmp_path, 3)
+    judge = StubJudge([{"frame_verdict": "ACCEPT"}] * 3)
+    aq.style_compliance(judge, tmp_path / "fig.png", frames, "progressive_reveal")
+
+    first, second, third = judge.calls
+    # figure + current only, and the temporal rules explicitly excused
+    assert len(first["images"]) == 2
+    assert "NO previous frame is provided" in first["prompt"]
+    assert "{previous_note}" not in first["prompt"]
+    assert "PREVIOUS frame in the sequence" not in first["prompt"]
+
+    # figure + previous + current, in that order
+    for call, position in ((second, 1), (third, 2)):
+        assert len(call["images"]) == 3
+        assert call["images"][1] == frames.paths[position - 1]
+        assert call["images"][2] == frames.paths[position]
+        assert "NO previous frame" not in call["prompt"]
+        assert "{previous_note}" not in call["prompt"]
+
+
 def test_unenforceable_style_rules_are_recorded_not_passed(tmp_path):
-    """Three rules cannot be answered from one frame -- two have no field in
-    the document's own schema, one is sequence-level. Silence would read as a
-    pass."""
+    """A rule with nowhere to put its answer is recorded, never silently
+    passed -- silence from such a rule reads exactly like compliance.
+
+    Only ONE such rule survives. "Mobile Boxes, Static Elements" was
+    unenforceable for both box styles until the schema gained a field for it
+    and ASCS began sending the previous frame; what remains is sliding's
+    "Hopping Boxes", which is genuinely sequence-level and cannot be settled
+    from any single frame."""
     from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
 
     judge = StubJudge([{"frame_verdict": "ACCEPT"}])
     out = aq.style_compliance(judge, tmp_path / "fig.png",
                               _frame_set(tmp_path, 1), "sliding_bounding_box")
-    assert len(out["ascs_unenforced_rules"]) == 2
+    assert out["ascs_unenforced_rules"] == [
+        "Hopping Boxes (HIGHLY CRITICAL): sequence-level, "
+        "unanswerable from one frame"]
+    # The box style whose only unenforceable rule became enforceable.
+    judge = StubJudge([{"frame_verdict": "ACCEPT"}])
+    assert aq.style_compliance(judge, tmp_path / "fig.png",
+                               _frame_set(tmp_path, 1),
+                               "hopping_bounding_box")["ascs_unenforced_rules"] == []
     judge = StubJudge([{"frame_verdict": "ACCEPT"}])
     assert aq.style_compliance(judge, tmp_path / "fig.png",
                                _frame_set(tmp_path, 1),
@@ -627,19 +744,17 @@ def test_unenforceable_style_rules_are_recorded_not_passed(tmp_path):
 def test_repetition_is_unscored_where_no_prompt_exists(tmp_path):
     """Absent is not zero: 'no prompt was written' and 'no repetition found'
     are different claims, and only one of them is a measurement."""
-    from img_2_svg_pretraining.animatebench.checklist import Checklist
     from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
 
     for style in ("progressive_reveal", "colour_pop"):
         out = aq.unnecessary_repetition(StubJudge([]), tmp_path / "fig.png",
                                         _frame_set(tmp_path, 1), style,
-                                        Checklist(blocks=["B"]))
+                                        _checklist(blocks=["B"]))
         assert out["repetition_status"] == "not_specified"
         assert "unnecessary_repetition_count_element" not in out
 
 
 def test_repetition_counts_only_unjustified_revisits(tmp_path):
-    from img_2_svg_pretraining.animatebench.checklist import Checklist
     from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
 
     judge = StubJudge([
@@ -652,7 +767,7 @@ def test_repetition_counts_only_unjustified_revisits(tmp_path):
     ])
     out = aq.unnecessary_repetition(judge, tmp_path / "fig.png",
                                     _frame_set(tmp_path, 3), "alpha_masking",
-                                    Checklist(blocks=["B"], nodes=["N"]))
+                                    _checklist(blocks=["B"], nodes=["N"]))
     assert out["repetition_frequencies"] == {"B": 2, "N": 1}
     assert out["repetition_revisited"] == ["B"]        # freq >= 2
     assert out["unnecessary_repetition_count_element"] == 1
@@ -696,12 +811,47 @@ def test_checklist_validation_drops_what_it_cannot_use():
         "blocks": ["Generator", "Generator", "", 7],
         "nodes": ["Input Stack"],
         "edges": "not a list"}})
-    assert out.blocks == ["Generator"]
-    assert out.nodes == ["Input Stack"]
+    assert [e.label for e in out.blocks] == ["Generator"]
+    assert [e.label for e in out.nodes] == ["Input Stack"]
     assert out.edges == []
     # duplicate, empty string, non-string 7, and the edges list that wasn't one
     assert len(out.notes) == 4
+    # Bare strings predate frequencies and mean one instance each.
     assert out.total() == 2
+
+
+def test_checklist_frequency_counts_instances_not_labels():
+    """Several distinct elements routinely share one label. Collapsing them
+    would let an animation that showed one of three score as having shown
+    all three, hiding two real omissions."""
+    from img_2_svg_pretraining.animatebench import checklist as cl
+
+    out = cl.validate({"animation_checklist": {
+        "nodes": [{"label": "Layer Norm", "frequency": 2,
+                   "source_ids": ["n1", "n2"]},
+                  {"label": "Input", "frequency": 1, "source_ids": ["n3"]}],
+        "blocks": [{"label": "Layer Norm", "frequency": 1,
+                    "source_ids": ["b1"]}]}})
+    # Same label in two buckets is legitimate -- a node and a block are
+    # distinct entities, and the prompt says so explicitly.
+    assert [(e.label, e.frequency) for e in out.nodes] == [
+        ("Layer Norm", 2), ("Input", 1)]
+    assert [(e.label, e.frequency) for e in out.blocks] == [("Layer Norm", 1)]
+    assert out.total(False) == 4          # 2 + 1 + 1 instances, not 3 labels
+
+
+def test_checklist_frequency_cannot_exceed_the_ids_named():
+    """A frequency larger than the ids backing it is unfalsifiable padding:
+    every unnamed instance would count as an omission forever."""
+    from img_2_svg_pretraining.animatebench import checklist as cl
+
+    out = cl.validate({"animation_checklist": {
+        "nodes": [{"label": "Ghost", "frequency": 9, "source_ids": ["n1"]},
+                  {"label": "Zero", "frequency": 0, "source_ids": []}]}})
+    by_label = {e.label: e.frequency for e in out.nodes}
+    assert by_label["Ghost"] == 1         # clamped to the one id it could name
+    assert by_label["Zero"] == 1          # a sub-1 frequency still means one
+    assert any("frequency 9" in n for n in out.notes)
 
 
 def test_step_frames_refuses_an_ambiguous_mapping(tmp_path):
@@ -732,3 +882,271 @@ def test_sequence_view_buckets_from_the_xml_not_the_sequence():
     assert "blocks=['b1']" in view
     assert "nodes=['n1']" in view
     assert "edges=['e1']" in view
+
+
+# -- the video judge (E1b) -------------------------------------------------
+
+def _tiny_png(path):
+    """A 2x2 PNG, written by hand so the tests need no PIL."""
+    import base64
+    path.write_bytes(base64.b64decode(
+        b"iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8"
+        b"z8Dwn4GBgYEJRIAAAA8EAQGvOQEHAAAAAElFTkSuQmCC"))
+    return path
+
+
+def test_video_part_changes_the_cache_fingerprint(tmp_path):
+    """The one that matters.
+
+    A VideoPart the fingerprint does not hash makes two requests that differ
+    only in their video collide on one cache entry, and the second cell is
+    served the first's verdict -- silently, with a plausible score. This is not
+    hypothetical: the TikZ and SVG bench configs share a dataset root, so the
+    same (sample, style) cell sends an identical prompt and an identical source
+    image in both, differing only in the mp4.
+    """
+    from img_2_svg_pretraining.pipeline.backends import Message
+    from img_2_svg_pretraining.pipeline.backends.base import _fingerprint
+
+    image = _tiny_png(tmp_path / "source.png")
+    a = tmp_path / "a.mp4"; a.write_bytes(b"\x00\x00\x00\x18ftypmp42AAAA")
+    b = tmp_path / "b.mp4"; b.write_bytes(b"\x00\x00\x00\x18ftypmp42BBBB")
+
+    msg_a = Message.user("identical prompt", images=[image], videos=[a])
+    msg_b = Message.user("identical prompt", images=[image], videos=[b])
+
+    assert _fingerprint("m", [msg_a], {}) != _fingerprint("m", [msg_b], {})
+    # And identical bytes must still share an entry, or the cache is useless.
+    same = tmp_path / "a_copy.mp4"; same.write_bytes(a.read_bytes())
+    msg_same = Message.user("identical prompt", images=[image], videos=[same])
+    assert _fingerprint("m", [msg_a], {}) == _fingerprint("m", [msg_same], {})
+
+
+def test_fingerprint_refuses_a_part_it_cannot_hash():
+    """An unhashable part must raise, not fall through. A silent fall-through
+    is precisely how the video collision above would have gone unnoticed."""
+    import pytest
+
+    from img_2_svg_pretraining.pipeline.backends import Message
+    from img_2_svg_pretraining.pipeline.backends.base import _fingerprint
+
+    class RoguePart:
+        pass
+
+    msg = Message(role="user", content=[RoguePart()])
+    with pytest.raises(TypeError, match="cannot hash"):
+        _fingerprint("m", [msg], {})
+
+
+def test_video_part_order_matches_what_the_prompt_claims(tmp_path):
+    """The video prompt says "the original source diagram as a still image,
+    followed by a video". Parts must actually arrive in that order."""
+    from img_2_svg_pretraining.pipeline.backends import (
+        ImagePart, Message, TextPart, VideoPart)
+
+    image = _tiny_png(tmp_path / "s.png")
+    video = tmp_path / "v.mp4"; video.write_bytes(b"\x00")
+    msg = Message.user("prompt", images=[image], videos=[video])
+    assert [type(p) for p in msg.content] == [ImagePart, VideoPart, TextPart]
+    assert msg.videos()[0].media_type() == "video/mp4"
+
+
+def test_video_fidelity_sends_one_image_and_one_video(tmp_path):
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    judge = StubJudge([{"video_evaluation": {
+        "assessment": {"element_alteration": "fine"},
+        "temporal_defects_observed": "None observed",
+        "visual_fidelity_score": 7.5}}])
+    image = _tiny_png(tmp_path / "s.png")
+    video = tmp_path / "v.mp4"; video.write_bytes(b"\x00")
+
+    out = aq.video_fidelity(judge, image, video, "progressive_reveal")
+    assert len(judge.calls) == 1
+    assert len(judge.calls[0]["images"]) == 1
+    assert len(judge.calls[0]["videos"]) == 1
+    assert out["vfs_video"] == 0.75
+    assert out["vfs_video_raw"] == 7.5
+    assert out["vfs_video_temporal_defects"] == "None observed"
+
+
+def test_video_fidelity_accepts_a_bare_payload(tmp_path):
+    """Some replies omit the `video_evaluation` wrapper. Parse those too rather
+    than recording a null score for a judgement the model actually made."""
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    judge = StubJudge([{"visual_fidelity_score": 10.0,
+                        "temporal_defects_observed": "None"}])
+    image = _tiny_png(tmp_path / "s.png")
+    video = tmp_path / "v.mp4"; video.write_bytes(b"\x00")
+    assert aq.video_fidelity(judge, image, video, "colour_pop")["vfs_video"] == 1.0
+
+
+def test_video_fidelity_records_a_missing_score_instead_of_raising(tmp_path):
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    judge = StubJudge([{"video_evaluation": {"assessment": {}}}])
+    image = _tiny_png(tmp_path / "s.png")
+    video = tmp_path / "v.mp4"; video.write_bytes(b"\x00")
+    out = aq.video_fidelity(judge, image, video, "alpha_masking")
+    assert out["vfs_video"] is None
+    assert out["vfs_video_errors"]
+
+
+def test_vfs_video_is_opt_in_and_never_runs_by_default():
+    """Pins the decision. vfs_video is the only node calling a quota'd external
+    judge on every cell; folding it into STAGES would make every default full
+    run spend, and would change what `set(stages) != set(STAGES)` means in
+    run_eval's partial-run merge."""
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    assert "vfs_video" not in aq.STAGES
+    assert "vfs_video" in aq.EXTRA_STAGES
+    assert set(aq.ALL_STAGES) == set(aq.STAGES) | set(aq.EXTRA_STAGES)
+
+
+def test_video_prompt_renders_for_every_style_without_placeholders():
+    """The video body and its five adapters were transcribed from the design
+    doc but had no caller until now, so nothing had ever rendered them."""
+    import re
+
+    from img_2_svg_pretraining.animatebench.judge import PROMPTS_ROOT
+    from img_2_svg_pretraining.animatebench.metrics.animation_quality import (
+        STYLES, _adapter)
+    from img_2_svg_pretraining.pipeline.prompts import load_and_render
+
+    for style in STYLES:
+        text = load_and_render("animation_fidelity.yaml#video", {
+            "style_adapter": _adapter("animation_fidelity.yaml", style,
+                                      "adapter_video"),
+        }, root=PROMPTS_ROOT)
+        leftover = [m for m in re.findall(r"\{([a-zA-Z_]\w*)\}", text)]
+        assert not leftover, f"{style}: unrendered placeholders {leftover}"
+        assert "visual_fidelity_score" in text
+        assert "temporal_defects_observed" in text
+
+
+def test_ascs_reports_frames_sent_and_frames_verdicted_separately(tmp_path):
+    """`FrameSet.manifest()` emits `frames_judged`, which becomes
+    `ascs_frames_judged` and collides with the count of frames that came back
+    with a parseable verdict. The manifest meaning wins -- it is what all 64
+    stored records already hold, and what compare_judges.py reads it as -- so
+    the unambiguous count gets its own key rather than redefining the old one.
+
+    Three frames are sent; the middle reply omits `frame_verdict`, so only two
+    are verdicted. Before the fix both numbers were reported as 3.
+    """
+    from img_2_svg_pretraining.animatebench.frames import FrameSet
+    from img_2_svg_pretraining.animatebench.metrics import animation_quality as aq
+
+    paths = [_tiny_png(tmp_path / f"frame-{i}.png") for i in (1, 2, 3)]
+    frames = FrameSet(paths=paths, indices=[0, 1, 2], source_count=3,
+                      policy="all", long_edge=1568,
+                      labels=[p.name for p in paths])
+    ok = {"frame_verdict": "ACCEPT", "generic_quality_checks": {},
+          "style_specific_checks": {}}
+    unparseable = {"generic_quality_checks": {}, "style_specific_checks": {}}
+    judge = StubJudge([ok, unparseable, ok])
+
+    out = aq.style_compliance(judge, _tiny_png(tmp_path / "s.png"), frames,
+                              "progressive_reveal")
+
+    assert out["ascs_frames_judged"] == 3     # frames SENT (from the manifest)
+    assert out["ascs_frames_verdicted"] == 2  # frames with a real verdict
+    assert out["ascs_pass"] is True
+    assert len(out["ascs_frame_detail"]) == 3
+
+
+# -- keyframe extraction ---------------------------------------------------
+
+def test_adaptive_activity_threshold_scales_with_the_video():
+    """The published extractors use a fixed activity_threshold of 0.01. A
+    hopping bounding box on a 4236x4236 figure peaks at 0.0027, so under the
+    fixed rule the animation reads as perfectly static from start to finish and
+    a 32-frame video extracts to one keyframe. The threshold must scale to the
+    video's own range."""
+    from img_2_svg_pretraining.animatebench.keyframes import (
+        adaptive_activity_threshold as thr)
+
+    small = [0.0000, 0.0012, 0.0023, 0.0027, 0.0014]   # measured, arch00554
+    large = [0.0, 0.10, 0.25, 0.30, 0.05]
+    assert 0 < thr(small) < 0.01, "must sit below the fixed 0.01 on small motion"
+    assert thr(large) > thr(small), "must rise with the video's own range"
+    # A genuinely static video has no threshold that means anything.
+    assert thr([0.0, 0.0, 0.0]) == float("inf")
+    assert thr([]) == float("inf")
+
+
+def test_dwell_fraction_uses_the_adaptive_threshold():
+    """Measured against the fixed 0.01, a hopping-box video whose every frame
+    differs reported dwell 1.00 -- 'nothing ever moves', the opposite of the
+    truth -- and would have been sent to a detector that then found nothing."""
+    from img_2_svg_pretraining.animatebench.keyframes import _dwell_fraction
+
+    moving = [0.0012, 0.0023, 0.0023, 0.0022, 0.0027, 0.0014, 0.0015]
+    assert _dwell_fraction(moving) < 1.0
+    assert _dwell_fraction([0.0, 0.0, 0.0, 0.0]) == 1.0
+
+
+def test_keyframe_names_sort_under_the_projects_own_frame_index():
+    """The extracted deck must be a drop-in frames_dir. list_frames sorts by
+    export.render._frame_index, which concatenates every digit in the stem, so
+    the originals' mixed `0_frame_0000` / `state_0001_frame_0012` scheme yields
+    0 and 10012 -- an order that holds by luck. Zero-padded frame-NN is what
+    the rest of the pipeline already assumes."""
+    from pathlib import Path
+
+    from img_2_svg_pretraining.pipeline.export.render import _frame_index
+
+    names = [f"frame-{n:02d}.png" for n in range(1, 13)]
+    assert [_frame_index(Path(n)) for n in names] == list(range(1, 13))
+    # The scheme it replaces, for contrast.
+    assert _frame_index(Path("0_frame_0000.png")) == 0
+    assert _frame_index(Path("state_0001_frame_0012.png")) == 10012
+
+
+def test_every_style_has_a_keyframe_extractor():
+    """A new style must fail loudly here rather than falling through to a
+    default that happens to be wrong for it."""
+    from img_2_svg_pretraining.animatebench.keyframes import EXTRACTORS
+    from img_2_svg_pretraining.animatebench.metrics.animation_quality import STYLES
+
+    assert set(EXTRACTORS) == set(STYLES)
+
+
+def test_ssim_fallback_matches_skimage():
+    """scikit-image is absent from the pipeline container and installing it can
+    move numpy off the 1.26.4 pin cv2 and torch are built against, so SSIM is
+    implemented on cv2 primitives. The two must agree, or every threshold tuned
+    against one silently means something else under the other.
+
+    This SKIPS in both environments, so it cannot be left to CI to notice. It
+    was run once, deliberately, against a real scikit-image installed off to one
+    side so the pinned environment stayed untouched -- and it passed to 1e-6:
+
+        docker exec <container> bash -lc 'PIP_CONSTRAINT= \\
+          /environments/img_2_svg_pretraining/bin/pip install --target=/tmp/skimage_check \\
+          --no-deps scikit-image==0.24.0'
+        docker exec <container> bash -lc 'cd /code && \\
+          PYTHONPATH=/tmp/skimage_check:src <python> -m pytest \\
+          ...::test_ssim_fallback_matches_skimage'
+
+    Re-run it that way if `_ssim_map` is ever touched.
+    """
+    import pytest
+
+    pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    skimage_metrics = pytest.importorskip("skimage.metrics")
+
+    from img_2_svg_pretraining.animatebench.keyframes import _ssim_map
+
+    rng = np.random.default_rng(0)
+    a = rng.integers(0, 255, (64, 64), dtype=np.uint8)
+    b = a.copy()
+    b[20:40, 20:40] = 0
+
+    _, reference = skimage_metrics.structural_similarity(
+        a, b, data_range=255, gaussian_weights=True, sigma=1.5,
+        use_sample_covariance=False, full=True)
+    assert np.allclose(_ssim_map(a, b), reference, atol=1e-6)

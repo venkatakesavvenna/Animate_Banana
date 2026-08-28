@@ -11,13 +11,31 @@
 # `*** <STYLE> RULES ***` block and the `style_specific_checks` object of the
 # schema vary. Those two are factored out here as `adapter_*` and `schema_*`.
 #
-# `frames` carries {style_name}, {frame_context}, {style_adapter} and
-# {output_schema}.
+# REVISED 2026-08-19: each call now sees the ORIGINAL image, the PREVIOUS
+# frame and the CURRENT frame -- three images, not two. Every style has at
+# least one rule that is a claim about change (persistence, cumulative effect,
+# opacity stability, "only the box moved"), and asking that while showing a
+# single frame invites an invented answer: the judge cannot see what changed,
+# but nothing stops it asserting that something did.
+#
+# The FIRST frame has no predecessor. It is sent with two images and an
+# explicit note that the temporal rules are not applicable, rather than
+# receiving the original image as a stand-in predecessor -- frame 1
+# legitimately shows far less than the original, so that substitution would
+# read as a mass persistence violation on every sequence's first frame.
+#
+# `frames` carries {style_name}, {frame_context}, {previous_note},
+# {style_adapter} and {output_schema}.
 
 frames: |
   You are an expert Animation Style Verifier. Your objective is to determine if the "{style_name}" animation style has been correctly and consistently applied to a diagram on a per-frame basis, and whether the overall output is acceptable.
 
-  You are provided with the Original Image first, followed by a single animation frame taken from the animation sequence ({frame_context}). You are a highly strict judge. Evaluate this frame against the original image based on the generic quality checks and style-specific rules below.
+  You are provided with, in this order:
+  1. The ORIGINAL fully-revealed diagram image (ground truth layout).
+  2. The PREVIOUS frame in the sequence (the state before this one). {previous_note}
+  3. The CURRENT frame under evaluation ({frame_context}).
+
+  You are a highly strict judge. Evaluate the CURRENT frame against the original image and, where a rule calls for it, directly against the PREVIOUS frame, using the generic quality checks and style-specific rules below. Rules are about the CURRENT frame; the previous frame is evidence, not the subject.
 
   The CRITICAL factors must heavily influence the final verdict.
 
@@ -36,8 +54,8 @@ frames: |
 
 adapter_progressive_reveal: |
   *** PROGRESSIVE REVEAL RULES ***
-  1. Cumulative Addition: The elements present in the current frame must represent a logical cumulative addition from the previous frames.
-  2. Absolute Persistence (CRITICAL): Any element revealed in previous frames MUST remain fully visible in the current frame.
+  1. Cumulative Addition (CRITICAL): The elements present in the current frame must represent a logical cumulative addition from the previous frames.
+  2. Absolute Persistence (Temporal Comparison) (CRITICAL): The animation effect is strictly cumulative. You MUST actively compare the current frame to the PREVIOUS frame. Any element (node, block, text, arrow) that was fully visible in the previous frame MUST still be fully visible in its exact location in the current frame. If anything vanishes, gets deleted, or drops out, this rule is violated.
   3. No Masking/Hiding: Nothing should be hidden, dimmed, or masked. Elements must remain at full visibility.
   4. No Premature Floating Elements (CRITICAL): Arrows, text, or floating nodes must not be visible out of context in distant parts of the diagram before their logical reveal.
 
@@ -46,14 +64,14 @@ adapter_alpha_masking: |
   1. Fade-in Reveal: The currently active elements in the frame must be clearly visible/fading in to full opacity.
   2. Background Masking: Previously active elements (or inactive elements) must be masked to a lower opacity to emphasize the active group.
   3. Semantic Persistence (CRITICAL): Parent containers or background contextual elements must correctly persist across the frame without vanishing completely.
-  4. Opacity Maintenance (CRITICAL): Opacity levels must be stable. Transparent areas must remain transparent; masked areas must not falsely become fully opaque.
+  4. Opacity Maintenance (Temporal Comparison) (CRITICAL): Opacity levels must be stable and must only change for elements this step is actively revealing. You MUST actively compare the current frame to the PREVIOUS frame: an element that was masked/dimmed must not have flickered to full opacity without being the new active group, and a fully-opaque element must not have been dimmed unless the active group legitimately moved on.
 
 adapter_colour_pop: |
   *** COLOUR POP RULES ***
   1. Grayscale Integrity (CRITICAL): All non-active and unrevealed areas of the diagram must be strictly greyscale.
   2. Active Group Colorization: The active element/group in the frame must be fully colored.
-  3. Color Match: The colors appearing in the frame must match the original diagram's colors. However, don't penalize minor changes.
-  4. Cumulative Effect (CRITICAL): Any element that was colored in previous frames MUST remain colored in the current frame. It cannot revert to greyscale.
+  3. Color Match & Anti-Hallucination (CRITICAL): The colors appearing in the frame must logically match the original diagram. Mild variations in tint, brightness, or saturation are acceptable. However, generating completely new hues is a strict violation. If the Original Image is strictly black-and-white, the animation MUST NOT invent and apply new colors (e.g., suddenly coloring a box blue); doing so is a hallucination and an immediate failure.
+  4. Cumulative Effect (Temporal Persistence) (CRITICAL): The color effect builds up and never resets. You MUST actively compare the current frame to the PREVIOUS frame. Any element that had color in the previous frame MUST still have color in the current frame. If an element reverts from colored back to greyscale, this rule is violated.
   5. No Color Bleeding: Colors must strictly stay within the bounds of their defined elements and not bleed into the background.
 
 adapter_hopping_bounding_box: |
@@ -62,7 +80,7 @@ adapter_hopping_bounding_box: |
   2. Box Transparency (CRITICAL): The interior of the bounding box must be strictly transparent (not opaque) and must not obscure the elements beneath it.
   3. Clean Enclosure (CRITICAL): The box must be undistorted and cleanly enclose the target elements. It should not cut through the element, and the element should not spill out.
   4. No Text Overlap: The bounding box stroke/lines must not overlap with, strike through, or cover any textual label.
-  5. Mobile Boxes, Static Elements (CRITICAL): There should not be any displacement of any diagram element. The frames should depict only the hopping of the bounding box
+  5. Mobile Boxes, Static Elements (Temporal Comparison) (CRITICAL): There should not be any displacement of any diagram element. You MUST actively compare the current frame to the PREVIOUS frame: every diagram element must sit at the exact same position and size in both. The ONLY thing permitted to have moved is the bounding box itself.
 
 adapter_sliding_bounding_box: |
   *** SLIDING BOUNDING BOX RULES ***
@@ -71,7 +89,7 @@ adapter_sliding_bounding_box: |
   3. Clean Enclosure (HIGHLY CRITICAL): If the box is at rest over a target in this frame, it must cleanly enclose the target elements without cutting through them or letting them spill out.
   4. No Text Overlap (At Rest): If the box is at rest over a target in this frame, the bounding box stroke/lines must not strike through or cover any textual label.
   5. Hopping Boxes (HIGHLY CRITICAL): There must at least be one frame where the sliding box is shown in-between elements and not ON any element in particular. If all frames are on particular elements, then the overall style should be discarded even if all other conditions are met.
-  6. Mobile Boxes, Static Elements (CRITICAL): There should not be any displacement of any diagram element. The frames should depict only the motion of the bounding box
+  6. Mobile Boxes, Static Elements (Temporal Comparison) (CRITICAL): There should not be any displacement of any diagram element. You MUST actively compare the current frame to the PREVIOUS frame: every diagram element must sit at the exact same position and size in both. The ONLY thing permitted to have moved is the bounding box itself.
 
 schema_progressive_reveal: |
   {
@@ -92,7 +110,7 @@ schema_progressive_reveal: |
         "followed": false
       },
       "absolute_persistence": {
-        "reasoning": "Detailed rationale checking if every previously revealed element is still present.",
+        "reasoning": "Detailed rationale confirming, against the ORIGINAL image, that no element appears half-erased, dropped out, or truncated relative to what this frame has revealed.",
         "followed": true
       },
       "no_masking_or_hiding": {
@@ -163,12 +181,12 @@ schema_colour_pop: |
         "reasoning": "Detailed rationale checking that active elements cleanly transition to color.",
         "followed": true
       },
-      "exact_color_match": {
-        "reasoning": "Detailed rationale verifying the revealed colors perfectly map to the original image.",
+      "color_match_and_anti_hallucination": {
+        "reasoning": "Detailed rationale verifying the revealed colors match the original image. Explicitly state if the original was black-and-white and verify no artificial hues were hallucinated.",
         "followed": true
       },
       "cumulative_effect": {
-        "reasoning": "Detailed rationale confirming that previously colored elements remain colored.",
+        "reasoning": "Detailed rationale confirming, against the ORIGINAL image, that no coloured element appears reverted or partially decoloured.",
         "followed": true
       },
       "no_color_bleeding": {
@@ -208,6 +226,10 @@ schema_hopping_bounding_box: |
       "no_text_overlap": {
         "reasoning": "Detailed rationale confirming the stroke of the bounding box never strikes through textual labels.",
         "followed": true
+      },
+      "mobile_boxes_static_elements": {
+        "reasoning": "Detailed rationale comparing the current frame to the PREVIOUS frame, confirming every diagram element sits at the exact same position and size in both, and that the ONLY thing that moved is the bounding box. If this is the first frame, state that the rule is not applicable.",
+        "followed": true
       }
     },
     "frame_verdict": "ACCEPT"
@@ -241,6 +263,10 @@ schema_sliding_bounding_box: |
       },
       "no_text_overlap": {
         "reasoning": "Detailed rationale confirming the stroke of the bounding box avoids textual labels at its resting position.",
+        "followed": true
+      },
+      "mobile_boxes_static_elements": {
+        "reasoning": "Detailed rationale comparing the current frame to the PREVIOUS frame, confirming every diagram element sits at the exact same position and size in both, and that the ONLY thing that moved is the bounding box. If this is the first frame, state that the rule is not applicable.",
         "followed": true
       }
     },

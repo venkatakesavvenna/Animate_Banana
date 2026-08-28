@@ -71,6 +71,22 @@ def load_keys_from_csv(path: Path, backend_type: str) -> list[str]:
     return list(dict.fromkeys(keys))
 
 
+def _split_keys(value: str) -> list[str]:
+    """One key, or several comma-separated ones.
+
+    A pool given this way rotates through `KeyRing` exactly like a CSV pool, so
+    a key that hits its spend cap is marked exhausted and the next one takes
+    over mid-run instead of the run dying. That is the whole reason this accepts
+    a list: OpenRouter keys carry a hard credit limit, and a sweep that outlives
+    one key should not have to be restarted to reach the second.
+
+    No provider this repo talks to issues keys containing a comma (OpenRouter
+    `sk-or-v1-<hex>`, Google `AIza<base64url>`), so splitting is unambiguous.
+    Blanks are dropped, which makes a trailing comma harmless.
+    """
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
 def resolve_keys(backend_type: str, cfg: dict, default_env: str | None = None) -> list[str]:
     """All usable keys for a backend, most explicit source first.
 
@@ -80,12 +96,12 @@ def resolve_keys(backend_type: str, cfg: dict, default_env: str | None = None) -
     """
     inline = cfg.get("api_key")
     if inline:
-        return [inline]
+        return _split_keys(inline)
 
     env_var = cfg.get("api_key_env") or default_env
     from_env = os.environ.get(env_var) if env_var else None
     if from_env:
-        return [from_env]
+        return _split_keys(from_env)
 
     key_file = find_key_file(cfg.get("api_key_file"))
     if key_file:

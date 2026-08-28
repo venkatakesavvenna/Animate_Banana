@@ -1,0 +1,256 @@
+# V2-DATASET VARIANT. Six study samples exist only under animatebench_v2;
+# run_pipeline takes its dataset root from the config and has no override.
+# CachePaths puts artifacts under cache_root/<dataset name>, so these land
+# in animatebench_v3_cache/animatebench_v2/ -- a separate tree from v3.
+#
+# AnimateBench v3 -- SVG target, Gemma-4-26B-A4B via OpenRouter.
+#
+# The weak-model arm of the four-way metric-soundness study. Same bench, same
+# dataset, same prompts, same critic rounds, same token caps, same judges as the
+# Gemini and Qwen arms; the ONLY difference is which model sits behind every
+# pipeline agent.
+#
+# THE POINT OF THIS CONFIG IS THAT IT SHOULD LOSE. A metric that cannot separate
+# a 26B open-weights model from Gemini 3.7 Flash is not measuring animation
+# quality. Gemma is here to give the metrics something they ought to be able to
+# rank confidently -- if the scoreboard cannot, that is the study's finding.
+#
+# MAX_TOKENS STAYS AT 32768. Gemma bills $0.07/M in and $0.34/M out, about a
+# seventh of Qwen3.8-27B's output rate, so the whole 38-cell arm is ~$1.5 and
+# the token cap is NOT the cost lever here. Lowering it to save money would
+# truncate the SVG mid-emit, which fails as a compile error and pollutes the
+# comparison with a harness artifact rather than a real model weakness.
+#
+# LINEAGE. `CachePaths` keys artifacts on the MODEL string, not the backend
+# alias, so these outputs land under `google-gemma-4-26b-a4b-it__...__svg__...`
+# beside the Gemini and Qwen ones rather than on top of them. Do NOT alias
+# `model:` to a short name -- that would collapse the arms onto one path.
+#
+# THE JUDGES ARE DELIBERATELY UNCHANGED. `gemini_video` and `qwen38_flash_judge`
+# are the metrics under test, not part of the pipeline being compared. Swapping
+# a judge alongside the generator would confound "is the metric sound" with
+# "did the model change".
+#
+# NO PDF, and stage 2a is gone, for exactly the reasons bench_v3_or_svg.yaml
+# gives. Its header is the canonical explanation; this file does not repeat it.
+
+dataset:
+  root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v2
+  limit: 0
+
+cache_root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v3_cache
+
+animation_style: progressive_reveal
+target: svg
+
+backends:
+  openrouter_gemma:
+    type: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    model: google/gemma-4-26b-a4b-it
+    api_key_env: OPEN_ROUTER_KEY
+    # 4, as on the Gemini side: a shared paid endpoint, and the bill is per
+    # token rather than per hour, so more concurrency buys nothing but a faster
+    # route to the $3 cap.
+    max_concurrency: 4
+
+  # Video judge for the vfs_video (E1b) node only. Native `gemini`, not the
+  # OpenRouter route: OpenRouter's openai-compatible schema has no verified
+  # video part type, and openai_compat now raises rather than silently dropping
+  # one. Free-tier Google keys make the whole video study cost nothing.
+  #
+  # max_concurrency 2, not 8. Eight threads over this key pool once landed ZERO
+  # calls in thirty minutes: each thread marked keys exhausted until the ring
+  # had cleared every mark and started again on dead ones. The quota here is
+  # per DAY (20/key), which KeyRing's per-minute-shaped backoff does not model.
+  # PAID video judge, via OpenRouter. Same model as `gemini_video`, different
+  # transport -- use when the free-tier Google pool is exhausted.
+  #
+  # WHY THIS EXISTS. The 75 free keys are 20 requests/DAY each. Running the
+  # 38-cell sweep and pilot scorings together drained them into sustained 429
+  # RESOURCE_EXHAUSTED, and judging fell to 3 cells/hour while workers retried.
+  #
+  # MEASURED COST, not estimated: 12592 prompt + 146 completion tokens per call
+  # at $0.375/M in and $1.875/M out = ~$0.0041/call. Two calls per cell, ~100
+  # model-cells, so the ENTIRE video-judging bill is about $0.83. That is small
+  # enough that waiting on free quota costs more in wall clock than it saves.
+  #
+  # max_concurrency 6, not 2: the free-tier value was shaped around a per-DAY
+  # key quota where aggressive threading raced keys into exhaustion. A paid
+  # single-key endpoint has no such failure mode.
+  #
+  # NOTE the media_resolution param is NOT set here. It is a native-Gemini
+  # GenerateContentConfig field that the OpenAI-compatible route does not
+  # accept, so frames arrive at the default ~60 tokens each rather than ~250.
+  # Criterion 6 of the fidelity prompt (text legibility) is therefore weaker on
+  # this route than on `gemini_video`. Do not mix the two judges' scores for
+  # that criterion without saying which produced them.
+  gemini_video_paid:
+    type: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    model: google/gemini-3.7-flash
+    api_key_env: OPEN_ROUTER_KEY
+    max_concurrency: 6
+
+  gemini_video:
+    type: gemini
+    model: gemini-3.7-flash
+    max_concurrency: 1
+    default_params:
+      # MEASURED, not guessed. Gemini samples inline video at exactly 1 frame
+      # per second (token cost is perfectly linear in duration: 60 tokens per
+      # frame at 2/5/10/20/40 frames), and tokenizes those frames far more
+      # coarsely than a still image -- 60 vs ~700 tokens for the same diagram.
+      # Criterion 6 of the video prompt asks about text legibility, which at 60
+      # tokens/frame the model cannot assess because it cannot read the labels.
+      # HIGH restores ~250 tokens/frame, comparable to how the frame judge sees
+      # them, so a frames-vs-video disagreement is about the modality rather
+      # than about resolution. Costs ~$0.19 for all 64 cells on the paid route,
+      # $0 on free-tier keys.
+      media_resolution: MEDIA_RESOLUTION_HIGH
+
+  # SSS / GPS judge for the letter-band rubric. Frame-level, so it needs image
+  # input but not video: the question is about a pair of consecutive stills and
+  # the XML they map onto.
+  #
+  # A DIFFERENT FAMILY FROM BOTH GENERATORS ON PURPOSE. Scoring Gemini's output
+  # with Gemini, or Qwen3.8-27B's with Qwen3.8-27B, is the circular evaluation
+  # this repo's notes warn about; a shared judge keeps the two comparable and
+  # neither self-preferring.
+  #
+  # Cheap enough not to need rationing: $0.16/M in, $0.47/M out, against
+  # Qwen3.8-27B's $2.55/M out.
+  qwen38_flash_judge:
+    type: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    model: qwen/qwen3.8-flash
+    api_key_env: OPEN_ROUTER_KEY
+    # 8, and this is now the ONE knob that matters: `_banded_workers` reads it
+    # to size the timestep pool, so raising it here parallelises SSS/GPS rather
+    # than only allowing concurrency the sequential driver never used.
+    max_concurrency: 8
+
+  qwen_judge:
+    type: openai_compat
+    base_url: http://127.0.0.1:8010/v1
+    model: Qwen/Qwen3-VL-235B-A22B-Instruct
+    api_key: EMPTY
+    max_concurrency: 8
+
+transmuter:
+  code_converter:
+    backend: openrouter_gemma
+    prompt: diagram_transmuter/svg_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      # Doubled as on the TikZ side: reasoning tokens are billed as output and
+      # spend this budget before a single tag is emitted.
+      max_tokens: 32768
+
+  raster_integrator:
+    enabled: true
+    backend: openrouter_gemma
+    params:
+      temperature: 0.0
+      max_tokens: 32768
+
+  diagram_critic:
+    enabled: true
+    backend: openrouter_gemma
+    prompt: diagram_transmuter/critic.yaml
+    fidelity_threshold: 0.7
+    max_rounds: 3
+    params:
+      temperature: 0.1
+      max_tokens: 32768
+
+planner:
+  # Declared, never run. See the header.
+  strategizer:
+    backend: openrouter_gemma
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+
+  parser:
+    backend: openrouter_gemma
+    prompt: animation_planner/svg_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 32768
+
+  sequencer:
+    backend: openrouter_gemma
+    prompt: animation_planner/svg_sequencer.yaml#new_prompt
+    # context_tier deliberately unset: the bench sequencer prompt names its
+    # own three inputs and plans traversal from them. Setting it (to
+    # caption/abstract/full) feeds the paper's prose in as well AND appends
+    # `ctx-<tier>` to the sequence lineage, so the two variants never share a
+    # cache entry. Left off here so SVG stays comparable with the TikZ run.
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    enabled: true
+    backend: openrouter_gemma
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  narrative_writer:
+    backend: openrouter_gemma
+    prompt: animation_planner/narrative_writer.yaml
+    # The one stage that genuinely wants the paper's own words.
+    context_tier: full
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+animator:
+  designer:
+    backend: openrouter_gemma
+    # Style-keyed, unlike the TikZ designer. `{style}` is expanded at run time
+    # by designer._resolve_prompt, which also maps the two keys whose names
+    # differ from the pipeline's (hopping_box / sliding_box). One config now
+    # serves every style instead of a near-duplicate per style -- which is
+    # exactly how a config's style and its designer prompt drift apart.
+    prompt: animation_designer/svg_designer.yaml#{style}
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  # DISABLED FOR THIS ARM ONLY, AND IT IS A DELIBERATE ASYMMETRY.
+  #
+  # Measured on CVPR_2025_arch01215: asked to repair an animated SVG, Gemma
+  # returned a complete LaTeX/TikZ document instead -- `\documentclass`,
+  # `\begin{tikzpicture}`, 2203 completion tokens, not one `<svg>` tag. The
+  # response cache was clean (no truncation, no completion_tokens=1), so this
+  # is the model ignoring the target representation, not a transport fault, and
+  # a retry reproduces it. `critique-animation` then yields no output and the
+  # run stops before export, leaving nothing to score.
+  #
+  # WHAT THIS COSTS THE COMPARISON. Gemma now runs a SHORTER pipeline than the
+  # Gemini and Qwen arms, which still get three critic rounds. Any Gemma-vs-
+  # others gap therefore mixes model quality with pipeline depth and MUST be
+  # reported that way -- it is no longer "same setup, different model" for this
+  # stage. The designer output is exported unreviewed.
+  #
+  # The critic failure is itself a finding about the model and should be
+  # reported alongside the scores, not buried here.
+  critic:
+    enabled: false
+    backend: openrouter_gemma
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  exporter:
+    # mp4 only -- no pdf for SVG (see header). mp4 also writes exports/frames/.
+    outputs: [mp4]
+    fps: 2
+    dpi: 300

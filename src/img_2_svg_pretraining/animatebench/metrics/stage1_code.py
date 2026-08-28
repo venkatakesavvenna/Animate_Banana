@@ -26,11 +26,20 @@ SEMANTIC_CLASSES = ("block", "standalone_node", "child_node", "raster_node",
                     "text_node", "composite_whole", "composite_part", "edge")
 
 
-def compile_diagram(code: str, cache_dir: Path) -> dict:
-    """Compilation Success Rate input, plus the render used by fidelity."""
-    from img_2_svg_pretraining.viewer.compile import compile_tikz
+def compile_diagram(code: str, cache_dir: Path, target: str = "tikz") -> dict:
+    """Compilation Success Rate input, plus the render used by fidelity.
 
-    result = compile_tikz(code, cache_dir)
+    Dispatches on `target` via `pipeline.render.render_code`, which exists so
+    callers stop being TikZ-only by accident. This one was: it called
+    `compile_tikz` unconditionally, and an SVG run only scored `csr: 1.0`
+    because stage 1c had already rendered the same source into the shared
+    render cache, so the lookup hit before latexmk was ever invoked. Correct
+    answer, accidental mechanism -- disable the critic and the same SVG would
+    have scored 0.
+    """
+    from img_2_svg_pretraining.pipeline.render import render_code
+
+    result = render_code(code, target, Path(cache_dir))
     return {
         "csr": 1.0 if result.ok else 0.0,
         "compiles": bool(result.ok),
@@ -164,9 +173,9 @@ def code_quality(judge, code: str, variant: str = "diagram") -> dict:
 
 
 def run(judge, code: str, image_path: Path, cache_dir: Path,
-        include_quality: bool = False) -> dict:
-    record = {"suite": "stage1"}
-    compiled = compile_diagram(code, cache_dir)
+        include_quality: bool = False, target: str = "tikz") -> dict:
+    record = {"suite": "stage1", "target": target}
+    compiled = compile_diagram(code, cache_dir, target=target)
     record.update(compiled)
 
     tagged = declared_classes(code)

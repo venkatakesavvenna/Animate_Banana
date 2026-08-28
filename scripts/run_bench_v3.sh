@@ -37,7 +37,7 @@
 set -uo pipefail
 
 REPO=/fsxvision_new/venkat.kesav/img_2_svg_pretraining
-CONTAINER=img-2-svg-pretraining-singlenode-venkat.kesav
+CONTAINER=animatebanana-v4
 PY=/environments/img_2_svg_pretraining/bin/python
 CONFIG=src/img_2_svg_pretraining/pipeline/configs/bench_v3_gemini.yaml
 KEYFILE=$REPO/api_keys.live.csv

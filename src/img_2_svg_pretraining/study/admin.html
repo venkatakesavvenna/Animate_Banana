@@ -1,0 +1,184 @@
+<meta charset="utf-8">
+<title>Study admin</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#ffffff;--panel2:#eef1f5;--line:#d8dee6;--fg:#1a1d23;
+      --dim:#5f6b7a;--accent:#2563eb;--ok:#0f9d6e;--warn:#b7791f;--bad:#d13438}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+#top{height:46px;display:flex;align-items:center;gap:16px;padding:0 18px;
+     border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:9}
+#top b{font-size:15px}
+.tab{background:none;border:0;color:var(--dim);font:inherit;padding:6px 12px;
+     border-radius:5px;cursor:pointer}
+.tab.on{background:var(--panel2);color:var(--fg)}
+#tok{margin-left:auto;display:flex;gap:8px;align-items:center}
+input{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+      border-radius:5px;padding:6px 10px;font:inherit}
+.wrap{padding:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:22px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.stat .k{font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+.stat .v{font-size:24px;margin-top:4px;font-variant-numeric:tabular-nums}
+.stat .s{font-size:12px;color:var(--dim);margin-top:2px}
+table{width:100%;border-collapse:collapse;background:var(--panel);
+      border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:22px}
+th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+/* Not sticky: these tables are tens of rows, and a sticky header inside a
+   non-scrolling table floats over the first row instead of pinning above it. */
+th{background:var(--panel2);color:var(--dim);font-weight:600;font-size:11.5px;
+   text-transform:uppercase;letter-spacing:.04em}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;border:1px solid}
+.pill.retired{color:var(--ok);border-color:var(--ok)}
+.pill.active{color:var(--warn);border-color:var(--warn)}
+.pill.untouched{color:var(--dim);border-color:var(--line)}
+h2{font-size:15px;margin:24px 0 10px}
+.bar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;min-width:70px}
+.bar > i{display:block;height:100%;background:var(--accent)}
+.warn{background:var(--panel2);border-left:3px solid var(--warn);padding:10px 14px;
+      border-radius:0 6px 6px 0;color:var(--dim);margin-bottom:18px}
+.dist{display:flex;gap:2px;align-items:flex-end;height:26px}
+.dist i{width:9px;background:var(--accent);display:block;border-radius:1px;min-height:1px}
+button.act{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+           border-radius:5px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
+</style>
+
+<div id="top">
+  <b>Study admin</b>
+  <button class="tab on" data-v="overview">Overview</button>
+  <button class="tab" data-v="samples">Samples</button>
+  <button class="tab" data-v="experiments">Experiments</button>
+  <button class="tab" data-v="participants">Participants</button>
+  <span id="tok"><input id="token" type="password" placeholder="admin token" size="18">
+  <button class="act" id="save">Load</button></span>
+</div>
+<div class="wrap" id="view">Enter the admin token to load.</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s==null?"":s).replace(/[&<>"']/g,
+  (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let TOKEN = sessionStorage.getItem("study_admin_token") || "";
+let VIEW = "overview";
+if (TOKEN) $("#token").value = TOKEN;
+
+async function get(path) {
+  const r = await fetch(path, { headers: { "X-Admin-Token": TOKEN } });
+  if (!r.ok) throw new Error(r.status === 401 ? "bad token" : "HTTP " + r.status);
+  return r.json();
+}
+function num(n){ return n==null?"–":Number(n).toLocaleString(); }
+
+async function render() {
+  try {
+    if (VIEW === "overview") return renderOverview(await get("/admin/api/overview"));
+    if (VIEW === "samples") return renderSamples(await get("/admin/api/samples"));
+    if (VIEW === "experiments") return renderExperiments(await get("/admin/api/experiments"));
+    if (VIEW === "participants") return renderParticipants(await get("/admin/api/participants"));
+  } catch (e) { $("#view").innerHTML = `<div class="warn">${esc(e.message)}</div>`; }
+}
+
+function renderOverview(d) {
+  const cap = Object.entries(d.capacity_participants||{})
+    .map(([k,v]) => `${k}: ${v}`).join(" · ") || "–";
+  const stat = (k,v,s) => `<div class="stat"><div class="k">${k}</div>
+    <div class="v">${v}</div>${s?`<div class="s">${s}</div>`:""}</div>`;
+  $("#view").innerHTML = `
+    ${d.cells_retired === d.cells_total ? `<div class="warn">
+      Every stimulus has reached its quota of ${d.quota}. Further participants
+      will be served nothing until the pool grows.</div>` : ""}
+    <div class="grid">
+      ${stat("Participants", num(d.participants), `${d.experts} expert · ${d.complete} complete`)}
+      ${stat("Started", num(d.started), `${d.trials_open} trial(s) open now`)}
+      ${stat("Trials submitted", num(d.trials_submitted))}
+      ${stat("Answers", num(d.responses), `${num(d.revisions)} were revisions`)}
+      ${stat("Events", num(d.events))}
+      ${stat("Median trial", d.median_trial_seconds ? d.median_trial_seconds+"s" : "–")}
+      ${stat("Cells retired", `${d.cells_retired} / ${d.cells_total}`, `quota ${d.quota}`)}
+      ${stat("Calibration", `${d.calibration.passed} passed`, `${d.calibration.attempts} attempts`)}
+    </div>
+    <h2>Capacity before the pool runs dry</h2>
+    <div class="warn">${esc(cap)} participants. This scales with the stimulus
+      pool, not with recruitment.</div>
+    <h2>Judgments by experiment</h2>
+    <table><tr><th>Experiment</th><th>Pool</th><th class="num">Submitted</th></tr>
+      ${Object.keys(d.pool_sizes).map((e)=>`<tr><td>${e}</td>
+        <td>${d.pool_sizes[e] || `<span class="pill untouched">no stimuli — dark</span>`}</td>
+        <td class="num">${num(d.by_experiment[e]||0)}</td></tr>`).join("")}
+    </table>
+    <h2>Judgments by style</h2>
+    <table><tr><th>Style</th><th class="num">Submitted</th></tr>
+      ${Object.entries(d.by_style).map(([k,v])=>`<tr><td>${esc(k)}</td>
+        <td class="num">${num(v)}</td></tr>`).join("") || "<tr><td>none yet</td><td></td></tr>"}
+    </table>`;
+}
+
+function renderSamples(rows) {
+  $("#view").innerHTML = `<h2>${rows.length} diagrams</h2><table>
+    <tr><th>Diagram</th><th>Density</th><th>Conn.</th><th>Raster</th>
+        <th>Styles</th><th>Cells</th><th>Retired</th><th>Judgments</th></tr>
+    ${rows.map((r)=>`<tr>
+      <td title="${esc(r.title||"")}">${esc(r.diagram_id)}</td>
+      <td>${esc(r.element_density||"–")}</td>
+      <td>${esc(r.connectivity_level||"–")}</td>
+      <td>${r.has_raster?"yes":"no"}</td>
+      <td>${r.narratives.length}</td>
+      <td>${r.cells.length}</td>
+      <td>${r.retired}/${r.cells.length}
+        <span class="bar" style="display:inline-block;width:52px;vertical-align:middle">
+          <i style="width:${r.cells.length?100*r.retired/r.cells.length:0}%"></i></span></td>
+      <td>${Object.entries(r.judgments).map(([k,v])=>`${k}:${v}`).join("  ")||"–"}</td>
+    </tr>`).join("")}</table>`;
+}
+
+function renderExperiments(rows) {
+  $("#view").innerHTML = rows.map((e)=>`
+    <h2>${e.experiment} — ${e.participants} participants, ${e.diagrams} diagrams</h2>
+    <table><tr><th>Question</th><th>Metric</th><th class="num">n</th>
+      <th class="num">Mean</th><th class="num">Median</th><th class="num">SD</th>
+      <th>Distribution</th></tr>
+    ${e.questions.map((q)=>{
+      const d = q.dist ? Object.values(q.dist) : null;
+      const mx = d ? Math.max(...d, 1) : 1;
+      return `<tr><td title="${esc(q.prompt)}">${esc(q.question_id)}</td>
+        <td>${esc(q.metric||"–")}</td><td class="num">${q.n}</td>
+        <td class="num">${q.mean??"–"}</td><td class="num">${q.median??"–"}</td>
+        <td class="num">${q.sd??"–"}</td>
+        <td>${d?`<span class="dist">${d.map((v)=>`<i style="height:${100*v/mx}%" title="${v}"></i>`).join("")}</span>`
+             :(q.counts?esc(Object.entries(q.counts).map(([k,v])=>`${k.replace(/"/g,"")}:${v}`).join(" ")):"–")}</td>
+      </tr>`;}).join("")}</table>`).join("") || "<div class='warn'>No submitted trials yet.</div>";
+}
+
+function renderParticipants(rows) {
+  $("#view").innerHTML = `<h2>${rows.length} participants</h2><table>
+    <tr><th>Name</th><th>Roll</th><th>Level</th><th>Stage</th><th class="num">Trials</th>
+        <th>Calibration</th><th class="num">Flags</th><th></th></tr>
+    ${rows.map((r)=>`<tr>
+      <td>${esc(r.display_name||"–")}${r.is_expert?' <span class="pill retired">expert</span>':""}
+          ${r.excluded?' <span class="pill" style="color:var(--bad);border-color:var(--bad)">excluded</span>':""}</td>
+      <td>${esc(r.roll_no||"–")}</td><td>${esc(r.education_level||"–")}</td>
+      <td>${esc(r.stage)}</td><td class="num">${r.submitted}</td>
+      <td>${r.calibration_passed?"passed":"–"} (${r.calibration_attempts})</td>
+      <td class="num">${r.flags}</td>
+      <td><button class="act" onclick="exclude('${r.participant_id}')">Exclude</button></td>
+    </tr>`).join("")}</table>`;
+}
+
+async function exclude(pid) {
+  const reason = prompt("Reason for excluding this participant?");
+  if (!reason) return;
+  await fetch(`/admin/api/participants/${pid}/annotate`, { method: "POST",
+    headers: {"Content-Type":"application/json","X-Admin-Token":TOKEN},
+    body: JSON.stringify({kind:"exclude", reason})});
+  render();
+}
+
+document.querySelectorAll(".tab").forEach((t)=>{ t.onclick = () => {
+  document.querySelectorAll(".tab").forEach((o)=>o.classList.toggle("on", o===t));
+  VIEW = t.dataset.v; render(); };});
+$("#save").onclick = () => { TOKEN = $("#token").value.trim();
+  sessionStorage.setItem("study_admin_token", TOKEN); render(); };
+if (TOKEN) render();
+</script>

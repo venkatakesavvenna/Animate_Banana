@@ -54,6 +54,66 @@ def _copy(src: Path, dest: Path) -> None:
     shutil.copy2(src, dest)
 
 
+# `..\..\rasters\crop_x.png` or `../../rasters/crop_x.png`, in an href,
+# xlink:href, src or \includegraphics. Captured so only the raster reference is
+# rewritten -- a stray backslash elsewhere in the document is left alone.
+_RASTER_REF = re.compile(r"(\.\.[\\/])+rasters[\\/]([^\"'\s>}]+)")
+
+
+def _rewrite_raster_hrefs(text: str, raster_dir: Path) -> tuple[str, int]:
+    """Point a bundle's raster references at where the import actually puts them.
+
+    Two independent breakages, both real in the Set5 bundle:
+
+    - **Windows separators.** Every one of its 17 SVG diagram files writes
+      `href="..\\..\\rasters\\crop_x.png"`. A backslash is not a path separator
+      to a browser, to resvg, or to `\\includegraphics` on Linux, so the image
+      silently fails to load and the reference renders as a blank box.
+    - **Depth.** In the bundle the code sits at `diagram_codes/<target>/f.html`,
+      two levels above `rasters/`. The import flattens it to
+      `reference/diagram/f.html`, which is only one level above
+      `reference/rasters/` -- so `../../` overshoots by exactly one directory.
+
+    Rewriting is **conditional on the target existing**: if the file the
+    rewritten path would point at is not in `raster_dir`, the original text is
+    kept. A reference we cannot resolve is a fact about the bundle worth
+    preserving, and guessing at it would turn a visibly-missing image into an
+    invisibly-wrong one. Returns the text and the number of references rewritten.
+    """
+    count = 0
+
+    def sub(match: re.Match) -> str:
+        nonlocal count
+        name = match.group(2).replace("\\", "/")
+        if not (raster_dir / name).exists():
+            return match.group(0)
+        count += 1
+        return f"../rasters/{name}"
+
+    return _RASTER_REF.sub(sub, text), count
+
+
+# Files whose raster references are worth rewriting. Binary siblings (.pdf) and
+# everything else are copied byte-for-byte.
+_REWRITABLE = {".html", ".svg", ".tex"}
+
+
+def _copy_code(src: Path, dest: Path, raster_dir: Path) -> int:
+    """Copy a code file, repairing its raster references on the way through."""
+    if src.suffix.lower() not in _REWRITABLE:
+        _copy(src, dest)
+        return 0
+    try:
+        text = src.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        _copy(src, dest)
+        return 0
+    fixed, n = _rewrite_raster_hrefs(text, raster_dir)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(fixed, encoding="utf-8")
+    return n
+
+
 def import_sample(sample_dir: Path, dest_root: Path) -> dict:
     """Import one extracted bundle. Returns a summary of what was found."""
     sample_id = sample_dir.name
@@ -163,9 +223,17 @@ V2_STYLE_CODE = {
 }
 
 # `<id>_<suffix>` in diagram_context/ -> the name discovery expects.
+#
+# The caption is spelled BOTH ways across bundle generations: v2 shipped
+# `<id>_caption.txt`, Set5 ships `<id>_caption.tex`. Only one of the two exists
+# in any given bundle and the copy loop skips a missing source, so listing both
+# is safe. Getting this wrong is silent: the caption simply never lands, and
+# `supports_tier` then fails for `caption`, `abstract` and `full` alike --
+# every sample degrades to `image_only` with no error anywhere.
 V2_CONTEXT = {
     "abstract.tex": "abstract.tex",
     "caption.txt": "caption.txt",
+    "caption.tex": "caption.tex",    # Set5 onwards; `_read_first` tries .tex first
     "method.tex": "methods.tex",     # singular in the bundle, plural in ours
     "title.txt": "title.txt",
 }
@@ -216,7 +284,7 @@ def import_sample_v2(sample_dir: Path, dest_root: Path) -> dict:
 
     summary = {"id": sample_id, "videos": 0, "sequences": 0, "narrations": 0,
                "rasters": 0, "context": [], "image": None, "reviews": 0,
-               "layout": "v2"}
+               "layout": "v2", "animation_codes": 0, "hrefs_fixed": 0}
 
     ctx = sample_dir / "diagram_context"
     image = ctx / f"{sample_id}.png"
@@ -287,10 +355,34 @@ def import_sample_v2(sample_dir: Path, dest_root: Path) -> dict:
             _copy(f, ref / "rasters" / f.name)
             summary["rasters"] += 1
 
+    # Rasters must already be in place: the href rewrite below only fires for a
+    # reference whose target it can actually see.
+    raster_dir = ref / "rasters"
+
     for target in ("tikz", "svg"):
         for f in sorted((sample_dir / "diagram_codes" / target).glob("*")):
             if f.is_file():
-                _copy(f, ref / "diagram" / f.name)
+                summary["hrefs_fixed"] += _copy_code(f, ref / "diagram" / f.name,
+                                                     raster_dir)
+
+    # The animation SOURCE, not just the rendered video. An SVG animation is a
+    # standalone HTML document, and this bundle ships 21 of them against zero
+    # SVG videos -- the only three mp4s in it are TikZ. Copying videos alone
+    # (which is all this importer used to do) therefore leaves the comparison
+    # viewer with an empty reference column for every SVG cell, i.e. nothing to
+    # compare the pipeline's animation against. Rendering these to mp4 is a
+    # separate pass; getting the source in is what makes it possible.
+    for style, code in V2_STYLE_CODE.items():
+        for target in ("tikz", "svg"):
+            src_dir = sample_dir / "animation" / style / target / "codes"
+            if not src_dir.is_dir():
+                continue
+            for f in sorted(src_dir.glob(f"{sample_id}_ani_{target}_{code}.*")):
+                if not f.is_file():
+                    continue
+                dest = ref / "animation" / f"{style}_{sample_id}_{target}{f.suffix}"
+                summary["hrefs_fixed"] += _copy_code(f, dest, raster_dir)
+                summary["animation_codes"] += 1
 
     # New in v2: the author's actual conference talk. Not scored yet, but it
     # is the only human-authored presentation of these figures in existence,
@@ -308,13 +400,28 @@ def import_sample_v2(sample_dir: Path, dest_root: Path) -> dict:
             except (OSError, json.JSONDecodeError):
                 presentation = {}
 
+    # One crop namespace, potentially two sets of boxes. `rasters_state_<target>
+    # .json` carries human-adjusted boxes per target, but the crops themselves
+    # are `crop_<xml_id>.png` with NO target suffix -- so when both state files
+    # exist, only one of them describes the PNGs actually on disk. On the one
+    # Set5 sample where this happens the crops match the TikZ boxes, leaving the
+    # SVG boxes pointing at images that were never rendered from them. Nothing
+    # downstream reads these files today, so this is a note rather than a
+    # repair; recorded so the next person to reach for them knows which half to
+    # distrust instead of rediscovering it from pixel sizes.
+    states = sorted(p.name for p in raster_dir.glob("rasters_state_*.json"))
+    ambiguous = len(states) > 1
+
     (ref / "index.json").parent.mkdir(parents=True, exist_ok=True)
     (ref / "index.json").write_text(json.dumps({
         "sample_id": sample_id, "layout": "v2", "videos": index,
         "reviews": [], "original_presentation": presentation,
+        "raster_states": states,
+        "raster_state_ambiguous": ambiguous,
     }, indent=2), encoding="utf-8")
 
     summary["presentation"] = bool(presentation)
+    summary["raster_state_ambiguous"] = ambiguous
     return summary
 
 
@@ -335,13 +442,31 @@ def main() -> None:
             f"(expected dirs containing inputs/ or diagram_context/)")
 
     args.dest.mkdir(parents=True, exist_ok=True)
+    summaries = []
     for bundle in bundles:
         s = (import_sample_v2 if is_v2(bundle) else import_sample)(bundle, args.dest)
+        summaries.append(s)
         extra = " talk" if s.get("presentation") else ""
+        if s.get("animation_codes"):
+            extra += f" anim_src={s['animation_codes']}"
+        if s.get("hrefs_fixed"):
+            extra += f" hrefs_fixed={s['hrefs_fixed']}"
+        if s.get("raster_state_ambiguous"):
+            extra += " RASTER_STATE_AMBIGUOUS"
         print(f"{s['id']}: [{s.get('layout', 'v1')}] image={s['image']} "
               f"context={len(s['context'])} videos={s['videos']} seq={s['sequences']} "
               f"narration={s['narrations']} rasters={s['rasters']}{extra}")
+
+    # A per-sample line scrolls past; the totals are what tells you a fix
+    # actually fired. `context` counts especially: a bundle whose caption
+    # spelling this importer does not know still imports "successfully", just
+    # with every sample one context file short and every tier degraded.
+    ctx_missing = [s["id"] for s in summaries if len(s["context"]) < 4]
     print(f"\n{len(bundles)} sample(s) -> {args.dest}")
+    print(f"  animation sources : {sum(s.get('animation_codes', 0) for s in summaries)}")
+    print(f"  raster hrefs fixed: {sum(s.get('hrefs_fixed', 0) for s in summaries)}")
+    if ctx_missing:
+        print(f"  INCOMPLETE CONTEXT ({len(ctx_missing)}): {' '.join(ctx_missing[:8])}")
 
 
 if __name__ == "__main__":

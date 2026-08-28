@@ -38,7 +38,12 @@ def _export_svg(ctx: AgentContext, sample: PaperSample, code: str, out_dir: Path
     """
     from ..export.svg_frames import render_svg_frames
 
-    frames, used_fps = render_svg_frames(code, out_dir / "frames", fps=fps)
+    # `style` selects the sampling policy: fade styles get one frame per
+    # state midpoint, sliding also gets in-transit frames. Without it every
+    # style shares one uniform grid, which drops subtitles and makes a slide
+    # look like a hop.
+    frames, used_fps = render_svg_frames(code, out_dir / "frames", fps=fps,
+                                         style=ctx.cfg.style)
     if not frames:
         raise RenderError(f"no frames rendered for '{sample.id}'")
 

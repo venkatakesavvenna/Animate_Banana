@@ -1,0 +1,138 @@
+<meta charset="utf-8">
+<title>AnimateBanana study</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#ffffff;--panel2:#eef1f5;--line:#d8dee6;--fg:#1a1d23;
+      --dim:#5f6b7a;--accent:#2563eb;--ok:#0f9d6e;--warn:#b7791f;--bad:#d13438}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:640px;margin:0 auto;padding:48px 24px 80px}
+h1{font-size:26px;margin:0 0 6px}
+.sub{color:var(--dim);margin:0 0 28px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      padding:22px;margin-bottom:18px}
+h2{font-size:16px;margin:0 0 14px}
+label{display:block;font-size:13px;color:var(--dim);margin:14px 0 5px}
+input,select{width:100%;background:var(--panel2);color:var(--fg);
+             border:1px solid var(--line);border-radius:6px;padding:9px 11px;font:inherit}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+.consent{display:flex;gap:10px;align-items:flex-start;margin-top:16px;
+         font-size:14px;color:var(--dim)}
+.consent input{width:auto;margin-top:3px}
+button{background:var(--accent);color:#ffffff;border:0;border-radius:6px;
+       padding:11px 20px;font:inherit;font-weight:600;cursor:pointer;margin-top:20px}
+button:disabled{background:var(--line);color:var(--dim);cursor:not-allowed}
+.err{color:var(--bad);font-size:13px;margin-top:10px;min-height:18px}
+ul{color:var(--dim);font-size:14px;padding-left:20px;margin:10px 0 0}
+li{margin-bottom:6px}
+.resume{background:var(--panel2);border-left:3px solid var(--ok)}
+a{color:var(--accent)}
+</style>
+
+<div class="wrap">
+  <h1>Animated figure study</h1>
+  <p class="sub">Judging how well generated animations explain scientific diagrams.</p>
+
+  <div class="card resume" id="resume" style="display:none">
+    <h2>You have a session in progress</h2>
+    <p class="sub" style="margin:0">Pick up where you left off — your answers are saved.</p>
+    <button id="continue">Continue</button>
+    <button id="fresh" style="background:var(--line);color:var(--fg);margin-left:8px">Start over</button>
+  </div>
+
+  <div class="card" id="register">
+    <h2>About you</h2>
+    <p class="sub" style="font-size:13px;margin:0">
+      Your name and roll number are stored separately from your answers and are
+      never part of the analysis — they exist only so we can tell whose session
+      is whose if you need to resume.</p>
+
+    <label for="name">Name</label>
+    <input id="name" autocomplete="off">
+
+    <label for="level">You are a…</label>
+    <select id="level">
+      <option value="">Choose one</option>
+      <option value="student">Student</option>
+      <option value="faculty">Faculty</option>
+      <option value="researcher">Researcher</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label for="roll">Roll number <span id="rollnote">(students only)</span></label>
+    <input id="roll" autocomplete="off">
+
+    <label for="area">Broad area you work in</label>
+    <input id="area" placeholder="e.g. computer vision, databases, NLP">
+
+    <label for="papers">How often do you read papers with figures like these?</label>
+    <select id="papers">
+      <option value="">Choose one</option>
+      <option value="weekly">Most weeks</option>
+      <option value="monthly">A few times a month</option>
+      <option value="rarely">Rarely</option>
+    </select>
+
+    <div class="consent">
+      <input type="checkbox" id="consent">
+      <label for="consent" style="margin:0;color:var(--fg)">
+        I agree to take part. I understand my responses are recorded and used in
+        aggregate for research, and that I can stop at any time.
+      </label>
+    </div>
+
+    <button id="go" disabled>Begin</button>
+    <div class="err" id="err"></div>
+  </div>
+
+  <div class="card">
+    <h2>What to expect</h2>
+    <ul>
+      <li>You will see a figure from a paper alongside an animated version of it.</li>
+      <li>Watch each animation through once, then answer a short set of questions.</li>
+      <li>You can replay freely, slow it down, or step through it frame by frame.</li>
+      <li>You can go back and change an earlier answer at any point in a trial.</li>
+      <li>There are no right answers. Your honest impression is the data.</li>
+    </ul>
+  </div>
+</div>
+
+<script src="/study.js"></script>
+<script>
+if (Session.get()) el("#resume").style.display = "block";
+el("#continue").onclick = () => location.href = "/study";  // resume skips prep
+el("#fresh").onclick = () => { Session.clear(); location.reload(); };
+
+const fields = ["#name", "#level", "#consent", "#papers"];
+function validate() {
+  const ok = el("#name").value.trim() && el("#level").value
+             && el("#papers").value && el("#consent").checked;
+  el("#go").disabled = !ok;
+}
+fields.forEach((f) => { el(f).oninput = validate; el(f).onchange = validate; });
+el("#level").onchange = () => {
+  const student = el("#level").value === "student";
+  el("#rollnote").textContent = student ? "(required)" : "(optional)";
+  validate();
+};
+
+el("#go").onclick = async () => {
+  el("#go").disabled = true;
+  el("#err").textContent = "";
+  try {
+    const res = await api("/api/register", { method: "POST", body: JSON.stringify({
+      display_name: el("#name").value.trim(),
+      education_level: el("#level").value,
+      roll_no: el("#roll").value.trim(),
+      area: el("#area").value.trim(),
+      reads_papers: el("#papers").value,
+      consent: el("#consent").checked,
+    })});
+    Session.set(res.participant_id);
+    location.href = "/prepare";
+  } catch (e) {
+    el("#err").textContent = "Could not start: " + e.message;
+    el("#go").disabled = false;
+  }
+};
+</script>

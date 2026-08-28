@@ -280,6 +280,81 @@ METRICS: dict[str, dict] = {
         "judged": True,
         "terms": ["vfs_raw", "vfs_frames_judged"],
     },
+    "vfs_band": {
+        "label": "Visual Fidelity (video, banded)",
+        "stage": "Animation \u00b7 elimination 1",
+        "doc": "VFS",
+        "what": "The same six fidelity axes as VFS, judged from the whole "
+                "animation as a video, but returned as one of four bands "
+                "rather than a 0-10 score. BAND A/B pass; BAND C/D fail.",
+        "better": "higher",
+        "range": "BAND A \u2013 BAND D",
+        "caveat": "Bands exist because the numeric scales did not "
+                  "discriminate: 86% of scored cells sat at exactly VFS 1.0, "
+                  "which makes a correlation against them undefined rather "
+                  "than weak. The band boundary is the prompt's own -- it "
+                  "labels C 'Poor (FAIL)' and D 'Severe Failure (FAIL)' -- so "
+                  "the pass rule is transcribed, not a threshold invented "
+                  "here. Judged by Gemini 3.7 Flash on a 4x-slowed video.",
+        "formula": "One judged call over the whole animation returning "
+                   "`fidelity_band`; stored as an ordinal 0 (BAND A) to 3 "
+                   "(BAND D), passing at <= 1.",
+        "judged": True,
+        "terms": ["vfs_band_ordinal", "vfs_band_pass", "vfs_band_summary",
+                  "vfs_band_rationale", "vfs_band_frame_count",
+                  "vfs_band_source"],
+    },
+    "ascs_video": {
+        "label": "Style Compliance (video)",
+        "stage": "Animation \u00b7 elimination 2",
+        "doc": "ASCS",
+        "what": "Was the declared animation style actually implemented? Asked "
+                "ONCE of the whole animation, with a timestamped rationale, "
+                "instead of once per frame.",
+        "better": "higher",
+        "range": "ACCEPT / DISCARD",
+        "caveat": "Deliberately not the same question as frame-level `ascs`. "
+                  "That metric folds per-frame verdicts with a strict AND, and "
+                  "35% of its cell failures rest on a single frame even though "
+                  "the per-frame judgements are internally consistent "
+                  "(Spearman-Brown 0.809) -- the aggregation was the unreliable "
+                  "half, so this removes it. It also asks something a frame "
+                  "judge cannot answer at all: hopping and sliding differ only "
+                  "in transit, and every individual frame of both shows a box "
+                  "at rest. That only works if the deck actually contains the "
+                  "transit -- see `ascs_video_source`, which says whether the "
+                  "dense deck was used.",
+        "formula": "`overall_verdict` from one judged call over a 4x-slowed "
+                   "video; ACCEPT passes.",
+        "judged": True,
+        "terms": ["ascs_video_verdict", "ascs_video_pass",
+                  "ascs_video_rationale", "ascs_video_frame_count",
+                  "ascs_video_source", "ascs_video_fps"],
+    },
+    "vfs_video": {
+        "label": "Visual Fidelity (video)",
+        "stage": "Animation · elimination 1b",
+        "doc": "VFS",
+        "what": "The same six fidelity axes as VFS, but judged from the "
+                "animation as a video rather than from still frames. Sees "
+                "what a frame check structurally cannot: flicker, transient "
+                "corruption, mid-animation reverts, elements that appear and "
+                "then disappear again.",
+        "better": "higher",
+        "range": "0–1",
+        "caveat": "A different judge on a different modality, so it is not a "
+                  "drop-in replacement for `vfs` and the two are not averaged. "
+                  "Measured Spearman between them is 0.19 over 64 cells -- "
+                  "they rank animations differently, which is why both are "
+                  "shown. Frame VFS ties 55 of those 64 cells at exactly 1.0; "
+                  "the video judge splits that tie 15 ways.",
+        "formula": "visual_fidelity_score / 10 from a single judged call over "
+                   "the whole animation, re-timed to the judge's own sampling "
+                   "rate so every animation frame is actually seen.",
+        "judged": True,
+        "terms": ["vfs_video_raw", "vfs_video_frame_count",
+                  "vfs_video_temporal_defects"],
+    },
     "ascs_pass": {
         "label": "Ani-Style Compliance",
         "stage": "Animation · elimination 2",
@@ -406,8 +481,13 @@ SUITE_ORDER: dict[str, list[str]] = {
     "sequence": ["coverage_recall", "coverage_precision", "tof", "dovr", "sscr_pass"],
     "stage3": ["anim_csr", "aif", "anim_code_quality"],
     # Tree order: the three gates, then the three contributors.
-    "animation": ["vfs", "ascs_pass", "omission_rate", "arrow_omission_count",
-                  "sss", "gps", "repetition_rate"],
+    # Each revised metric sits immediately after the one it revises, so a
+    # reader compares the frame verdict against the video verdict on the same
+    # row rather than hunting across the table. None of them replace anything:
+    # the study's whole question is whether they disagree.
+    "animation": ["vfs", "vfs_video", "vfs_band", "ascs_pass", "ascs_video",
+                  "omission_rate", "arrow_omission_count", "sss", "gps",
+                  "repetition_rate"],
 }
 
 
@@ -549,6 +629,23 @@ def describe(key: str) -> dict:
 
 def ordered(suite: str) -> list[str]:
     return SUITE_ORDER.get(suite, [])
+
+
+# The scoreboard's column groups: suite -> heading, in pipeline-stage order.
+#
+# Lives here rather than in `inspector/compare.py`, where it started, because
+# two things now render this same table -- the viewer and
+# `animatebench.aggregate` -- and a per-model summary whose columns disagree
+# with the per-sample view they summarise is worse than having no summary. The
+# dependency only points one way: compare.py already imports `descriptions`,
+# while the reverse would drag flask into the eval package.
+TABLE_SUITES: list[tuple[str, str]] = [
+    ("stage1", "Code"),
+    ("xml", "XML"),
+    ("sequence", "Sequence"),
+    ("stage3", "Animation"),
+    ("animation", "Anim. quality"),
+]
 
 
 def suite_note(suite: str) -> dict:

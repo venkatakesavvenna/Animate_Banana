@@ -111,6 +111,11 @@ def write_live(keys: list[str], path: Path = LIVE) -> None:
             fh.write(f"{key}, Google\n")
 
 
+def _mask(key: str) -> str:
+    """Enough to identify a key in a report; not enough to use it."""
+    return f"{key[:10]}...{key[-6:]}" if len(key) > 20 else "***"
+
+
 def sweep(keys: list[str], model: str) -> list[tuple[str, int, str]]:
     with ThreadPoolExecutor(max_workers=8) as pool:
         return list(pool.map(lambda k: probe(k, model), keys))
@@ -158,9 +163,15 @@ def main() -> None:
     live = report(results)
     write_live(live)
     STATUS.parent.mkdir(parents=True, exist_ok=True)
+    # Masked, never the raw key: this file lives under logs/, which is
+    # tracked, and a full key here is a credential leak waiting for someone to
+    # `git add -A`. api_keys.live.csv carries the real values and is the one
+    # path in .gitignore's `*.csv` rule -- that is the only file allowed to
+    # hold them.
     STATUS.write_text(json.dumps(
         {"model": args.model, "live": len(live), "total": len(results),
-         "by_key": {k: c for k, c, _ in results}}, indent=2), encoding="utf-8")
+         "by_key": {_mask(k): c for k, c, _ in results}}, indent=2),
+        encoding="utf-8")
     print(f"wrote {LIVE} and {STATUS}")
     if not live:
         print("\nNo key has quota left today. Runs will fail until reset.",

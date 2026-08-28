@@ -65,6 +65,50 @@ backends:
     # $10 balance before anyone notices.
     max_concurrency: 4
 
+  # The animation evaluation tree's judge. Design docs name
+  # Qwen3-VL-235B-A22B for every node -- reachable only as a served endpoint,
+  # so it runs locally under vLLM (img2svg-qwen-venkat container, TP=8, bf16,
+  # port 8010) and is spoken to over the OpenAI-compatible route, which
+  # already sends images as data URLs. Deliberately a different model family
+  # from openrouter_flash, which generated these animations: judging a
+  # model's output with itself is the circular-evaluation risk this project's
+  # own notes call out.
+  #
+  #   run_eval animation --config .../bench_v3_or.yaml \
+  #     --style <style> --judge-backend qwen_judge
+  # Video judge for the vfs_video (E1b) node only. Native `gemini`, not the
+  # OpenRouter route: OpenRouter's openai-compatible schema has no verified
+  # video part type, and openai_compat now raises rather than silently dropping
+  # one. Free-tier Google keys make the whole video study cost nothing.
+  #
+  # max_concurrency 2, not 8. Eight threads over this key pool once landed ZERO
+  # calls in thirty minutes: each thread marked keys exhausted until the ring
+  # had cleared every mark and started again on dead ones. The quota here is
+  # per DAY (20/key), which KeyRing's per-minute-shaped backoff does not model.
+  gemini_video:
+    type: gemini
+    model: gemini-3.7-flash
+    max_concurrency: 1
+    default_params:
+      # MEASURED, not guessed. Gemini samples inline video at exactly 1 frame
+      # per second (token cost is perfectly linear in duration: 60 tokens per
+      # frame at 2/5/10/20/40 frames), and tokenizes those frames far more
+      # coarsely than a still image -- 60 vs ~700 tokens for the same diagram.
+      # Criterion 6 of the video prompt asks about text legibility, which at 60
+      # tokens/frame the model cannot assess because it cannot read the labels.
+      # HIGH restores ~250 tokens/frame, comparable to how the frame judge sees
+      # them, so a frames-vs-video disagreement is about the modality rather
+      # than about resolution. Costs ~$0.19 for all 64 cells on the paid route,
+      # $0 on free-tier keys.
+      media_resolution: MEDIA_RESOLUTION_HIGH
+
+  qwen_judge:
+    type: openai_compat
+    base_url: http://127.0.0.1:8010/v1
+    model: Qwen/Qwen3-VL-235B-A22B-Instruct
+    api_key: EMPTY
+    max_concurrency: 8
+
 transmuter:
   code_converter:
     backend: openrouter_flash

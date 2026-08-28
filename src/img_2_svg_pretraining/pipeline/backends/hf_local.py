@@ -31,8 +31,8 @@ from __future__ import annotations
 
 import time
 
-from .base import ChatBackend
-from .types import GenerationResult, ImagePart, Message, TextPart
+from .base import ChatBackend, BackendError
+from .types import GenerationResult, ImagePart, Message, TextPart, VideoPart
 
 MODEL_CLASSES = ("image_text_to_text", "multimodal_lm")
 
@@ -202,6 +202,13 @@ class HFLocalBackend(ChatBackend):
                         "type": "image",
                         "image": Image.open(part.path).convert("RGB"),
                     })
+                elif isinstance(part, VideoPart):
+                    # Loudly, not silently. A backend that ignored the video
+                    # would still return a confident score computed from the
+                    # source image alone -- indistinguishable from a real one.
+                    raise BackendError(
+                        f"{self.name}: this backend cannot send video "
+                        f"({part.path}); use a 'gemini' backend for video judging")
             out.append({"role": m.role, "content": content})
         return out
 

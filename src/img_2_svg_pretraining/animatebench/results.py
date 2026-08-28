@@ -66,21 +66,37 @@ HEADLINES: dict[str, list[str]] = {
 }
 
 
-def collect(root: Path) -> dict:
-    """Every suite record under evals/, keyed (config, style, sample)."""
+def collect(root: Path, configs: list[str] | None = None) -> dict:
+    """Every suite record under evals/, keyed (config, style, sample).
+
+    NOT EVERY DIRECTORY UNDER evals/ IS A CONFIG. It also holds `alignment/`,
+    `checklist/`, `raw/`, `_frames/`, `_compile_work/` and archived
+    `_stale_prompts_<date>/` -- all four levels deep, so a `*/*/*/*.json` glob
+    reaches straight into them. Skipping `alignment` alone (which is what this
+    did) let the rest through as if they were models: the committed report.md
+    really does carry a `## checklist` section, and a stale-prompt archive would
+    be reported as a config with 45 samples.
+
+    The reliable discriminator is the filename, not the directory name: a real
+    record is `<suite>.json` for a suite we know. That needs no maintenance as
+    new sibling directories appear, which a name blacklist does -- there were
+    two such blacklists in this repo and both had already fallen behind.
+    """
     out: dict[str, dict] = {}
     for path in sorted(Path(root).glob("*/*/*/*.json")):
         suite = path.stem
-        sample = path.parent.name
-        style = path.parent.parent.name
+        if suite not in HEADLINES:
+            continue
         config = path.parent.parent.parent.name
-        if config == "alignment":
+        if config == "alignment" or config.startswith("_"):
+            continue
+        if configs is not None and config not in configs:
             continue
         record = read_record(path)
         if record is None:
             continue
-        out.setdefault(config, {}).setdefault(style, {}) \
-           .setdefault(sample, {})[suite] = record
+        out.setdefault(config, {}).setdefault(path.parent.parent.name, {}) \
+           .setdefault(path.parent.name, {})[suite] = record
     return out
 
 

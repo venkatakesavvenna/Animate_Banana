@@ -122,6 +122,12 @@ def _validate_prompt_ref(agent_name: str, ref: str) -> None:
         keys = available_prompts(file_part)
     except PromptError as e:
         raise ConfigError(f"agent '{agent_name}': {e}") from e
+    if key == "{style}":
+        # Resolved per run from cfg.style (designer._resolve_prompt), so there
+        # is no single key to check here. Validate that the file offers a
+        # style-keyed set at all -- a typo'd filename still fails loudly, and
+        # an unknown style fails at run time naming the style.
+        return
     if key is not None and key not in keys:
         raise ConfigError(
             f"agent '{agent_name}': prompt '{file_part}' has no key '{key}'. Available: {keys}"

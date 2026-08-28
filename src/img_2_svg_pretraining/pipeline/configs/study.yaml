@@ -1,0 +1,44 @@
+# Study parameters. Loaded by `study.config.StudyConfig`, then written into the
+# `study_config` table as a numbered version. Every trial records the version it
+# ran under, so changing anything here cannot reinterpret data already collected
+# -- it starts a new version instead.
+
+study_version: pilot-1
+state: open                      # open | paused | closed
+
+experiment_order: [exp1, exp2, exp3, exp4, exp5]
+
+# An experiment with no stimuli in the bundle ships dark whatever this says:
+# the scheduler skips any arm whose pool is empty, so exp3/exp4/exp5 turn on by
+# themselves the moment their pairs land.
+enabled:
+  exp1: true      # animation quality   (captions off)
+  exp2: true      # narrative quality   (captions on, same media)
+  exp3: true      # context utility     (+K vs -K)
+  exp4: true      # system comparison   (ours vs end-to-end baseline)
+  exp5: true      # benchmark verification (ours vs bench reference)
+
+# Samples each participant judges per experiment.
+samples_per_experiment:
+  exp1: 10
+  exp2: 10
+  exp3: 10
+  exp4: 10
+  exp5: 10
+
+# Retire a sample once it has this many independent judgments; a replacement is
+# then drawn from the same stratification class. This is a hard quota -- once an
+# experiment's pool is fully retired the scheduler moves participants on rather
+# than gathering judgments we have decided we do not need.
+#
+# CAPACITY: pool_size x judgments_per_sample / samples_per_experiment
+# participants. With today's 15 SVG samples that is 9 participants before exp1
+# and exp2 are both saturated. It rises with the pool, not with recruitment.
+judgments_per_sample: 6
+
+# Fields that must match when a retired sample is replaced.
+stratum_fields: [element_density, connectivity_level, has_raster]
+
+attention_check_fraction: 0.0    # raise once degraded stimuli are generated
+calibration_pass_threshold: 0.7
+open_trial_ttl_seconds: 7200

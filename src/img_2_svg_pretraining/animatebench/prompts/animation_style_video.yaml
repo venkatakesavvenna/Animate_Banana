@@ -1,0 +1,167 @@
+# Animation Style Compliance, judged from the VIDEO (E2-video).
+#
+# The frame-level ASCS in `animation_style.yaml` asks one question per frame and
+# folds the answers with a strict AND, so a twenty-frame deck fails on a single
+# DISCARD -- and `docs/METRIC_RELIABILITY.md` measured that 35% of its failures
+# rest on exactly one frame. These prompts ask the question ONCE, of the whole
+# video, which is the only way a judge can see the property the style is
+# actually about: what happens BETWEEN frames.
+#
+# That matters most for the two bounding-box styles, where hopping and sliding
+# are distinguishable only in transit. A frame judge literally cannot tell them
+# apart -- every individual frame of a hop and of a slide shows a box resting
+# somewhere -- so the frame-level metric was answering a different question than
+# the one the style poses.
+#
+# ONE SELF-CONTAINED PROMPT PER STYLE, no body/adapter split. The bodies differ
+# in their rules and their definitions, not merely in a spliced-in paragraph,
+# so a shared body would have to be mostly conditionals. Transcribed verbatim
+# from the Notion source; edit there and re-transcribe rather than diverging.
+#
+# The judge is Gemini 3.7 Flash via the native `gemini_video` backend. Verdicts
+# are ACCEPT / DISCARD with a timestamped rationale -- the timestamp is the
+# evidence, and a rationale without one should be treated as unverified.
+
+progressive_reveal: |
+  You are an expert Animation Style Verifier. Your objective is to determine if the "Progressive Reveal" animation style has been correctly and consistently applied to a diagram throughout an entire video, using the original static diagram as the ground-truth reference.
+
+  You will be provided with the Original Image first, followed by the Video. You are a highly strict judge.
+
+  *** DEFINITION OF PROGRESSIVE REVEAL ***
+  Starting from a blank canvas, the figure is revealed in parts. As new parts of the figure are revealed, the previously revealed parts MUST persist on the screen. They do not disappear, and they do not get masked or greyed out by a transparent layer.
+  (Note: If the entire diagram is visible or  masked from the beginning and either simply changes colors, or masks and unmasks different parts of the diagram with a transparent layer at different timesteps, this is a violation of the style).
+
+  *** CRITICAL RULES ***
+  If ANY of these rules are broken at any point in the video, the animation is uncompliant and MUST be discarded.
+  1. Purely Cumulative (Build-up): The elements must appear sequentially and eventually build up to the provided full view of the diagram. The effect is strictly cumulative.
+  2. No Masking/Greying: There should be no masking, dimming, or greying of any part of the figure as other components are displayed.
+  3. No Premature Floating Elements: Arrows, text, or floating nodes must not appear out of context in distant parts of the diagram before their logical connecting components are revealed.
+  4. Generic Quality: The video must maintain visual integrity. It must not introduce blur, jitter, rendering artifacts, or text corruption.
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below. Do not output conversational text.
+  Provide a single rationale. If the video is non-compliant, explain exactly which rule failed and provide the timestamp as evidence (e.g., "At 0:03, the entire diagram is already visible" or "At 0:05, the previously revealed blue node is masked by a grey layer"). If the video is compliant, simply state "The video is style compliant."
+
+  {
+    "metadata": {
+      "animation_style": "Progressive Reveal"
+    },
+    "overall_verdict": "ACCEPT or DISCARD",
+    "rationale": "Explanation of failure with timestamp evidence, OR 'The video is style compliant.' if ACCEPT."
+  }
+
+alpha_masking: |
+  You are an expert Animation Style Verifier. Your objective is to determine if the "Alpha Masking" animation style has been correctly and consistently applied to a diagram throughout an entire video, using the original static diagram as the ground-truth reference.
+
+  You will be provided with the Original Image first, followed by the Video. You are a highly strict judge.
+
+  *** DEFINITION OF ALPHA MASKING ***
+  Unlike Progressive Reveal, Alpha Masking is strictly non-cumulative. Elements do not permanently build up to complete the full diagram. Instead, at each step of the animation, a specific active group of elements is unmasked and fully visible, while inactive elements are covered by a transparent mask layer. The original appearance and colors of elements must remain intact-they must not be greyed out, dimmed, or color-shifted, but simply covered by a transparent layer when inactive.
+
+  *** CRITICAL RULES ***
+  If ANY of these rules are broken at any point in the video, the animation is uncompliant and MUST be discarded.
+  1. Active Element Visibility: Currently active elements must be clearly visible with no partial masking. There must be no change in color or appearance of the unmasked elements.
+  2. Inactive Element Masking: Elements that are not currently active must be covered with a transparent layer and strictly must not be fully visible on screen.
+  3. Structural Persistence: Parent containers or background contextual elements must correctly persist across the timeline without vanishing completely when child nodes change active states.
+  4. Generic Quality: The video must maintain visual integrity. It must not introduce blur, jitter, rendering artifacts, or text/shape corruption.
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below. Do not output conversational text.
+  Provide a single rationale. If the video is non-compliant, explain exactly which rule failed and provide the timestamp as evidence (e.g., "At 0:04, the inactive node remains fully visible without a transparent mask layer" or "At 0:02, the parent container completely vanishes"). If the video is compliant, simply state "The video is style compliant."
+
+  {
+    "metadata": {
+      "animation_style": "Alpha Masking"
+    },
+    "overall_verdict": "ACCEPT or DISCARD",
+    "rationale": "Explanation of failure with timestamp evidence, OR 'The video is style compliant.' if ACCEPT."
+  }
+
+colour_pop: |
+  You are an expert Animation Style Verifier. Your objective is to determine if the "Colour Pop" animation style has been correctly and consistently applied to a diagram throughout an entire video, using the original static diagram as the ground-truth reference.
+
+  You will be provided with the Original Image first, followed by the Video. You are a highly strict judge.
+
+  *** DEFINITION OF COLOUR POP ***
+  The entire canvas starts out in grayscale at the beginning of the video. As the video progresses, elements start getting progressively and cumulatively colored until the final frame perfectly matches the provided Original Image. Even if some elements are masked initially, the visible image must start in grayscale before colors are introduced.
+
+  *** CRITICAL RULES ***
+  If ANY of these rules are broken at any point in the video, the animation is uncompliant and MUST be discarded.
+  1. Grayscale Integrity: All non-active and unrevealed areas of the diagram must be strictly grayscale.
+  2. Cumulative Colorization (No Reversion): Once an element is colored, it must NEVER go back to being grayscale. The coloration process is strictly cumulative over time.
+  3. Color Match & Anti-Hallucination: The colors appearing in the video must logically match the original diagram. Mild variations in tint, brightness, or saturation are acceptable, but generating completely new hues is a strict violation. If the Original Image is strictly black-and-white, the animation MUST NOT invent and apply new colors (e.g., suddenly coloring a box blue); doing so is a hallucination.
+  4. No Color Bleeding: Colors must strictly stay within the bounds of their defined elements and not bleed into the background or neighboring shapes.
+  5. Generic Quality: The video must maintain visual integrity. It must not introduce blur, jitter, rendering artifacts, or text/shape corruption.
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below. Do not output conversational text.
+  Provide a single rationale. If the video is non-compliant, explain exactly which rule failed and provide the timestamp as evidence (e.g., "At 0:03, the blue box reverts to grayscale" or "At 0:04, a hallucinated red color appears on a strictly black-and-white diagram"). If the video is compliant, simply state "The video is style compliant."
+
+  {
+    "metadata": {
+      "animation_style": "Colour Pop"
+    },
+    "overall_verdict": "ACCEPT or DISCARD",
+    "rationale": "Explanation of failure with timestamp evidence, OR 'The video is style compliant.' if ACCEPT."
+  }
+
+hopping_bounding_box: |
+  You are an expert Animation Style Verifier. Your objective is to determine if the "Hopping Bounding Box" animation style has been correctly applied to a diagram throughout an entire video.
+
+  You will be provided with the Original Image first, followed by the Video. You are a highly strict judge.
+
+  *** DEFINITION: HOPPING VS. SLIDING ***
+  - HOPPING (ACCEPT): The bounding box vanishes from Element A and instantly reappears on Element B. It only ever exists perfectly enclosing a target element.
+  - SLIDING (DISCARD): The bounding box physically travels across the canvas. During transitions, the box is caught "in transit"-meaning it is seen floating over white space, passing over arrows, or overlapping multiple unrelated elements as it moves.
+
+  *** CRITICAL RULES ***
+  If ANY of these rules are broken at any point in the video, the animation is uncompliant and MUST be discarded.
+
+  1. The "In-Transit" Check (Strict No-Sliding): Carefully observe the bounding box when it changes targets. If you ever see the bounding box caught in empty space between two nodes, crossing over connecting arrows, or physically traversing the canvas to get to its next destination, it is a SLIDING animation. DISCARD IMMEDIATELY.
+  2. Box Transparency: The interior of the bounding box must be strictly transparent (not opaque). It must not obscure, dim, or alter the appearance of the elements beneath it.
+  3. Clean Enclosure: When resting on an element, the box must cleanly enclose it. If it cuts deeply through the element's text or shapes, it fails. (Very minor edge spillage is acceptable).
+  4. Static Canvas: The underlying diagram elements (nodes, text, background) must remain completely static. Only the bounding box should animate.
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below. Do not output conversational text.
+  Provide a single, precise rationale. If the video fails, you MUST cite the specific timestamp and describe exactly where the bounding box was caught "in transit" (e.g., "At 0:03, the bounding box is seen in the empty space between 'Entities' and 'Visual Encoder', proving it is sliding rather than hopping").
+
+  {
+    "metadata": {
+      "animation_style": "Hopping Bounding Box"
+    },
+    "overall_verdict": "ACCEPT or DISCARD",
+    "rationale": "Detailed explanation of failure with timestamps and spatial descriptions, OR 'The video is style compliant.' if ACCEPT."
+  }
+
+sliding_bounding_box: |
+  You are an expert Animation Style Verifier. Your objective is to determine if the "Sliding Bounding Box" animation style has been correctly applied to a diagram throughout an entire video.
+
+  You will be provided with the Original Image first, followed by the Video. You are a highly strict judge.
+
+  *** DEFINITION: SLIDING VS. HOPPING ***
+  - SLIDING (ACCEPT): The bounding box smoothly travels across the canvas from one target element to the next. You MUST clearly see the box in transit (e.g., passing over empty space or arrows between nodes).
+  - HOPPING (DISCARD): If the box only ever appears perfectly resting on elements and instantly teleports without visible sliding transitions, it is a Hopping style and must be discarded.
+  - NO BOX (DISCARD): If there is no bounding box present at all, discard immediately.
+
+  *** CRITICAL RULES ***
+  If ANY of these rules are broken at any point in the video, the animation is uncompliant and MUST be discarded.
+
+  1. Visible Transit Requirement (Anti-Hopping): There must be clear visual evidence of the bounding box sliding between elements. If it only teleports, discard.
+  2. Adaptive Enclosure & Resizing: When at rest, the box must cleanly enclose the target element. The bounding box MUST dynamically adapt its size and proportions to fit the specific element it is highlighting (it should not remain one fixed, rigid size). Very minor edge spillage is acceptable, but significant spillage or cutting through the element is a violation.
+  3. Transition Integrity: While sliding across the canvas, the bounding box must maintain its structural shape (a recognizable box) and not warp or distort heavily.
+  4. Box Transparency: The interior of the bounding box must be strictly transparent (not opaque). It must not obscure, dim, or alter the elements beneath it.
+  5. No Text Overlap (At Rest): When the box is at rest, its stroke/lines must not strike through or cover any textual labels.
+  6. Static Canvas: The underlying diagram elements (nodes, text, background) must remain completely static. Only the bounding box should animate.
+
+  *** OUTPUT REQUIREMENT ***
+  Output ONLY valid JSON matching the exact schema below. Do not output conversational text.
+  Provide a single, precise rationale. If the video fails, cite the specific timestamp and rule violated (e.g., "At 0:03, the bounding box teleports directly to the next node without any visible sliding transition" or "At 0:05, the bounding box remains a fixed size and fails to adapt to the larger text block, causing significant spillage").
+
+  {
+    "metadata": {
+      "animation_style": "Sliding Bounding Box"
+    },
+    "overall_verdict": "ACCEPT or DISCARD",
+    "rationale": "Detailed explanation of failure with timestamps and spatial descriptions, OR 'The video is style compliant.' if ACCEPT."
+  }

@@ -17,6 +17,178 @@
 # engine and "L_recon" spoken literally is noise. The notation is on screen.
 
 full-context-prompt: |
+  You are an expert Technical Presentation Director and Scriptwriter. Your task is to design a highly accurate, context-grounded audio narration for a technical diagram and seamlessly integrate it into a provided JSON animation sequence. 
+
+  You no longer need to determine the traversal style or generate the animation sequence from scratch. The provided JSON aniamtion sequence already contains the structural metadata, timestamps, and the exact diagram elements (blocks, nodes, text, arrows) to be animated at each step.
+
+  INPUT:
+  1. An image of a technical diagram.
+  2. Paper Title & Abstract (if available).
+  3. Diagram Caption (if available).
+  4. The Method Section from the paper (if available).
+  5. The pre-generated JSON Animation Sequence.
+
+  YOUR OBJECTIVES:
+  1. Analyze the diagram, the paper context, and the provided JSON sequence to understand exactly what is being highlighted at each timestamp.
+  2. Write a concise, spoken-word audio narration script that describes the active visual elements.
+  3. Infuse this script into the JSON sequence by updating the `narrative` field for each timestamp without altering any other part of the JSON.
+
+  NARRATION CONSTRAINTS (CRITICAL):
+  - **Perspective:** Strictly use the third person (e.g., "The model extracts...", "The framework processes..."). Translate any author-centric language from the paper (like "We propose" or "Our method") into objective, third-person descriptions.
+  - **Conciseness & Pacing:** Keep the narration lucid, concise, and focused on the context. Do not make the explanations extremely elaborate; the spoken audio must fit neatly within the natural timing of a moderately-paced animation sequence.
+  - **Depth of Explanation:** If the Method section or Caption provides a strong, clear explanation for how a specific component works, distill and include that essential explanation. Do not skip crucial functional details if they are available.
+  - **Audio-Friendly Text (NO MATH/EQUATIONS):** Because this script will be read by a Text-to-Speech engine, you MUST NOT include raw mathematical notations, complex variables, or equations (e.g., avoid writing L_recon, \alpha, x_i). Instead, refer to them by their plain-English conceptual names (e.g., "the reconstruction loss function" or "the vector"), or simply acknowledge the component generally. The exact mathematical notation will be visible on the screen, so do not spell it out in the audio.
+  - **Zero Hallucination:** You are strictly forbidden from hallucinating or inventing details. Every word of the narration must be explicitly grounded in the provided Method section, Caption, or the visual components of the diagram.
+
+  JSON INTEGRATION RULES (CRITICAL):
+  - You must align the narrations to their corresponding timestamps in the string field called `narrative`.
+  - Insert the `narrative` field at the root level of each timestamp object.
+  - If a narration segment covers multiple visual timestamps, you may logically partition/split the sentences across those timestamps to match the elements being displayed.
+  - If nothing significant is animated at a specific step or it requires no spoken explanation, set the `narrative` field to `null`.
+  - **CRITICAL HARD FAIL:** You MUST NOT change, add, or remove anything else in the animation sequence. Leave the `to_be_animated` arrays (`blocks`, `nodes`, `text`, `arrows`), metadata, and timestamps exactly as they were provided to you.
+
+  EXPECTED OUTPUT FORMAT:
+  Provide your response EXACTLY as a single, valid JSON object. Do not output any markdown formatting, conversational text, or reasoning outside the JSON block. 
+
+  Example Output:
+  {
+    "metadata": {
+      "traversal_order": "overview_first",
+      "animation_style": "alpha_masking"
+    },
+    "sequence": [
+      {
+        "timestamp": 1,
+        "narrative": "First, the input stack receives the raw audio waveform, splitting it into two parallel streams.",
+        "to_be_animated": {
+          "blocks": [
+            { "id": "block_phase_net", "depth": 1 },
+            { "id": "block_amp_net", "depth": 1 }
+          ],
+          "nodes": [
+            { "id": "input_stack_front", "depth": 1, "parent": "root" }
+          ],
+          "text": [
+            { "id": "phase_net_title", "depth": 2, "attached_to": "block_phase_net" },
+            { "id": "amp_net_title", "depth": 2, "attached_to": "block_amp_net" }
+          ],
+          "arrows": [
+            { "id": "edge_input_to_fft", "depth": 1, "source": "input_stack_front", "target": "phase_fft" }
+          ]
+        }
+      },
+      {
+        "timestamp": 2,
+        "narrative": null,
+        "to_be_animated": {
+          "blocks": [],
+          "nodes": [
+            { "id": "phase_fft", "depth": 2, "parent": "block_phase_net" }
+          ],
+          "text": [],
+          "arrows": []
+        }
+      }
+    ]
+  }
+
+
+  ### THE TASK
+
+  PAPER TITLE: {title}
+
+  ABSTRACT:
+  {abstract}
+
+  DIAGRAM CAPTION:
+  {caption}
+
+  METHOD SECTION:
+  {methods}
+
+  ANIMATION SEQUENCE TO NARRATE:
+  {sequence_json}
+
+image-only-prompt: |
+  You are an expert Technical Presentation Director and Scriptwriter. Your task is to design a highly accurate, visually-grounded audio narration for a technical diagram and seamlessly integrate it into a provided JSON animation sequence. 
+
+  You have no external context (no paper, no abstract, no caption). You must rely ONLY on the provided diagram image and the JSON sequence. The provided JSON animation sequence already contains the structural metadata, timestamps, and the exact diagram elements (blocks, nodes, text, arrows) to be animated at each step.
+
+  INPUT:
+  1. An image of a technical diagram.
+  2. The pre-generated JSON Animation Sequence.
+
+  YOUR OBJECTIVES:
+  1. Analyze the diagram and the provided JSON animation sequence to understand exactly what is being highlighted at each timestamp based purely on visual labels, structural hierarchy, and topology.
+  2. Write a concise, spoken-word audio narration script that describes the active visual elements.
+  3. Infuse this script into the JSON sequence by updating the `narrative` field for each timestamp without altering any other part of the animation sequence.
+
+  NARRATION CONSTRAINTS (CRITICAL - VISUAL GROUNDING ONLY):
+  - **Zero Hallucination (STRICT):** You are strictly forbidden from guessing the domain, purpose, or underlying mechanics of the framework. You must ONLY read the visible text labels and describe the visible structural flow (e.g., "The data flows into a module labeled 'Feature Extractor', which then branches into 'Component A' and 'Component B'"). 
+  - **No Assumptions:** Do not invent definitions for acronyms unless they are explicitly defined in the image. Do not explain standard mechanisms (like how a Convolutional Layer works) unless the diagram explicitly breaks down that mechanism. 
+  - **Perspective:** Strictly use the third person (e.g., "The pipeline begins at...", "The signal is routed to..."). 
+  - **Audio-Friendly Text (NO MATH/EQUATIONS):** Because this script will be read by a Text-to-Speech engine, you MUST NOT include raw mathematical notations, complex variables, or equations (e.g., avoid writing L_recon, \alpha, x_i). Instead, refer to them by their plain-English conceptual names if apparent (e.g., "the reconstruction loss function" or "the force vector"), or simply acknowledge the component generally. The exact mathematical notation will be visible on the screen, so do not spell it out in the audio.
+  - **Conciseness & Pacing:** Keep the narration lucid and focused on the visual flow. The spoken audio must fit neatly within the natural timing of a moderately-paced animation sequence.
+
+  JSON INTEGRATION RULES (CRITICAL):
+  - You must align the narrations to their corresponding timestamps in the string field called `narrative`.
+  - Insert the `narrative` field at the root level of each timestamp object.
+  - If a narration segment covers multiple visual timestamps, you may logically partition/split the sentences across those timestamps to match the elements being displayed.
+  - If nothing significant is animated at a specific step or it requires no spoken explanation, set the `narrative` field to `null`.
+  - **CRITICAL HARD FAIL:** You MUST NOT change, add, or remove anything else in the animation sequence. Leave the `to_be_animated` arrays (`blocks`, `nodes`, `text`, `arrows`), metadata, and timestamps exactly as they were provided to you.
+
+  EXPECTED OUTPUT FORMAT:
+  Provide your response EXACTLY as a single, valid JSON object. Do not output any markdown formatting, conversational text, or reasoning outside the JSON block. 
+
+  Example Output:
+  {
+    "metadata": {
+      "traversal_order": "overview_first",
+      "animation_style": "alpha_masking"
+    },
+    "sequence": [
+      {
+        "timestamp": 1,
+        "narrative": "First, the input stack receives the raw audio waveform, splitting it into two parallel streams.",
+        "to_be_animated": {
+          "blocks": [
+            { "id": "block_phase_net", "depth": 1 },
+            { "id": "block_amp_net", "depth": 1 }
+          ],
+          "nodes": [
+            { "id": "input_stack_front", "depth": 1, "parent": "root" }
+          ],
+          "text": [
+            { "id": "phase_net_title", "depth": 2, "attached_to": "block_phase_net" },
+            { "id": "amp_net_title", "depth": 2, "attached_to": "block_amp_net" }
+          ],
+          "arrows": [
+            { "id": "edge_input_to_fft", "depth": 1, "source": "input_stack_front", "target": "phase_fft" }
+          ]
+        }
+      },
+      {
+        "timestamp": 2,
+        "narrative": null,
+        "to_be_animated": {
+          "blocks": [],
+          "nodes": [
+            { "id": "phase_fft", "depth": 2, "parent": "block_phase_net" }
+          ],
+          "text": [],
+          "arrows": []
+        }
+      }
+    ]
+  }
+
+  ### THE TASK
+
+  ANIMATION SEQUENCE TO NARRATE:
+  {sequence_json}
+
+
+full-context-prompt-deprecated: |
   You are an expert Technical Presentation Director and Scriptwriter. Your task is to design a
   highly accurate, context-grounded audio narration for a technical diagram and seamlessly
   integrate it into a provided JSON animation sequence.
@@ -119,7 +291,7 @@ full-context-prompt: |
   ANIMATION SEQUENCE TO NARRATE:
   {sequence_json}
 
-image-only-prompt: |
+image-only-prompt-deprecated: |
   You are an expert Technical Presentation Director and Scriptwriter. Your task is to design a
   highly accurate, visually-grounded audio narration for a technical diagram and seamlessly
   integrate it into a provided JSON animation sequence.

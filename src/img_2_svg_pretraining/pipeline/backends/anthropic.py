@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import time
 
-from .base import ChatBackend, RetriableError
-from .types import GenerationResult, ImagePart, Message, TextPart
+from .base import ChatBackend, RetriableError, BackendError
+from .types import GenerationResult, ImagePart, Message, TextPart, VideoPart
 
 DEFAULT_MAX_TOKENS = 8192
 
@@ -54,6 +54,13 @@ class AnthropicBackend(ChatBackend):
                             "data": part.to_base64(),
                         },
                     })
+                elif isinstance(part, VideoPart):
+                    # Loudly, not silently. A backend that ignored the video
+                    # would still return a confident score computed from the
+                    # source image alone -- indistinguishable from a real one.
+                    raise BackendError(
+                        f"{self.name}: this backend cannot send video "
+                        f"({part.path}); use a 'gemini' backend for video judging")
             out.append({"role": m.role, "content": content})
         return out, ("\n".join(system_text) if system_text else None)
 

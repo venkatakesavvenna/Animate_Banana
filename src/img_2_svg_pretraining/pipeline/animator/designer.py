@@ -20,6 +20,29 @@ from ..styles import get_style
 AGENT = "designer"
 
 
+# The SVG designer prompt is keyed BY STYLE (`svg_designer.yaml#<key>`) where
+# the TikZ one is not, and two of its keys do not match the pipeline's style
+# names. Mapping them here rather than renaming the YAML keeps the prompt file
+# byte-identical to the one the design docs specify.
+SVG_DESIGNER_KEY = {
+    "hopping_bounding_box": "hopping_box",
+    "sliding_bounding_box": "sliding_box",
+}
+
+
+def _resolve_prompt(spec: str, style: str) -> str:
+    """Expand a `{style}` token in a prompt spec to this run's style key.
+
+    Lets ONE config serve every style -- `svg_designer.yaml#{style}` --
+    instead of a near-duplicate config per style, which is how the style and
+    the designer prompt drift apart. A spec without the token is returned
+    unchanged, so every existing config keeps working.
+    """
+    if "{style}" not in spec:
+        return spec
+    return spec.replace("{style}", SVG_DESIGNER_KEY.get(style, style))
+
+
 def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
     # Narrated first: 2e writes the spoken script onto an otherwise identical
     # structure, and that script carries pacing and emphasis the designer can
@@ -42,13 +65,25 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
     sequence = AnimationSequence.load(sequence_path)
     code = Path(ctx.paths.resolve_code(sample.id)).read_text(encoding="utf-8")
 
+    sequence_json = sequence.to_json()
     context = {
         "style_block": get_style(ctx.cfg.style).prompt_block(),
-        "sequence_json": sequence.to_json(),
+        "sequence_json": sequence_json,
         "diagram_code": code,
+        # BOTH SPELLINGS, deliberately. The prompt was rewritten to take
+        # `{svg_code}` / `{json_sequence}` while this dict supplied
+        # `diagram_code` / `sequence_json`. Nothing errored: `has_placeholders`
+        # saw braces and took the substitution branch, `render` replaced only
+        # the keys it recognised, and the model was handed the LITERAL text
+        # "{svg_code}" where the diagram should have been -- so it redrew the
+        # figure from scratch, losing every element id and every spliced
+        # raster. A renamed placeholder must never be able to fail this
+        # quietly, so both names resolve to the same value.
+        "svg_code": code,
+        "json_sequence": sequence_json,
     }
 
-    template = load_prompt(ctx.agent.prompt)
+    template = load_prompt(_resolve_prompt(ctx.agent.prompt, ctx.cfg.style))
     if has_placeholders(template):
         text = render(template, context)
     else:

@@ -8,7 +8,8 @@ Three stages, each a set of agents:
     critique-diagram   render, compare against the source, repair what differs
 
   STAGE 2  ANIMATION PLANNER
-    strategize         traversal strategy (OVERVIEW_FIRST | DETAIL_FIRST)
+    strategize         DEPRECATED, not runnable -- the sequencer plans its own
+                       traversal; paper context goes to `narrate` instead
     parse              diagram structure/hierarchy XML
     sequence           animation sequence, conditioned on the style
     critique-sequence  review and repair the sequence
@@ -49,7 +50,6 @@ STAGE_MODULES = {
     "convert-code": ("transmuter.code_converter", "code_converter"),
     "integrate-rasters": ("transmuter.raster_integrator", "raster_integrator"),
     "critique-diagram": ("transmuter.critic", "diagram_critic"),
-    "strategize": ("planner.strategizer", "strategizer"),
     "parse": ("planner.parser", "parser"),
     "sequence": ("planner.sequencer", "sequencer"),
     "critique-sequence": ("planner.critic", "planner_critic"),
@@ -61,22 +61,34 @@ STAGE_MODULES = {
 
 STAGE_GROUPS = {
     "stage1": ["convert-code", "integrate-rasters", "critique-diagram"],
-    # `strategize` is deliberately absent: the sequencer now uses the bench
-    # prompts, which plan the traversal themselves from the code and the
-    # structural graph, so a separate strategy pass adds a model call whose
-    # output nothing reads. The stage still exists and can be run explicitly
-    # (`run_pipeline.py strategize`) for the placeholder-style sequencer
-    # prompt, which does interpolate it.
+    # `strategize` (2a) is DEPRECATED and no longer runnable -- it is absent
+    # from STAGE_MODULES, so `run_pipeline.py strategize` now fails rather
+    # than burning a model call. The bench sequencer prompts plan the
+    # traversal themselves ("You must determine the optimal Traversal
+    # Style"), so its output was read by nothing.
+    #
+    # Paper context now reaches the NARRATIVE WRITER, and optionally the
+    # SEQUENCER via `planner.sequencer.context_tier`. It no longer flows to a
+    # stage that does not run.
     "stage2": ["parse", "sequence", "critique-sequence", "narrate"],
     "stage3": ["design", "critique-animation", "export"],
 }
 STAGE_GROUPS["all"] = STAGE_GROUPS["stage1"] + STAGE_GROUPS["stage2"] + STAGE_GROUPS["stage3"]
 
-# Canonical agent order, which is what `--from`/`--to` slice against. Includes
-# `strategize` even though no group runs it, so `--from strategize` still
-# resolves rather than erroring on an unknown stage.
+# Canonical agent order, which is what `--from`/`--to` slice against. Retains
+# the deprecated `strategize` slot so an old `--from strategize` in someone's
+# notes still resolves to "start at stage 2" instead of erroring; nothing can
+# execute it, because it has no STAGE_MODULES entry.
 STAGE_ORDER = (STAGE_GROUPS["stage1"] + ["strategize"]
                + STAGE_GROUPS["stage2"] + STAGE_GROUPS["stage3"])
+
+# Named so the CLI can explain itself rather than just rejecting the word.
+DEPRECATED_STAGES = {
+    "strategize": ("the sequencer's own prompt decides traversal order, so "
+                   "2a's output was read by nothing. Paper context now goes "
+                   "to the narrative writer, and optionally to the sequencer "
+                   "via planner.sequencer.context_tier."),
+}
 
 
 def resolve_stages(stage: str, start: str | None = None, stop: str | None = None) -> list[str]:
@@ -141,6 +153,11 @@ def _build_parser() -> argparse.ArgumentParser:
     for name in list(STAGE_MODULES) + list(STAGE_GROUPS):
         common(sub.add_parser(name, help=_help_for(name)))
 
+    # Deprecated stages still parse, so the CLI can say WHY rather than
+    # emitting argparse's "invalid choice" at someone following old notes.
+    for name in DEPRECATED_STAGES:
+        common(sub.add_parser(name, help="DEPRECATED -- no longer runnable"))
+
     inspect = sub.add_parser("paths", help="print the artifact paths this config resolves to")
     inspect.add_argument("--config", default=str(DEFAULT_CONFIG))
     inspect.add_argument("--sample", default="<id>")
@@ -151,6 +168,14 @@ def _build_parser() -> argparse.ArgumentParser:
     check.add_argument("--only", nargs="+", metavar="ID")
 
     return parser
+
+
+def _reject_deprecated(name: str) -> None:
+    if name in DEPRECATED_STAGES:
+        raise SystemExit(
+            f"'{name}' is deprecated and no longer runs.\n  {DEPRECATED_STAGES[name]}\n"
+            f"  Its cached artifacts and its lineage component are untouched, so "
+            f"nothing already scored is invalidated.")
 
 
 def _help_for(name: str) -> str:
@@ -204,6 +229,7 @@ def _run_stage(name: str, cfg, samples, force: bool) -> bool:
 
 def main() -> None:
     args = _build_parser().parse_args()
+    _reject_deprecated(getattr(args, "stage", None))
 
     # Must precede any torch-touching import: torch locks device visibility at
     # first CUDA import, so setting this later has no effect.

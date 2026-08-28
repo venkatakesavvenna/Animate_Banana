@@ -41,6 +41,14 @@ new_prompt: |
       *   **Filtering & Pacing:** Include ALL element types and strictly follow the step-by-step sequential pacing rule defined in Rule A. Do not display too many things at once; animate sequentially.
       *   **DAG PRESERVATION (CRITICAL):** To ensure the animation sequence remains a strict Directed Acyclic Graph (DAG), during Overview-First Traversal style, you must NEVER list a parent container or any other element in multiple timestamps. A parent block is animated exactly ONCE when first encountered. Do NOT re-include the parent container in the arrays when animating its internal children at later timestamps. You can include its title text. Assume the rendering engine inherently persists the mask.
 
+  ### RULESET 4: LEGEND HANDLING (CRITICAL)
+  If the diagram contains a legend (key/index explaining symbols or colors), you must handle it according to the requested animation style:
+  *   **For `progressive_reveal`, `alpha_masking`, and `colour_pop`:**
+      *   *Diagram-Wide Legends:* If a legend applies to the entire diagram, you MUST introduce it at `timestamp: 1` alongside the initial elements so that it persists from the very beginning to the end of the animation.
+      *   *Block-Specific Legends:* If a legend explicitly belongs to a specific block or subsystem, you MUST introduce it at the exact same timestamp that its parent block is first revealed.
+  *   **For Bounding Box Styles (`hopping_bounding_box` and `sliding_bounding_box`):**
+      *   You MUST completely IGNORE legends. NEVER assign a legend block or legend node as a target for a bounding box hop or slide. They should be omitted from the animation sequence entirely so they remain static background context.
+
   ### EXPECTED JSON OUTPUT FORMAT
   Your output must be a single, valid JSON object containing metadata and the sequence array. Do NOT include any markdown text outside the JSON block.
 

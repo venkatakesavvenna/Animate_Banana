@@ -116,6 +116,51 @@ raster screen parsed the raw 1a while detections described the spliced version
 **Rule: when rebuilding an artifact, evict everything derived from its previous
 version.**
 
+### A part the cache cannot hash is a part that does not exist
+
+`_fingerprint` hashed `TextPart` and `ImagePart` and let anything else fall
+through in silence. Adding video would have made two requests differing *only*
+in their mp4 collide on one cache entry — and the TikZ and SVG configs share a
+dataset root, so the same (sample, style) cell sends an identical prompt and an
+identical source image in both. Every SVG cell would have been served the TikZ
+cell's verdict, plausibly and invisibly.
+
+It now hashes video bytes and **raises** on an unknown part rather than ignoring
+it. `test_video_part_changes_the_cache_fingerprint` guards this; do not relax it
+to an `else: pass`.
+
+Same class, at the backend edge: `openai_compat`, `anthropic` and `hf_local`
+raise on a `VideoPart` instead of dropping it. A backend that silently ignored
+the video would still return a confident score computed from the source image
+alone.
+
+### A fixed pixel threshold is a threshold on canvas size
+
+The keyframe extractors classify motion with `activity_threshold = 0.01` — one
+percent of the frame must change. A hopping bounding box on a 4236×4236 figure
+peaks at **0.0027**, so the animation reads as perfectly static end to end, the
+settle detector never arms, and 32 frames extract to one keyframe. The dwell
+guard inherited the same constant and reported "nothing ever moves" about a
+video whose every frame differs.
+
+`adaptive_activity_threshold` scales it to each video's own 95th percentile.
+**Rule: a threshold in absolute pixels or frame-fraction must be calibrated per
+input, or it silently measures how big the canvas is.**
+
+### Judged media is sampled, and the sampling rate is not yours
+
+Gemini samples inline video at **exactly 1 fps** — measured, token cost is
+perfectly linear in duration. The exporter writes at `fps: 2`, so sending
+`exports/animation.mp4` straight through would have shown the judge roughly
+*half* the animation, chosen by the sampler, with nothing in the response to
+say so. `animatebench/video.py` re-times the deck to 1 fps instead.
+
+Video frames are also tokenized far more coarsely than stills: 60 tokens/frame
+against ~700 for the same diagram as an image. Criterion 6 of the video prompt
+asks about text legibility, which at 60 tokens/frame the model cannot see. The
+`gemini_video` backend sets `media_resolution: MEDIA_RESOLUTION_HIGH` (~250
+tokens/frame) so the comparison is about modality, not resolution.
+
 ---
 
 ## The annotation tool

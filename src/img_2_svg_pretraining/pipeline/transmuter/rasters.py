@@ -31,3 +31,13 @@ def find_placeholders(code: str, target: str) -> list:
 
 def splice(code: str, replacements: dict[str, str], target: str) -> tuple[str, list[str]]:
     return module_for(target).splice(code, replacements)
+
+
+def document_extent(code: str, target: str) -> tuple[float, float] | None:
+    """The drawing's coordinate extent in `bbox()`'s units, or None if unknown.
+
+    Needed because a placeholder's box and a detected region's box are in
+    different spaces, and only this makes them comparable. See
+    `raster_integrator._expand_to_placeholder`.
+    """
+    return module_for(target).document_extent(code)

@@ -1,0 +1,253 @@
+<meta charset="utf-8">
+<title>Before you start</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#ffffff;--panel2:#eef1f5;--line:#d8dee6;--fg:#1a1d23;
+      --dim:#5f6b7a;--accent:#2563eb;--ok:#0f9d6e;--warn:#b7791f;--bad:#d13438}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+     font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+#top{height:46px;display:flex;align-items:center;gap:14px;padding:0 18px;
+     border-bottom:1px solid var(--line);background:var(--panel);
+     position:sticky;top:0;z-index:20;font-weight:600}
+#step{margin-left:auto;color:var(--dim);font-size:13px;font-weight:400}
+.wrap{max-width:880px;margin:0 auto;padding:34px 22px 120px}
+h2{font-size:20px;margin:0 0 10px}
+h3{font-size:15px;margin:26px 0 8px}
+p{color:var(--dim);max-width:70ch}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+      padding:22px;margin-bottom:18px}
+ul{color:var(--dim);padding-left:20px}
+li{margin-bottom:9px}
+li b{color:var(--fg)}
+.note{background:var(--panel2);border-left:3px solid var(--warn);padding:12px 16px;
+      border-radius:0 6px 6px 0;font-size:14px;color:var(--dim);margin:16px 0}
+.note.ok{border-left-color:var(--ok)}
+button{background:var(--accent);color:#ffffff;border:0;border-radius:6px;
+       padding:11px 22px;font:inherit;font-weight:600;cursor:pointer}
+button:disabled{background:var(--line);color:var(--dim);cursor:not-allowed}
+button.ghost{background:var(--panel2);color:var(--fg);border:1px solid var(--line)}
+.foot{display:flex;gap:12px;align-items:center;margin-top:26px}
+.msg{font-size:13px;color:var(--dim)}
+.msg.bad{color:var(--bad)}
+.msg.good{color:var(--ok)}
+#calItems > div{margin-bottom:26px}
+.scoreline{font-size:15px;margin-top:12px}
+
+/* the shared player + form components style themselves from these */
+.player{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:12px}
+.pl-tabs{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.pl-tab{background:var(--panel2);color:var(--dim);border:1px solid var(--line);
+        border-radius:5px;padding:4px 12px;font:inherit;font-size:13px;cursor:pointer}
+.pl-tab.pl-on{background:var(--accent);color:#ffffff;border-color:var(--accent);font-weight:600}
+.pl-badge{margin-left:auto;font-size:11px;color:var(--warn);border:1px solid var(--warn);
+          border-radius:10px;padding:1px 9px}
+.pl-badge.pl-ok{color:var(--ok);border-color:var(--ok)}
+.pl-stage{position:relative;background:#fff;border-radius:5px;overflow:hidden;display:flex;
+          align-items:center;justify-content:center;min-height:170px;max-height:38vh}
+.pl-frame{width:100%;height:100%;object-fit:contain;display:block}
+.pl-hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);
+         pointer-events:none;background:rgba(26,29,35,.86);color:#e6e8ec;font-size:12px;
+         padding:4px 12px;border-radius:12px;white-space:nowrap}
+.pl-started .pl-hint{display:none}
+.pl-cue{min-height:44px;padding:9px 12px;margin-top:8px;background:var(--panel2);
+        border-radius:5px;font-size:13.5px}
+.pl-controls{display:flex;align-items:center;gap:8px;margin-top:8px}
+.pl-play{background:var(--accent);color:#ffffff;border:0;border-radius:5px;
+         padding:7px 16px;font:inherit;font-weight:600;cursor:pointer;min-width:88px}
+.pl-seek{flex:1}.pl-seek:disabled{opacity:.35}
+.pl-time{font-size:12px;color:var(--dim);min-width:74px;text-align:right}
+.pl-speed{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px;color:var(--dim)}
+.pl-speed input{flex:1;max-width:150px}
+.pl-replay{margin-left:auto;background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+           border-radius:5px;padding:5px 12px;font:inherit;font-size:12px;cursor:pointer}
+.calfig{max-width:100%;background:#fff;border-radius:5px;margin-bottom:10px;max-height:220px;object-fit:contain}
+.calq{margin-top:14px}
+.calq .q{font-size:15px;margin-bottom:8px}
+.opts{display:flex;gap:7px;flex-wrap:wrap}
+.opts button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+             padding:8px 14px;font-weight:400;font-size:13.5px}
+.opts button.sel{border-color:var(--accent);background:#dbe7fe}
+</style>
+
+<div id="top">Before you start <span id="step">Step 1 of 2 · Preparation</span></div>
+
+<div class="wrap">
+  <div id="prep">
+    <div class="card">
+      <h2>What you are judging</h2>
+      <p>You will see a figure from a research paper on the left, and an animated
+         presentation of that same figure on the right. Your job is to say how
+         well the animation presents the figure.</p>
+      <p>There are no right answers, and you are not expected to know the paper.
+         Judge what you can see.</p>
+    </div>
+
+    <div class="card">
+      <h2>How to watch</h2>
+      <ul>
+        <li><b>Slider</b> is how you move through the animation: drag it, or use
+            the <b>&larr;</b> and <b>&rarr;</b> arrow keys to step a frame at a time.</li>
+        <li>The questions appear once you have taken the slider <b>all the way to
+            the end</b>. Until then they stay hidden.</li>
+        <li><b>Video</b> plays it through automatically instead, at half speed by
+            default.</li>
+        <li>Go back and forth as much as you like — nothing is one-shot.</li>
+        <li>Some animations <b>start almost blank</b> and build up. That is the
+            style, not a fault — but whether it works is exactly the sort of
+            thing worth rating.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>What the questions mean</h2>
+      <ul>
+        <li><b>Coverage</b> — does the animation show what the figure shows?
+            Missing boxes, invented arrows, wrong positions, unreadable labels.</li>
+        <li><b>Quality</b> — does it highlight sensible things in a sensible
+            order, at a comfortable pace?</li>
+        <li><b>Style</b> — each animation is supposed to follow one named style.
+            You are told which; say whether it does.</li>
+        <li><b>Narration</b> (later sections) — does the text make sense on its
+            own, and does it match what is on screen when it appears?</li>
+      </ul>
+      <div class="note">You can change any answer before submitting a trial. Use
+        <b>Previous</b> and <b>Next</b>, or click a chip in the strip above the
+        question. People often revise early answers once they have seen the whole
+        animation — that is expected, not cheating.</div>
+    </div>
+
+    <div class="foot">
+      <button id="toCal">Continue</button>
+      <span class="msg" id="prepMsg"></span>
+    </div>
+  </div>
+
+  <div id="cal" style="display:none">
+    <div class="card">
+      <h2>A quick check</h2>
+      <p id="calIntro">Answer these the way you would in the real study. It is a
+         check that the task is clear, not a test of the subject matter.</p>
+      <div class="note" id="calNote" style="display:none"></div>
+    </div>
+    <div id="calItems"></div>
+    <div class="foot">
+      <button id="calSubmit" disabled>Submit answers</button>
+      <button class="ghost" id="calBack">Back to instructions</button>
+      <span class="msg" id="calMsg"></span>
+    </div>
+  </div>
+</div>
+
+<script src="/study.js"></script>
+<script src="/player.js"></script>
+<script>
+if (!Session.get()) location.href = "/";
+let ITEMS = [], ANSWERS = {}, PLAYERS = [];
+
+async function boot() {
+  const d = await api("/api/prepare");
+  ITEMS = d.items || [];
+  if (d.passed) { location.href = "/study"; return; }
+  if (!d.calibration_available) {
+    // No expert session has been recorded yet, so there is no marking key.
+    // Say so rather than showing a quiz that cannot score anything.
+    el("#calNote").style.display = "block";
+    el("#calNote").textContent =
+      "The practice check is not set up yet, so you will go straight to the study "
+      + "after the instructions.";
+    el("#toCal").textContent = "Start the study";
+    el("#toCal").onclick = () => location.href = "/study";
+    return;
+  }
+  el("#toCal").onclick = showCal;
+}
+
+function showCal() {
+  el("#prep").style.display = "none";
+  el("#cal").style.display = "block";
+  el("#step").textContent = "Step 2 of 2 · Practice check";
+  const host = el("#calItems");
+  host.innerHTML = "";
+  PLAYERS.forEach((p) => p.destroy());
+  PLAYERS = [];
+
+  ITEMS.forEach((item, idx) => {
+    ANSWERS[item.cell_key] = ANSWERS[item.cell_key] || {};
+    const box = document.createElement("div");
+    box.className = "card";
+    box.innerHTML = `<h3>Example ${idx + 1} of ${ITEMS.length}</h3>
+      ${item.figure ? `<img class="calfig" src="/media/${item.figure.media_id}">` : ""}
+      <div class="players"></div><div class="qs"></div>`;
+    host.appendChild(box);
+
+    item.slots.forEach((slot) => {
+      const mount = document.createElement("div");
+      box.querySelector(".players").appendChild(mount);
+      PLAYERS.push(mountPlayer(mount, slot, {}));
+    });
+
+    item.questions.questions.forEach((q) => {
+      if (q.type === "text") return;
+      const wrap = document.createElement("div");
+      wrap.className = "calq";
+      wrap.innerHTML = `<div class="q">${esc(q.prompt)}</div><div class="opts"></div>`;
+      const opts = wrap.querySelector(".opts");
+      let choices = [];
+      if (q.type === "likert5")
+        choices = (q.labels || [1,2,3,4,5]).map((l, i) => ({ v: i + 1, l: `${i+1} ${l}` }));
+      else if (q.type === "yesno") choices = [{v:true,l:"Yes"},{v:false,l:"No"}];
+      else if (q.type === "choice_ab")
+        choices = [{v:"A",l:"Left (A)"},{v:"no_preference",l:"No preference"},{v:"B",l:"Right (B)"}];
+      else choices = (q.options || []).map((o) => ({ v: o.value, l: o.label }));
+
+      choices.forEach((c) => {
+        const b = document.createElement("button");
+        b.textContent = c.l;
+        b.onclick = () => {
+          ANSWERS[item.cell_key][q.id] = c.v;
+          opts.querySelectorAll("button").forEach((o) => o.classList.remove("sel"));
+          b.classList.add("sel");
+          refresh();
+        };
+        opts.appendChild(b);
+      });
+      box.querySelector(".qs").appendChild(wrap);
+    });
+  });
+  refresh();
+}
+
+function refresh() {
+  const need = ITEMS.reduce((n, it) =>
+    n + it.questions.questions.filter((q) => q.type !== "text").length, 0);
+  const got = Object.values(ANSWERS).reduce((n, a) => n + Object.keys(a).length, 0);
+  el("#calSubmit").disabled = got < need;
+  el("#calMsg").textContent = got < need ? `${need - got} left` : "";
+}
+
+el("#calBack").onclick = () => {
+  el("#cal").style.display = "none";
+  el("#prep").style.display = "block";
+  el("#step").textContent = "Step 1 of 2 · Preparation";
+};
+
+el("#calSubmit").onclick = async () => {
+  el("#calSubmit").disabled = true;
+  const r = await api("/api/calibration/submit", { method: "POST",
+    body: JSON.stringify({ answers: ANSWERS }) });
+  const msg = el("#calMsg");
+  msg.className = "msg " + (r.passed ? "good" : "bad");
+  if (r.passed) {
+    msg.textContent = `Agreed on ${r.agreed} of ${r.scored}. Starting the study…`;
+    setTimeout(() => location.href = "/study", 1200);
+  } else {
+    msg.textContent = `Agreed on ${r.agreed} of ${r.scored} — below the `
+      + `${Math.round(r.threshold * 100)}% needed. Have another look at the `
+      + `instructions and try again.`;
+    el("#calSubmit").disabled = false;
+    el("#calBack").focus();
+  }
+};
+
+boot();
+</script>

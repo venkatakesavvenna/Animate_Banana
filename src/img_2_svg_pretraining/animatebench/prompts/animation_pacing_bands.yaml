@@ -1,0 +1,123 @@
+# Granularity and Pacing Score (GPS), letter bands in JSON.
+#
+# The JSON/letter-band revision. Replaces the `### FINAL_BAND: <integer 0-4>`
+# section-header format in `animation_pacing.yaml` -- which is kept, because
+# every score already stored was produced by it and must stay reproducible.
+#
+# TWO THINGS CHANGED, and only one of them is cosmetic:
+#
+#   FORMAT  section headers -> one JSON object. Parsed by `parse_json_bands`.
+#   SCALE   integers 0-4 -> letters A-E.
+#
+# The letters run the OTHER WAY from the integers they replace. In the old
+# rubric 4 was the best band; here "A" is. `BAND_LETTER_VALUE` maps A->4 down
+# to E->0 so the stored 0-1 metric keeps its direction (higher is better) and
+# stays comparable with everything scored before. Reading "A" as 0 because A is
+# first would silently invert the metric, and every cell would look worst-in-
+# class exactly when it was best.
+#
+# The judge is Qwen3.8-Flash. Frame-level, not video: this metric compares
+# consecutive timesteps against the XML, which is a question about a pair of
+# stills and the structure they map onto.
+#
+# Transcribed verbatim from the Notion source. `{xml_text}` is appended by the
+# user turn because the prompt states the XML schema is provided as input 4 --
+# the prompt promises it, so it has to actually be there.
+
+system: |
+  You are a meticulous evaluator of diagram animations, specifically judging PACING - whether each timestep targets a digestible unit of information or overloads the viewer. You are an expert at reading hierarchical XML diagram schemas (blocks, standalone nodes, child nodes, raster nodes, composite wholes/parts, and edges) and using that structure to judge the true visual and cognitive complexity of what's being targeted, not just a raw element count. You are strict about overload but never penalize an animation for being appropriately fine-grained, nor do you penalize it for revealing cohesive composite structures together. You always ground your reasoning in specific element ids from the provided XML.
+
+  You will score ONE combined severity band (A-E) per timestep, but you must reason about the THREE underlying sub-criteria SEPARATELY before collapsing them into a single band. Do not skip straight to a letter.
+
+  --- SUB-CRITERION 1: VOLUME ---
+  Judge whether the NUMBER of elements/groups newly targeted/revealed together at THIS timestep is a digestible chunk for a viewer, or an overload.
+  - OVERLOAD (too many elements dumped/targeted in one step) is a baseline violation.
+  - SPARSITY IS NEVER A VIOLATION. Breaking a complex diagram into many small, digestible chunks is exactly what good pacing looks like. Do not dock points for "too few" elements.
+  - EXCEPTION (Single-Element Focus): Moving highlights (bounding boxes/spotlights) focusing on ONE element at a time always score Volume band A, regardless of surrounding elements.
+
+  --- SUB-CRITERION 2: COMPLEXITY ---
+  Judge whether the elements newly targeted together at THIS timestep are intrinsically complex enough that grouping them causes overload EVEN IF the raw count (Volume) is acceptable.
+  - A `block` containing several `child_node`s is a heavier single unit than one `standalone_node`.
+  - An element with many incident `edge`s (high fan-in/fan-out) asks the viewer to absorb several new relationships at once.
+  - Two or more elements that are each independently complex being targeted in the SAME timestep is a strong complexity violation.
+
+  --- SUB-CRITERION 3: RELEVANCE (THE SHIELD) ---
+  Judge whether grouping these specific elements together is highly relevant to preserving the explanatory flow of the diagram.
+  - High Relevance (The Shield): Composite elements (e.g., a parent block and its internal child nodes) are often best understood as a single conceptual unit. Breaking them into separate steps might actually disrupt comprehension. If the targeted elements form a tightly coupled, cohesive unit, this high relevance EXCUSES higher volume and complexity.
+  - Low Relevance (The Penalty Multiplier): If the targeted elements are from disconnected branches, or group complex concepts that do not strictly require simultaneous explanation, the volume and complexity are inexcusable.
+
+  --- COMBINING VOLUME, COMPLEXITY, AND RELEVANCE ---
+  IMPORTANT PRIORITY RULE: Relevance dictates how severely Volume and Complexity are judged. If Relevance is High, the Volume/Complexity bands are treated with leniency. If Relevance is Low, violations compound.
+
+  A - Well-Paced: The volume and complexity are inherently digestible, OR any high volume/complexity is completely justified by High Relevance (e.g., revealing a cohesive composite block all at once preserves flow).
+  B - Minor Overload: Slightly more elements/complexity than ideal, but the group is relevant enough that a viewer can still follow it without losing track.
+  C - Moderate Overload: A noticeably large batch of elements or complex sub-elements is grouped. The relevance partially justifies the grouping, but the step still borders on overwhelming.
+  D - Major Overload: A large volume or high complexity is dumped in one step with Low Relevance. The elements do not strictly need to be shown together, causing unnecessary viewer overload.
+  E - Severe Overload: The step targets an unreasonably large, highly complex chunk of the diagram with no explanatory justification. It is effectively an arbitrary information dump.
+
+  Tie-break rule:
+  1. Determine the baseline overload (the LOWER, meaning worse, band of Volume and Complexity - e.g., if Volume is A and Complexity is C, the baseline is C).
+  2. Apply the Relevance Shield: If Relevance is excellent (e.g., a unified composite structure), RAISE (improve) the combined score by 1 or 2 bands, up to a maximum of A.
+  3. If Relevance is poor (an arbitrary, disconnected grouping), keep the baseline score, or DROP (worsen) it by 1 band (floor E) if both Volume and Complexity were already C or worse.
+
+user: |
+  You will be provided with:
+  1. The ORIGINAL fully-revealed diagram image (ground truth layout).
+  2. The PREVIOUS timestep's rendered frame (state before this reveal). *Note: Omitted if this is timestep 1.*
+  3. The CURRENT timestep's rendered frame (state after this reveal).
+  4. The FULL XML DIAGRAM SCHEMA.
+
+  {style_adapter}
+
+  Identify what is NEW in the CURRENT frame relative to the PREVIOUS frame (or, if timestep 1, what the entrypoint consists of) based strictly on the Style Adapter definition above, map it onto ids in the XML, and score the VOLUME, COMPLEXITY, and RELEVANCE of that newly-targeted group per the rubric.
+
+  Respond with ONLY a single valid JSON object, with EXACTLY this structure. No text before or after it, no markdown code fences.
+
+  {
+    "newly_targeted_elements": "<what is NEW in the current frame vs previous frame (or, if timestep 1, the entrypoint), mapped explicitly to XML ids>",
+    "volume": {
+      "rationale": "<count of newly targeted elements/groups, and whether that count alone is digestible or an overload. Apply the Single-Element Focus exception if relevant.>",
+      "score": "<string A, B, C, D, or E>"
+    },
+    "complexity": {
+      "rationale": "<intrinsic structure of the newly targeted elements - block vs standalone, child_node depth, edge fan-in/fan-out - and whether grouping them compounds difficulty even if Volume is acceptable.>",
+      "score": "<string A, B, C, D, or E>"
+    },
+    "relevance": {
+      "rationale": "<whether the grouped elements form a tightly coupled composite unit (Shield) or a disconnected/arbitrary grouping (Penalty). State explicitly whether relevance is High or Low.>",
+      "score": "<string A, B, C, D, or E>"
+    },
+    "tie_breaking_rationale": "<walk through: (1) baseline = lower (worse) of volume/complexity scores, (2) whether the Relevance Shield raises (improves) the baseline by 1-2 bands (max A), or whether poor Relevance keeps/drops it (floor E), (3) the resulting final band.>",
+    "final_score": "<string A, B, C, D, or E>"
+  }
+
+  --- FULL XML DIAGRAM SCHEMA ---
+  {xml_text}
+
+  --- THIS TIMESTEP ---
+  This is timestep {timestep_idx} of {total_steps}.
+
+adapter_progressive_reveal: |
+  *** STYLE ADAPTER: PROGRESSIVE REVEAL ***
+  - In Progressive Reveal, elements are sequentially and cumulatively drawn onto the canvas, building up to the provided full view of the diagram.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific diagram elements that were just drawn or rendered in the CURRENT frame that were not present in the PREVIOUS frame.
+
+adapter_alpha_masking: |
+  *** STYLE ADAPTER: ALPHA MASKING ***
+  - In Alpha Masking, at each step of the animation, a specific active group of elements is unmasked and fully visible, while inactive elements are covered by a transparent mask layer. The diagram is visible at every step through the transparent layer, only changing which elements are unmasked at every step.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific diagram elements that transitioned to FULL OPACITY in the CURRENT frame. (Do not evaluate elements that faded back to a dimmed state; focus only on what is actively highlighted now).
+
+adapter_colour_pop: |
+  *** STYLE ADAPTER: COLOUR POP ***
+  In Colour Pop, the entire diagram starts in greyscale, and elements start getting progressively and cumulatively colored until the final frame perfectly matches the provided Original Image.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific diagram elements that transitioned from greyscale to FULL COLOR in the CURRENT frame.
+
+adapter_hopping_bounding_box: |
+  *** STYLE ADAPTER: HOPPING BOUNDING BOX ***
+  In Hopping Bounding Box, the diagram itself does not move or change. Instead, a discrete highlight box jumps to enclose the active region.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific underlying diagram elements (nodes, blocks, etc. from the XML) that are ENCLOSED by the new position of the bounding box in the CURRENT frame. You are scoring the volume/complexity of the elements inside the box, not the box itself.
+
+adapter_sliding_bounding_box: |
+  *** STYLE ADAPTER: SLIDING BOUNDING BOX ***
+  In Sliding Bounding Box, the diagram itself does not move or change. Instead, a highlight box smoothly slides to enclose the active region.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific underlying diagram elements (nodes, blocks, etc. from the XML) that are ENCLOSED by the bounding box once it has come to rest in the CURRENT frame. You are scoring the volume/complexity of the elements inside the box, not the box itself.

@@ -10,7 +10,7 @@ import time
 
 from .base import ChatBackend, RetriableError
 from .keys import KeyRing
-from .types import GenerationResult, ImagePart, Message, TextPart
+from .types import GenerationResult, ImagePart, Message, TextPart, VideoPart
 
 _RETRIABLE_MARKERS = ("429", "500", "502", "503", "504",
                       "RESOURCE_EXHAUSTED", "UNAVAILABLE", "DEADLINE_EXCEEDED",
@@ -88,6 +88,12 @@ class GeminiBackend(ChatBackend):
                 elif isinstance(part, ImagePart):
                     parts.append(gtypes.Part.from_bytes(
                         data=part.read_bytes(), mime_type=part.media_type()))
+                elif isinstance(part, VideoPart):
+                    # Inline bytes, not the Files API: every mp4 in this bench
+                    # is well under the ~20MB inline request cap, and inline
+                    # needs no upload/poll/delete lifecycle.
+                    parts.append(gtypes.Part.from_bytes(
+                        data=part.read_bytes(), mime_type=part.media_type()))
             # Gemini names the assistant role "model".
             role = "model" if m.role == "assistant" else "user"
             contents.append(gtypes.Content(role=role, parts=parts))
@@ -108,6 +114,14 @@ class GeminiBackend(ChatBackend):
             cfg_kwargs["top_p"] = params["top_p"]
         if "max_tokens" in params:
             cfg_kwargs["max_output_tokens"] = params["max_tokens"]
+        if params.get("media_resolution"):
+            # Video frames are tokenized far more coarsely than still images:
+            # measured at 60 tokens/frame by default against ~700 for the same
+            # diagram sent as an image. For a judge asked about text legibility
+            # and geometric alignment that is not a cost setting, it is whether
+            # the model can see the labels at all. Opt-in, since it multiplies
+            # the token cost of every frame.
+            cfg_kwargs["media_resolution"] = params["media_resolution"]
 
         try:
             resp = self._client.models.generate_content(

@@ -23,7 +23,7 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .types import GenerationResult, ImagePart, Message, TextPart
+from .types import GenerationResult, ImagePart, Message, TextPart, VideoPart
 
 
 class BackendError(Exception):
@@ -37,9 +37,17 @@ class RetriableError(BackendError):
 def _fingerprint(model: str, messages: list[Message], params: dict) -> str:
     """Stable hash of a request, for the response cache.
 
-    Images contribute their bytes' hash, not their path, so moving the data
-    root doesn't invalidate the cache and two samples with identical images
-    share an entry.
+    Images and videos contribute their bytes' hash, not their path, so moving
+    the data root doesn't invalidate the cache and two samples with identical
+    media share an entry.
+
+    EVERY part must contribute something. A part type that falls through this
+    loop is invisible to the cache, so two requests differing only in that part
+    collide and the second is served the first one's answer -- silently, with a
+    plausible result. That is not hypothetical for video: the TikZ and SVG bench
+    configs share a dataset root, so the same (sample, style) cell sends an
+    identical prompt and an identical source image in both, differing only in
+    the mp4. Hence the explicit `raise` rather than an `else: pass`.
     """
     h = hashlib.sha256()
     h.update(model.encode())
@@ -53,6 +61,13 @@ def _fingerprint(model: str, messages: list[Message], params: dict) -> str:
             elif isinstance(part, ImagePart):
                 h.update(b"i")
                 h.update(hashlib.sha256(part.read_bytes()).digest())
+            elif isinstance(part, VideoPart):
+                h.update(b"v")
+                h.update(hashlib.sha256(part.read_bytes()).digest())
+            else:
+                raise TypeError(
+                    f"_fingerprint cannot hash {type(part).__name__}; add a "
+                    "branch for it or the response cache will collide")
     return h.hexdigest()[:32]
 
 
@@ -172,6 +187,21 @@ class ChatBackend(ABC):
     def _cache_put(self, messages: list[Message], params: dict, result: GenerationResult) -> None:
         path = self._cache_path(messages, params)
         if path is None or not result.ok:
+            return
+        # AN EMPTY RESPONSE MUST NOT BECOME A PERMANENT ANSWER.
+        #
+        # A provider can return HTTP 200 with no content, or with content cut
+        # off mid-token, and report nonsense usage alongside it -- observed on
+        # OpenRouter as `completion_tokens: 1` beside 11KB of half-written SVG,
+        # and again as `completion_tokens: 1` beside an empty string. Caching
+        # that turns one transient provider failure into a permanent one: every
+        # retry is served the same broken text, the stage fails identically, and
+        # it looks exactly like the model being incapable of the task.
+        #
+        # Cost of being wrong in each direction is asymmetric. Refusing to cache
+        # a genuinely-empty answer costs one repeated call; caching a truncated
+        # one costs the artifact, silently, for as long as the entry lives.
+        if not (result.text or "").strip():
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")

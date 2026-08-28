@@ -64,6 +64,39 @@ _GROUP_OPEN_RE = re.compile(
 _ID_RE = re.compile(r"\b(?:data-id|id)\s*=\s*[\"']([^\"']+)[\"']")
 
 
+_VIEWBOX_RE = re.compile(
+    r"<svg\b[^>]*?\bviewBox\s*=\s*[\"']\s*"
+    r"([-\d.eE]+)[,\s]+([-\d.eE]+)[,\s]+([-\d.eE]+)[,\s]+([-\d.eE]+)\s*[\"']",
+    re.IGNORECASE | re.DOTALL)
+_SVG_WH_RE = re.compile(
+    r"<svg\b[^>]*?\bwidth\s*=\s*[\"']([\d.]+)[a-z%]*[\"'][^>]*?"
+    r"\bheight\s*=\s*[\"']([\d.]+)[a-z%]*[\"']",
+    re.IGNORECASE | re.DOTALL)
+
+
+def document_extent(code: str) -> tuple[float, float] | None:
+    """The drawing's own coordinate extent, in the same units `bbox()` returns.
+
+    The `viewBox` is the authority: it defines the user-unit space every
+    placeholder's `x`/`y`/`width`/`height` live in. `width`/`height` on the root
+    are a fallback, and are only equivalent when no viewBox rescales them.
+
+    Returns `None` when neither is parseable, which callers must read as "do not
+    correct" rather than as any particular size.
+    """
+    m = _VIEWBOX_RE.search(code)
+    if m:
+        w, h = float(m.group(3)), float(m.group(4))
+        if w > 0 and h > 0:
+            return (w, h)
+    m = _SVG_WH_RE.search(code)
+    if m:
+        w, h = float(m.group(1)), float(m.group(2))
+        if w > 0 and h > 0:
+            return (w, h)
+    return None
+
+
 def _local(tag: str) -> str:
     """Tag name without its namespace."""
     return tag.rsplit("}", 1)[-1]

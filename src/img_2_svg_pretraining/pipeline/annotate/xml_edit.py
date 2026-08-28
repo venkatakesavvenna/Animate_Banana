@@ -27,7 +27,7 @@ CLASSES = (
 def parse(xml_text: str) -> ET.Element:
     """Parse, raising ET.ParseError with the original message on failure."""
     return ET.fromstring(xml_text)
-
+ 
 
 def serialize(root: ET.Element) -> str:
     """Back to text, matching the parser's own formatting."""

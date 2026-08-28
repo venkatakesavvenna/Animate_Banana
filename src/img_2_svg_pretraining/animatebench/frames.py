@@ -96,20 +96,34 @@ def select(frames: list[Path], policy: str) -> tuple[list[Path], list[int]]:
 def step_frames(frames: list[Path], n_steps: int) -> tuple[list[Path], list[int]] | None:
     """The frame for each animation timestep, or None when that is ambiguous.
 
-    The per-timestep judges need "the frame for step i". Frame count equals
-    step count in 26 of the 29 scored cells, and there the mapping is the
-    identity. Where the animator emitted several frames per step the counts
-    disagree (17 steps / 67 frames on one sample) and the design document does
-    not say how to map them -- so this returns None and the caller records the
-    cell as unmappable.
+    The per-timestep judges need "the frame for step i". Two frame counts are
+    exactly attributable, and both are accepted:
 
-    Guessing would be worse than skipping: a frame taken from the wrong step
-    produces a band that is wrong while looking entirely plausible, and nothing
-    downstream could ever detect it.
+    - `len(frames) == n_steps` -- the identity. TikZ exports one PDF page per
+      declared frame, so this holds for every TikZ cell measured (delta 0
+      across all of them).
+    - `len(frames) == n_steps + 1` -- frame 0 is the animation's INITIAL
+      state, before any step has fired, and frame i is the state after step i.
+      SVG exports look like this: frames come from sampling the CSS timeline
+      in a browser, and the pre-keyframe state is a real, distinct sample.
+      Dropping frame 0 recovers the identity exactly. This is not a guess --
+      transition i-1 -> i *is* timestep i, which is precisely what the judge
+      is shown as (previous frame, current frame).
+
+    Anything else genuinely is ambiguous (17 steps / 67 frames on one sample,
+    with no stated rule for which of the four frames is "the" frame for a
+    step), and returns None so the caller records the cell as unmappable.
+    Guessing there would be worse than skipping: a frame taken from the wrong
+    step produces a band that is wrong while looking entirely plausible, and
+    nothing downstream could ever detect it.
     """
-    if not frames or n_steps <= 0 or len(frames) != n_steps:
+    if not frames or n_steps <= 0:
         return None
-    return list(frames), list(range(len(frames)))
+    if len(frames) == n_steps:
+        return list(frames), list(range(len(frames)))
+    if len(frames) == n_steps + 1:
+        return list(frames[1:]), list(range(1, len(frames)))
+    return None
 
 
 def prepare(paths: list[Path], long_edge: int = DEFAULT_LONG_EDGE,

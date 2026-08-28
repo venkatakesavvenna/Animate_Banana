@@ -1,0 +1,56 @@
+# Experiment 2 -- Narrative quality. Same animations as Experiment 1, with the
+# narration visible. The visuals are pixel-identical by construction, so these
+# scores are directly comparable with exp1's.
+
+experiment: exp2
+title: How well does the narration work with this animation?
+intro: >
+  Same kind of animation as before, but now the narration is shown beneath it.
+  Step through to the end, then judge the words and how well they fit what you
+  are seeing -- not the visuals on their own.
+
+questions:
+  - id: flow_coherence
+    section: Narration
+    prompt: Does the narration read as one connected explanation?
+    help: Whether each line follows from the last, rather than reading as separate captions.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: flow
+
+  - id: flow_quality
+    section: Narration
+    prompt: Is it well written?
+    help: Clear, correct, and free of padding or repetition.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: flow
+
+  - id: flow_soundness
+    section: Narration
+    prompt: Is what it says actually true of the figure?
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: flow
+
+  - id: align_relevance
+    section: Alignment
+    prompt: Does the narration talk about what is on screen at the time?
+    help: The right words arriving with the right part of the animation.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: alignment
+
+  - id: align_usefulness
+    section: Alignment
+    prompt: Does the narration help you understand what you are looking at?
+    type: likert5
+    labels: [Not at all, A little, Somewhat, Quite a bit, A great deal]
+    metric: alignment
+
+  - id: narr_overall
+    section: Alignment
+    prompt: Overall, how good is the narration for this animation?
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: Overall

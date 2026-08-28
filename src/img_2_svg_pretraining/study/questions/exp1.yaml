@@ -1,0 +1,115 @@
+# Experiment 1 -- Animation quality. Captions are hidden; the participant
+# judges the visuals alone.
+#
+# Wording note: keep these plain and human. They are read by colleagues, not
+# parsed by a model, and stilted phrasing makes people rate the sentence rather
+# than the animation. Edit freely -- nothing in the code depends on the text.
+#
+# `metric` links each question to the AnimateBench metric it should correlate
+# with, so the human<->LLM agreement analysis needs no separate mapping table.
+
+experiment: exp1
+title: How well does this animation present the diagram?
+intro: >
+  Step through the animation with the slider (or the arrow keys) all the way to
+  the end. The questions appear once you get there. You can go back over it as
+  often as you like, and the Video tab plays it through automatically.
+
+questions:
+  - id: cov_logical
+    section: Coverage
+    prompt: Does the animation show the same parts and connections as the figure?
+    help: Think about whether anything is missing, invented, or wired up differently.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: VFS
+
+  - id: cov_geometric
+    section: Coverage
+    prompt: Are things in the same places as in the figure?
+    help: Left/right, above/below, and the general arrangement.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: VFS
+
+  - id: cov_style
+    section: Coverage
+    prompt: Does it look like the original figure?
+    help: Colours, shapes, line weights, and overall visual character.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: VFS
+
+  - id: cov_proportion
+    section: Coverage
+    prompt: Are the sizes and spacing about right?
+    help: Boxes that should be equal being equal, nothing squashed or oversized.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: VFS
+
+  - id: cov_text
+    section: Coverage
+    prompt: Is the text correct and readable?
+    help: Labels spelled and placed as in the figure, nothing clipped or overlapping.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: VFS
+
+  - id: cov_alteration
+    section: Coverage
+    prompt: Do any elements change when they should not?
+    help: An element that shifts, resizes or recolours for no reason as the animation runs.
+    type: likert5
+    labels: [Changes badly, Changes often, Some changes, Barely changes, Stays put]
+    metric: OCS
+
+  - id: cov_omission
+    section: Coverage
+    prompt: Is anything from the figure never shown at all?
+    help: Whole boxes, arrows or labels that the animation simply skips.
+    type: likert5
+    labels: [Much missing, A lot missing, Some missing, A little missing, Nothing missing]
+    metric: OCS
+
+  - id: qual_selection
+    section: Quality
+    prompt: Does it highlight the right things, in a sensible order?
+    help: Whether the parts it chooses to focus on are the ones worth focusing on.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: SSS
+
+  - id: qual_pacing
+    section: Quality
+    prompt: Is it broken into sensible steps, at a comfortable pace?
+    help: Too much at once, too little at a time, too fast, or too slow.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: GPS
+
+  - id: qual_overall
+    section: Quality
+    prompt: Overall, how good is this animation?
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: Overall
+
+  - id: style_compliance
+    section: Style
+    prompt: "Does it follow the stated animation style: {style_name}?"
+    help: "{style_description}"
+    type: yesno
+    metric: ASCS
+
+  - id: style_traversal
+    section: Style
+    prompt: How does it move through the figure?
+    type: select
+    options:
+      - {value: overview_first, label: Overview first, then into the details}
+      - {value: detail_first, label: Straight into details, no overview}
+      - {value: sequential, label: Follows the flow from start to end}
+      - {value: grouped, label: Group by group}
+      - {value: no_order, label: No clear order}
+    metric: traversal

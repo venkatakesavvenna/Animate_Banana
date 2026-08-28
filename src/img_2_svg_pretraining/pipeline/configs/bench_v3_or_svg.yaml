@@ -1,0 +1,243 @@
+# AnimateBench v3 -- SVG target, Gemini 3.7 Flash via OpenRouter.
+#
+# The SVG twin of bench_v3_or.yaml. Same bench, same models, same critics,
+# same endpoint; the only difference is `target: svg` and the four prompts
+# that differ per target. That is deliberate: holding everything else fixed
+# is what makes "TikZ vs SVG" attributable to the representation rather than
+# to the setup.
+#
+# WHAT ACTUALLY DIFFERS FROM THE TIKZ CONFIG
+# ------------------------------------------
+#   target                       tikz -> svg
+#   code_converter.prompt        tikz_diagram_to_code -> svg_diagram_to_code
+#   parser.prompt                tikz_parser          -> svg_parser
+#   sequencer.prompt             tikz_sequencer       -> svg_sequencer
+#   designer.prompt              designer             -> svg_designer#<style>
+#   exporter.outputs             [pdf, mp4]           -> [mp4]
+#
+# The designer prompt is STYLE-KEYED for SVG (`svg_designer.yaml#<style>`)
+# where the TikZ one is not, so switching style here means switching that
+# prompt too. `#progressive_reveal` matches this file's `animation_style`.
+#
+# NO PDF. TikZ animations are a multipage PDF that pdftoppm turns into
+# frames; an SVG animation is CSS `@keyframes`, which no rasteriser can seek.
+# Frames come from headless chromium instead (export/svg_frames.py), driven
+# by playwright, which must be installed:
+#
+#   PLAYWRIGHT_BROWSERS_PATH=/environments/playwright-browsers \
+#     python -m playwright install chromium
+#
+# Asking for `pdf` here would fail at export, so `mp4` alone is requested --
+# and mp4 is also what writes exports/frames/, which the animation tree needs.
+#
+# PATHS DO NOT COLLIDE WITH THE TIKZ RUN. `CachePaths.code_lineage` appends
+# the target for anything that is not tikz, so every SVG artifact lands beside
+# its TikZ counterpart rather than on top of it. Without that the SVG run
+# would inherit the TikZ XML as "cached" and every sequence `focus` would
+# reference ids the SVG does not contain.
+#
+# STAGE 2a IS GONE. `strategizer` is still declared because its (never-run)
+# model is baked into the existing lineage and removing it would rewrite every
+# scored path -- see CachePaths.strategy_lineage. It cannot execute:
+# `run_pipeline strategize` now refuses. Paper context reaches the narrative
+# writer, and the sequencer only if `context_tier` is set there.
+
+dataset:
+  root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v3
+  limit: 0
+
+cache_root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v3_cache
+
+animation_style: progressive_reveal
+target: svg
+
+backends:
+  openrouter_flash:
+    type: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    model: google/gemini-3.7-flash
+    api_key_env: OPEN_ROUTER_KEY
+    max_concurrency: 4
+
+  # Video judge for the vfs_video (E1b) node only. Native `gemini`, not the
+  # OpenRouter route: OpenRouter's openai-compatible schema has no verified
+  # video part type, and openai_compat now raises rather than silently dropping
+  # one. Free-tier Google keys make the whole video study cost nothing.
+  #
+  # max_concurrency 2, not 8. Eight threads over this key pool once landed ZERO
+  # calls in thirty minutes: each thread marked keys exhausted until the ring
+  # had cleared every mark and started again on dead ones. The quota here is
+  # per DAY (20/key), which KeyRing's per-minute-shaped backoff does not model.
+  # PAID video judge, via OpenRouter. Same model as `gemini_video`, different
+  # transport -- use when the free-tier Google pool is exhausted.
+  #
+  # WHY THIS EXISTS. The 75 free keys are 20 requests/DAY each. Running the
+  # 38-cell sweep and pilot scorings together drained them into sustained 429
+  # RESOURCE_EXHAUSTED, and judging fell to 3 cells/hour while workers retried.
+  #
+  # MEASURED COST, not estimated: 12592 prompt + 146 completion tokens per call
+  # at $0.375/M in and $1.875/M out = ~$0.0041/call. Two calls per cell, ~100
+  # model-cells, so the ENTIRE video-judging bill is about $0.83. That is small
+  # enough that waiting on free quota costs more in wall clock than it saves.
+  #
+  # max_concurrency 6, not 2: the free-tier value was shaped around a per-DAY
+  # key quota where aggressive threading raced keys into exhaustion. A paid
+  # single-key endpoint has no such failure mode.
+  #
+  # NOTE the media_resolution param is NOT set here. It is a native-Gemini
+  # GenerateContentConfig field that the OpenAI-compatible route does not
+  # accept, so frames arrive at the default ~60 tokens each rather than ~250.
+  # Criterion 6 of the fidelity prompt (text legibility) is therefore weaker on
+  # this route than on `gemini_video`. Do not mix the two judges' scores for
+  # that criterion without saying which produced them.
+  gemini_video_paid:
+    type: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    model: google/gemini-3.7-flash
+    api_key_env: OPEN_ROUTER_KEY
+    max_concurrency: 6
+
+  gemini_video:
+    type: gemini
+    model: gemini-3.7-flash
+    max_concurrency: 1
+    default_params:
+      # MEASURED, not guessed. Gemini samples inline video at exactly 1 frame
+      # per second (token cost is perfectly linear in duration: 60 tokens per
+      # frame at 2/5/10/20/40 frames), and tokenizes those frames far more
+      # coarsely than a still image -- 60 vs ~700 tokens for the same diagram.
+      # Criterion 6 of the video prompt asks about text legibility, which at 60
+      # tokens/frame the model cannot assess because it cannot read the labels.
+      # HIGH restores ~250 tokens/frame, comparable to how the frame judge sees
+      # them, so a frames-vs-video disagreement is about the modality rather
+      # than about resolution. Costs ~$0.19 for all 64 cells on the paid route,
+      # $0 on free-tier keys.
+      media_resolution: MEDIA_RESOLUTION_HIGH
+
+  # SSS / GPS judge for the letter-band rubric. Frame-level, so it needs image
+  # input but not video: the question is about a pair of consecutive stills and
+  # the XML they map onto.
+  #
+  # A DIFFERENT FAMILY FROM BOTH GENERATORS ON PURPOSE. Scoring Gemini's output
+  # with Gemini, or Qwen3.8-27B's with Qwen3.8-27B, is the circular evaluation
+  # this repo's notes warn about; a shared judge keeps the two comparable and
+  # neither self-preferring.
+  #
+  # Cheap enough not to need rationing: $0.16/M in, $0.47/M out, against
+  # Qwen3.8-27B's $2.55/M out.
+  qwen38_flash_judge:
+    type: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    model: qwen/qwen3.8-flash
+    api_key_env: OPEN_ROUTER_KEY
+    # 8, and this is now the ONE knob that matters: `_banded_workers` reads it
+    # to size the timestep pool, so raising it here parallelises SSS/GPS rather
+    # than only allowing concurrency the sequential driver never used.
+    max_concurrency: 8
+
+  qwen_judge:
+    type: openai_compat
+    base_url: http://127.0.0.1:8010/v1
+    model: Qwen/Qwen3-VL-235B-A22B-Instruct
+    api_key: EMPTY
+    max_concurrency: 8
+
+transmuter:
+  code_converter:
+    backend: openrouter_flash
+    prompt: diagram_transmuter/svg_diagram_to_code.yaml#prompt
+    params:
+      temperature: 0.2
+      # Doubled as on the TikZ side: reasoning tokens are billed as output and
+      # spend this budget before a single tag is emitted.
+      max_tokens: 32768
+
+  raster_integrator:
+    enabled: true
+    backend: openrouter_flash
+    params:
+      temperature: 0.0
+      max_tokens: 32768
+
+  diagram_critic:
+    enabled: true
+    backend: openrouter_flash
+    prompt: diagram_transmuter/critic.yaml
+    fidelity_threshold: 0.7
+    max_rounds: 3
+    params:
+      temperature: 0.1
+      max_tokens: 32768
+
+planner:
+  # Declared, never run. See the header.
+  strategizer:
+    backend: openrouter_flash
+    prompt: animation_planner/strategizer.yaml#full-context-prompt
+    context_tier: full
+
+  parser:
+    backend: openrouter_flash
+    prompt: animation_planner/svg_parser.yaml#prompt
+    params:
+      temperature: 0.0
+      max_tokens: 32768
+
+  sequencer:
+    backend: openrouter_flash
+    prompt: animation_planner/svg_sequencer.yaml#new_prompt
+    # context_tier deliberately unset: the bench sequencer prompt names its
+    # own three inputs and plans traversal from them. Setting it (to
+    # caption/abstract/full) feeds the paper's prose in as well AND appends
+    # `ctx-<tier>` to the sequence lineage, so the two variants never share a
+    # cache entry. Left off here so SVG stays comparable with the TikZ run.
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+  critic:
+    enabled: true
+    backend: openrouter_flash
+    prompt: animation_planner/critic.yaml#prompt
+    max_rounds: 2
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  narrative_writer:
+    backend: openrouter_flash
+    prompt: animation_planner/narrative_writer.yaml
+    # The one stage that genuinely wants the paper's own words.
+    context_tier: full
+    params:
+      temperature: 0.3
+      max_tokens: 32768
+
+animator:
+  designer:
+    backend: openrouter_flash
+    # Style-keyed, unlike the TikZ designer. `{style}` is expanded at run time
+    # by designer._resolve_prompt, which also maps the two keys whose names
+    # differ from the pipeline's (hopping_box / sliding_box). One config now
+    # serves every style instead of a near-duplicate per style -- which is
+    # exactly how a config's style and its designer prompt drift apart.
+    prompt: animation_designer/svg_designer.yaml#{style}
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  critic:
+    enabled: true
+    backend: openrouter_flash
+    prompt: animation_designer/critic.yaml#prompt
+    max_rounds: 3
+    compile_check: true
+    params:
+      temperature: 0.2
+      max_tokens: 32768
+
+  exporter:
+    # mp4 only -- no pdf for SVG (see header). mp4 also writes exports/frames/.
+    outputs: [mp4]
+    fps: 2
+    dpi: 300

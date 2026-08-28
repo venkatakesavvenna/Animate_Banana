@@ -54,6 +54,38 @@ def _load_xml(ctx: AgentContext, sample: PaperSample) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _paper_context(ctx: AgentContext, sample: PaperSample) -> str:
+    """The paper's own words, when this sequencer is configured to want them.
+
+    OFF by default, and deliberately so. The bench prompts name exactly three
+    inputs (code, structural graph, style) and decide traversal from them;
+    adding the abstract and methods gives the model prose that can disagree
+    with the figure, which is a different experiment rather than a strictly
+    better one. It is a config option so that experiment can be run:
+
+        planner:
+          sequencer:
+            context_tier: full      # image_only | caption | abstract | full
+
+    `context_tier` also lands in the sequence lineage when set, so a run with
+    context and one without never share a cache entry.
+
+    Absent context is a configuration choice, not an error: a sample missing
+    an abstract simply contributes less, rather than failing the stage.
+    """
+    tier = ctx.agent.option("context_tier", None)
+    if not tier or tier == "image_only":
+        return ""
+    if not sample.supports_tier(tier):
+        return ""
+    fields = sample.context_for(tier)
+    blocks = [f"### {k.upper()}\n{v}" for k, v in fields.items() if v]
+    if not blocks:
+        return ""
+    return ("### PAPER CONTEXT (background only -- the figure and the graph "
+            "above remain authoritative)\n\n" + "\n\n".join(blocks))
+
+
 def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
     strategy = _load_strategy(ctx, sample)
     structure_xml = _load_xml(ctx, sample)
@@ -99,12 +131,16 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
         # supplying one would work against the instruction it is being asked
         # to follow.
         code = Path(ctx.paths.resolve_code(sample.id)).read_text(encoding="utf-8")
-        text = "\n\n".join([
+        parts = [
             template,
             "### ORIGINAL DIAGRAM CODE\n" + code,
             "### HIERARCHICAL GRAPH (STRUCTURE XML)\n" + structure_xml,
             f"### ANIMATION STYLE\n{ctx.cfg.style}\n\n{style.prompt_block()}",
-        ])
+        ]
+        paper = _paper_context(ctx, sample)
+        if paper:
+            parts.append(paper)
+        text = "\n\n".join(parts)
 
     return [Message.user(text, images=[sample.image_path])]
 

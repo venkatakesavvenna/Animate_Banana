@@ -1,0 +1,42 @@
+# Experiment 5 -- Benchmark verification. The pipeline's own animation against
+# the human-checked reference kept in AnimateBench, for the same figure and
+# style. Blinded and side-randomised like the other pairwise experiments: the
+# participant is not told which side was corrected.
+
+experiment: exp5
+title: Which of these two presentations is better?
+intro: >
+  Two presentations of the same figure. One has been checked and corrected by a
+  person; the other has not. Step both to the end, then say which works better --
+  you are not expected to be able to tell which is which.
+
+questions:
+  - id: pref_better
+    prompt: Which one is the better presentation of this figure?
+    type: choice_ab
+    metric: Overall
+  - id: correction_visible
+    prompt: How different are the two?
+    type: select
+    options:
+      - {value: none, label: I cannot tell them apart}
+      - {value: minor_unnecessary, label: Small differences, and they did not help}
+      - {value: minor_necessary, label: Small differences, but they mattered}
+      - {value: substantial, label: Clearly different in several ways}
+      - {value: full, label: Essentially a different presentation}
+    metric: correction_magnitude
+  - id: pref_reason
+    prompt: What decided it for you?
+    type: select
+    options:
+      - {value: coverage, label: What it covered}
+      - {value: animation, label: The animation itself}
+      - {value: flow, label: How it was ordered and paced}
+      - {value: narration, label: The narration}
+      - {value: style, label: How well it kept to the style}
+      - {value: all, label: Everything together}
+      - {value: other, label: Something else}
+  - id: pref_comment
+    prompt: Anything you want to add? (optional)
+    type: text
+    optional: true

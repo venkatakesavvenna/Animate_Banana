@@ -1,0 +1,52 @@
+# Experiment 4 -- System comparison. AnimateBanana against an end-to-end model
+# baseline, same figure and style on both sides.
+#
+# Per-side scores are collected only to estimate a margin, and are expected to
+# be noisy -- the forced choice is the primary outcome. Drop the scores rather
+# than the choice if the two disagree.
+
+experiment: exp4
+title: Which of these two presentations is better?
+intro: >
+  Two presentations of the same figure, made by different systems. Step both all
+  the way to the end before answering.
+
+questions:
+  - id: pref_use
+    prompt: If you had to use one of these to explain this figure, which would you pick?
+    type: choice_ab
+    metric: utility
+  - id: pref_visual
+    prompt: Which one looks better?
+    type: choice_ab
+    metric: visual_quality
+  - id: pref_pacing
+    prompt: Which one moves through the figure better?
+    help: Sensible steps, sensible order, comfortable pace.
+    type: choice_ab
+    metric: GPS
+  - id: pref_reason
+    prompt: What decided it for you?
+    type: select
+    options:
+      - {value: coverage, label: What it covered}
+      - {value: animation, label: The animation itself}
+      - {value: flow, label: How it was ordered and paced}
+      - {value: narration, label: The narration}
+      - {value: style, label: How well it kept to the style}
+      - {value: all, label: Everything together}
+      - {value: other, label: Something else}
+  - id: score_a
+    prompt: Rate the left-hand presentation on its own.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: margin
+  - id: score_b
+    prompt: Rate the right-hand presentation on its own.
+    type: likert5
+    labels: [Very poor, Poor, Acceptable, Good, Excellent]
+    metric: margin
+  - id: pref_comment
+    prompt: Anything you want to add? (optional)
+    type: text
+    optional: true

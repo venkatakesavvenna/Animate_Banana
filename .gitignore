@@ -1,5 +1,10 @@
 data/
 
+# Run output -- driver logs, per-batch pipeline/eval logs, key-probe status.
+# key_status.json in particular held unmasked API keys until it was masked;
+# nothing machine-generated under here belongs in the repo regardless.
+logs/
+
 *.csv
 
 *cache/*

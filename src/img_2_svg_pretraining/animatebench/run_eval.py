@@ -63,11 +63,20 @@ def _get_alignment(cfg, paths: CachePaths, root: Path, config_name: str,
         return None
 
     gt = load_ground_truth(cfg.dataset_root, sample.id)
-    if not gt.xml_path().exists() or not paths.xml(sample.id).exists():
+    # cfg.target, NOT the accessor default. Every GroundTruth accessor defaults
+    # to "tikz", so an SVG run silently looked for `<sample>_tikz.xml` and found
+    # it only for the handful of samples that happen to ship BOTH targets. The
+    # metrics then reported `alignment_missing` rather than an error, so the
+    # column simply shrank -- on v4 from n=20 to n=2 -- with nothing anywhere
+    # saying why. v3 hid this completely because every one of its samples has
+    # both targets.
+    if (not gt.xml_path(cfg.target).exists()
+            or not paths.xml(sample.id).exists()):
         return None
 
     try:
-        alignment = align(judge, gt.xml(), DiagramXml.load(paths.xml(sample.id)),
+        alignment = align(judge, gt.xml(cfg.target),
+                          DiagramXml.load(paths.xml(sample.id)),
                           sample.image_path)
     except JudgeError as e:
         print(f"    [{sample.id}] alignment failed: {e}", file=sys.stderr)
@@ -84,7 +93,7 @@ def _run_stage1(cfg, paths, sample, judge, include_quality) -> dict:
     code_path = paths.resolve_code(sample.id)
     return stage1_code.run(judge, Path(code_path).read_text(encoding="utf-8"),
                            sample.image_path, paths.compile_cache(),
-                           include_quality=include_quality)
+                           include_quality=include_quality, target=cfg.target)
 
 
 def _run_xml(cfg, paths, sample, alignment) -> dict:
@@ -98,7 +107,7 @@ def _run_xml(cfg, paths, sample, alignment) -> dict:
         record = {"suite": "xml", "alignment_missing": True}
         record.update(stage2_xml.depth_consistency(pred))
         return record
-    return stage2_xml.run(gt.xml(), pred, alignment)
+    return stage2_xml.run(gt.xml(cfg.target), pred, alignment)
 
 
 def _run_sequence(cfg, paths, sample, alignment, style) -> dict:
@@ -112,7 +121,8 @@ def _run_sequence(cfg, paths, sample, alignment, style) -> dict:
         return {"suite": "sequence", "error": "no predicted XML to check against"}
 
     gt = load_ground_truth(cfg.dataset_root, sample.id)
-    gt_seq = gt.sequence(style) if gt.has_style(style) else None
+    gt_seq = (gt.sequence(style, cfg.target)
+              if gt.has_style(style, cfg.target) else None)
     return stage2_sequence.run(gt_seq, AnimationSequence.load(seq_path),
                                DiagramXml.load(xml_path), alignment, style)
 
@@ -126,7 +136,8 @@ def _run_stage3(cfg, paths, sample, judge, include_quality) -> dict:
     diagram = Path(paths.resolve_code(sample.id)).read_text(encoding="utf-8")
     work = paths.root / "evals" / "_compile_work" / sample.id
     return stage3_anim.run(judge, diagram, anim_path.read_text(encoding="utf-8"),
-                           work, include_quality=include_quality)
+                           work, include_quality=include_quality,
+                           target=cfg.target)
 
 
 def _get_checklist(cfg, paths, root: Path, config_name: str, sample, style: str,
@@ -214,7 +225,10 @@ def _run_animation(cfg, paths, root, config_name, sample, style, judge, args) ->
         style=style, checklist=checklist, xml_text=xml_text,
         step_frames_=step_frames_, prior_summary_at=prior_at, stages=stages,
         frame_px=args.frame_px,
-        cache_dir=root / "_frames" / style / sample.id)
+        cache_dir=root / "_frames" / style / sample.id,
+        export_video=exports / "animation.mp4",
+        video_source=getattr(args, "video_source", "frames"),
+        rubric=getattr(args, "rubric", "headers"))
 
     # A partial `--stages` run merges into whatever was scored before rather
     # than replacing it. The tree costs ~70 judged calls per cell, so rebuilding
@@ -263,7 +277,21 @@ def main() -> None:
                                       "bench configs name container paths "
                                       "(/code/data/...), which do not exist "
                                       "when the eval runs outside that container")
-    ap.add_argument("--stages", nargs="+", choices=list(animation_quality.STAGES),
+    ap.add_argument("--video-source", choices=("frames", "export"),
+                    default="frames",
+                    help="which mp4 the vfs_video judge sees. 'frames' (default) "
+                         "re-times the judged frame deck to 1fps so Gemini's 1fps "
+                         "inline sampling keeps every frame; 'export' sends "
+                         "exports/animation.mp4 as written (fps=2), where a 1fps "
+                         "sampler sees roughly half the animation.")
+    ap.add_argument("--rubric", choices=("headers", "letters"), default="headers",
+                    help="Band rubric for sss/gps. 'headers' is the stored "
+                         "`### FINAL_BAND: <0-4>` format every existing score "
+                         "was produced by; 'letters' is the JSON A-E revision. "
+                         "A maps to 4 and E to 0, so both produce the same "
+                         "0-1 metric in the same direction.")
+    ap.add_argument("--stages", nargs="+",
+                    choices=list(animation_quality.ALL_STAGES),
                     help="animation suite: which nodes of the tree to run. "
                          "sss and gps cost one call per timestep and dominate "
                          "the bill, so they are worth selecting separately")

@@ -32,9 +32,31 @@ def _try_compile(source: str, out_pdf: Path) -> tuple[bool, str]:
         return False, f"{type(e).__name__}: {e}"
 
 
-def compile_animation(anim_code: str, work_dir: Path) -> dict:
+def compile_animation(anim_code: str, work_dir: Path,
+                      target: str = "tikz") -> dict:
+    """Does the animation code actually build?
+
+    `target` matters: an SVG animation is CSS `@keyframes` inside an XML
+    document, and running pdflatex over it reports `anim_csr: 0.0` for an
+    animation that exported 23 frames perfectly well. That is a property of
+    the harness, not of the animation, and it is exactly the kind of zero
+    that looks like a finding.
+    """
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    if target == "svg":
+        # There is no repair step to compare against, so raw and repaired are
+        # the same document and `repair_rescued` is meaningless rather than
+        # False-because-it-failed.
+        ok, log = _svg_builds(anim_code)
+        return {
+            "anim_csr": 1.0 if ok else 0.0,
+            "anim_compiles": ok,
+            "raw_compiles": ok,
+            "repair_rescued": False,
+            "anim_compile_log": "" if ok else log,
+        }
 
     ok, log = _try_compile(to_multipage_pdf_source(anim_code), work_dir / "repaired.pdf")
     raw_ok, _ = _try_compile(anim_code, work_dir / "raw.pdf")
@@ -46,6 +68,30 @@ def compile_animation(anim_code: str, work_dir: Path) -> dict:
         "repair_rescued": bool(ok and not raw_ok),
         "anim_compile_log": "" if ok else log,
     }
+
+
+def _svg_builds(anim_code: str) -> tuple[bool, str]:
+    """Well-formed XML carrying an <svg> root, and rasterisable.
+
+    Parsing alone is too weak -- an XML document with no <svg> element parses
+    fine and animates nothing. Rendering is the SVG counterpart of "pdflatex
+    exited 0": `render_svg` reports the same CompileResult contract that
+    `compile_tikz` does, deliberately (see svg_render.py).
+    """
+    import tempfile
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(anim_code)
+    except ET.ParseError as e:
+        return False, f"SVG is not well-formed XML: {e}"
+    if not root.tag.endswith("svg"):
+        return False, f"document root is <{root.tag}>, not <svg>"
+
+    from img_2_svg_pretraining.pipeline.svg_render import render_svg
+    with tempfile.TemporaryDirectory() as tmp:
+        result = render_svg(anim_code, Path(tmp))
+    return bool(result.ok), "" if result.ok else (result.log or "SVG did not render")
 
 
 def integration_footprint(diagram_code: str, anim_code: str) -> dict:
@@ -81,9 +127,9 @@ def integration_footprint(diagram_code: str, anim_code: str) -> dict:
 
 
 def run(judge, diagram_code: str, anim_code: str, work_dir: Path,
-        include_quality: bool = True) -> dict:
-    record = {"suite": "stage3"}
-    record.update(compile_animation(anim_code, work_dir))
+        include_quality: bool = True, target: str = "tikz") -> dict:
+    record = {"suite": "stage3", "target": target}
+    record.update(compile_animation(anim_code, work_dir, target=target))
     record.update(integration_footprint(diagram_code, anim_code))
     if judge is not None and include_quality:
         record.update(code_quality(judge, anim_code, "animation"))

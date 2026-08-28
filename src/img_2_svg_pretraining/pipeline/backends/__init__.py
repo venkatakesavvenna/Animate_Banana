@@ -14,11 +14,11 @@ from pathlib import Path
 
 from .base import BackendError, ChatBackend, PointBackend, RetriableError, SegmentBackend
 from .keys import KeyRing, find_key_file, resolve_keys
-from .types import GenerationResult, ImagePart, Message, Part, TextPart
+from .types import GenerationResult, ImagePart, Message, Part, TextPart, VideoPart
 
 __all__ = [
     "BackendError", "ChatBackend", "PointBackend", "SegmentBackend", "RetriableError",
-    "GenerationResult", "ImagePart", "Message", "Part", "TextPart",
+    "GenerationResult", "ImagePart", "Message", "Part", "TextPart", "VideoPart",
     "KeyRing", "find_key_file", "resolve_api_key", "resolve_api_keys",
     "make_backend", "CHAT_BACKENDS", "DEFAULT_KEY_ENV",
 ]
@@ -71,7 +71,10 @@ def make_backend(name: str, cfg: dict, cache_root: Path | None = None) -> ChatBa
 
     if backend_type == "openai_compat":
         from .openai_compat import OpenAICompatBackend
-        kwargs["api_key"] = resolve_api_key(backend_type, cfg)
+        # The whole pool, as for gemini. OpenRouter keys carry a hard credit
+        # cap rather than a per-minute quota, so the failure is terminal for
+        # that key and rotating is the only way a run outlives it.
+        kwargs["api_keys"] = resolve_api_keys(backend_type, cfg)
         return OpenAICompatBackend(name=name, **kwargs)
 
     if backend_type == "gemini":
