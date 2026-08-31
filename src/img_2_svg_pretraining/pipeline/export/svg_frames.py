@@ -205,7 +205,9 @@ def state_midpoints(timeline: dict, total_ms: float) -> list[float]:
 def render_svg_frames(svg_source: str, out_dir: Path, fps: int | None = None,
                       scale: float = 2.0, max_frames: int = 600,
                       base_dir: Path | None = None,
-                      style: str | None = None) -> tuple[list[Path], int]:
+                      style: str | None = None,
+                      steps_dir: Path | None = None,
+                      n_steps: int | None = None) -> tuple[list[Path], int]:
     """Render an animated SVG to PNG frames.
 
     Returns `(frame_paths, fps)`. `fps` is echoed back because it may be
@@ -317,6 +319,32 @@ def render_svg_frames(svg_source: str, out_dir: Path, fps: int | None = None,
                 page.screenshot(path=str(shot),
                                 clip={"x": 0, "y": 0, "width": width, "height": height})
                 frames.append(shot)
+
+            # A SECOND, STEP-ALIGNED DECK.
+            #
+            # The deck above samples every distinct animation STATE, which is
+            # what the video judges and a human viewer want -- and for a slide
+            # that is deliberately many more frames than there are timesteps.
+            # But SSS, GPS and NAS each need "the frame for step i", and
+            # `animatebench.frames.step_frames` accepts only n or n+1 frames
+            # precisely so it never has to guess which of several frames a step
+            # owns. A guessed frame yields a band that is wrong while looking
+            # entirely plausible, and nothing downstream could detect it.
+            #
+            # So rather than loosen that guard, emit exactly n_steps frames
+            # here, each sampled at the MIDPOINT of its own timestep's slice of
+            # the timeline. Exact by construction: step i's frame comes from
+            # step i's state, and the per-step judges keep their 1:1 mapping.
+            if steps_dir and n_steps and n_steps > 0:
+                steps_dir = Path(steps_dir)
+                steps_dir.mkdir(parents=True, exist_ok=True)
+                slice_ms = total / n_steps
+                for i in range(n_steps):
+                    t_mid = min((i + 0.5) * slice_ms, total)
+                    page.evaluate(_SEEK_JS, t_mid)
+                    page.screenshot(
+                        path=str(steps_dir / f"frame-{i + 1}.png"),
+                        clip={"x": 0, "y": 0, "width": width, "height": height})
         finally:
             browser.close()
 

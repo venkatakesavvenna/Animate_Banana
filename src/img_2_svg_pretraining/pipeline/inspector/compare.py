@@ -356,6 +356,9 @@ _EVIDENCE: dict[str, list[str]] = {
     "gps": ["gps_band_mean", "gps_steps_scored", "gps_steps_total",
             "gps_steps_invalid", "gps_step_detail", "gps_errors",
             "gps_rubric"],
+    "nas": ["nas_band_mean", "nas_steps_scored", "nas_steps_total",
+            "nas_steps_unnarrated", "nas_steps_invalid", "nas_step_detail",
+            "nas_errors", "nas_rubric"],
     "repetition_rate": ["repetition_status", "repetition_note",
                         "unnecessary_repetition_count_element",
                         "unnecessary_repetition_count_arrow",
@@ -826,7 +829,9 @@ _ANIM_NODES = [
      "animation_selection_bands.yaml", "user", "adapter", "sss_step_detail"),
     ("gps", "Contributor 2 · Granularity & Pacing",
      "animation_pacing_bands.yaml", "user", "adapter", "gps_step_detail"),
-    ("repetition", "Contributor 3 · Unnecessary Repetition",
+    ("nas", "Contributor 3 · Narration Alignment",
+     "animation_narration.yaml", "user", "adapter", "nas_step_detail"),
+    ("repetition", "Contributor 4 · Unnecessary Repetition",
      "animation_repetition.yaml", "frames", "adapter", "repetition_frame_detail"),
 ]
 
@@ -1327,6 +1332,74 @@ def api_overview():
                 })
     return jsonify({"columns": columns, "rows": rows,
                     "models": list(STATE["models"]), "cells": len(pairs)})
+
+
+@app.get("/steps.csv")
+def steps_csv():
+    """Framewise judge scores as one long-format CSV, for external analysis.
+
+    The cell-level sss/gps/nas numbers are means over per-timestep bands, and
+    a mean hides exactly what someone choosing an aggregation needs to see:
+    the distribution. One row per (model, sample, metric, timestep), carrying
+    the final band AND every sub-band the judge scored on the way there, so a
+    spreadsheet can test alternative aggregations (min, trimmed mean, per-
+    criterion) directly against the shipped mean.
+
+    Long format rather than one-column-per-metric because the three metrics
+    have disjoint sub-bands; metric-specific columns are simply empty on the
+    other metrics' rows. Rationales are deliberately omitted -- they are
+    prose, and this file is for arithmetic; the viewer shows them per cell.
+
+    Reads records through the same `results.suite_path` resolution as
+    `_metrics`, so the CSV can never disagree with what the viewer shows.
+    """
+    import csv
+    import io
+
+    from img_2_svg_pretraining.animatebench import results
+
+    detail_fields = {
+        "sss": ["criterion_a_band", "criterion_b_band"],
+        "gps": ["volume_band", "complexity_band", "relevance_band"],
+        "nas": ["alignment_band", "insight_band", "coherence_band"],
+    }
+    sub_cols = [f for fields in detail_fields.values() for f in fields]
+    header = (["model", "config", "sample", "style", "metric", "cell_score",
+               "cell_band_mean", "timestep", "frame", "is_valid",
+               "final_band", "band_label"] + sub_cols)
+
+    cells_spec = STATE.get("cells")
+    if cells_spec:
+        pairs = [(STATE["by_id"][c["id"]], c["style"]) for c in cells_spec
+                 if c["id"] in STATE["by_id"]]
+    else:
+        pairs = [(s, sty) for s in STATE["samples"] for sty in STATE["styles"]]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(header)
+    for label, model in STATE["models"].items():
+        config_name = Path(model["file"]).stem
+        root = _evals_root(model["cfg"])
+        for sample, style in pairs:
+            record = results.read_record(results.suite_path(
+                root, config_name, style, sample.id, "animation"))
+            if not record:
+                continue
+            for metric, fields in detail_fields.items():
+                for step in (record.get(f"{metric}_step_detail") or []):
+                    writer.writerow(
+                        [label, config_name, sample.id, style, metric,
+                         record.get(metric),
+                         record.get(f"{metric}_band_mean"),
+                         step.get("timestep"), step.get("frame"),
+                         step.get("is_valid"), step.get("final_band"),
+                         step.get("label")]
+                        + [step.get(f) if f in fields else "" for f in sub_cols])
+    return app.response_class(
+        buf.getvalue(), mimetype="text/csv",
+        headers={"Content-Disposition":
+                 "attachment; filename=animatebench_v5_steps.csv"})
 
 
 @app.get("/api/figure/<sample_id>")

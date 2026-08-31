@@ -130,6 +130,23 @@ class OpenAICompatBackend(ChatBackend):
         if "top_p" in params:
             kwargs["top_p"] = params["top_p"]
 
+        # Provider-specific passthrough, e.g. vLLM's `chat_template_kwargs`.
+        #
+        # This exists for reasoning models used as JUDGES. Kimi K2.6 emits a
+        # <think> block before any content, and its chat template accepts
+        # `{"thinking": false}` to pre-fill an empty one. Measured on a single
+        # banding call: 11.1s / 710 completion tokens with thinking on, versus
+        # 0.2s / 6 tokens with it off -- and the answer is CLEANER, a bare
+        # {"band":"B"} instead of prose a parser has to dig through. Across
+        # ~22k judged calls that is the difference between a night and a week.
+        #
+        # Deliberately NOT applied to generation: reasoning is what makes the
+        # model good at writing an SVG. This is per-backend config, so the
+        # judge can disable it while `served` keeps it.
+        extra = self.default_params.get("extra_body") if self.default_params else None
+        if isinstance(extra, dict) and extra:
+            kwargs["extra_body"] = extra
+
         try:
             resp = self._client.chat.completions.create(**kwargs)
         except (openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError) as e:

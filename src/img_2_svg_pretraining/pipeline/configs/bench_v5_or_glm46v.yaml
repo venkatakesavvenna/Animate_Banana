@@ -17,7 +17,7 @@
 # silently compares a run against itself.
 
 dataset:
-  root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v3
+  root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v5
   limit: 0
 
 cache_root: /fsxvision_new/venkat.kesav/img_2_svg_pretraining/data/animatebench_v5_or_cache
@@ -31,20 +31,52 @@ backends:
       base_url: https://openrouter.ai/api/v1
       model: z-ai/glm-4.6v
       api_key_env: OPEN_ROUTER_KEY
-      # 4, not 12: this is a shared paid endpoint with a hard credit cap.
-      max_concurrency: 4
+      # Raised from 4 once the key's credit cap was lifted. This stream must
+      # cover all 91 cells by itself overnight, and OpenRouter fans out far
+      # better than a single local server does.
+      max_concurrency: 12
 
-  # The judge. Run AFTER generation, so one load of the 471GB model scores every
-  # config rather than reloading per model. A different family from most
-  # generators here -- judging a model's output with itself is the circular
-  # evaluation this project's notes warn against, and it is why the
-  # qwen3vl235b row needs a footnote.
+  # The judge. Run AFTER generation, so one load scores every config rather
+  # than reloading per model. A different family from most generators here --
+  # judging a model's output with itself is the circular evaluation this
+  # project's notes warn against, and it is why the qwen3vl235b row needs a
+  # footnote.
   qwen_judge:
     type: openai_compat
     base_url: http://127.0.0.1:8010/v1
     model: Qwen/Qwen3-VL-235B-A22B-Instruct
     api_key: EMPTY
     max_concurrency: 8
+
+  # Kimi K2.6 as judge, served across 2 nodes on :8011.
+  #
+  # max_concurrency 64, not 8. The v3 animation-tree run is the cautionary
+  # tale: it scored 45 cells in 3.8h at "Running: 1 reqs" against
+  # --max-num-seqs 16, leaving ~94% of the server idle, because the DRIVER was
+  # sequential -- one run_eval subprocess per cell. The judging work is
+  # embarrassingly parallel (every cell independent), so the only thing that
+  # ever limited it was how many requests were in flight. This server sustains
+  # Running: 32 at ~1090 tok/s; 64 keeps the queue non-empty as cells finish.
+  kimi_judge:
+    type: openai_compat
+    base_url: http://127.0.0.1:8011/v1
+    model: moonshotai/Kimi-K2.6
+    api_key: EMPTY
+    max_concurrency: 8
+    # THINKING OFF FOR JUDGING. Kimi emits a <think> block before any content;
+    # its chat template takes `thinking: false` and pre-fills an empty one.
+    # Measured on one banding call: 11.1s / 710 completion tokens with thinking
+    # on, 0.2s / 6 tokens with it off -- and the reply is cleaner, a bare
+    # {"band":"B"} rather than prose the parser must dig through. Over ~22k
+    # judged calls that is a night instead of a week.
+    #
+    # A judge assigns a band against a rubric; it is not the task reasoning
+    # helps. Generation keeps thinking ON -- that is `served`, a different
+    # backend, and this setting does not touch it.
+    default_params:
+      extra_body:
+        chat_template_kwargs:
+          thinking: false
 
 transmuter:
   code_converter:
@@ -62,7 +94,7 @@ transmuter:
       max_tokens: 65536
 
   diagram_critic:
-    enabled: true
+    enabled: false
     backend: openrouter_glm46v
     prompt: diagram_transmuter/critic.yaml
     fidelity_threshold: 0.7
@@ -95,7 +127,7 @@ planner:
       max_tokens: 65536
 
   critic:
-    enabled: true
+    enabled: false
     backend: openrouter_glm46v
     prompt: animation_planner/critic.yaml#prompt
     max_rounds: 2
@@ -121,7 +153,7 @@ animator:
       max_tokens: 65536
 
   critic:
-    enabled: true
+    enabled: false
     backend: openrouter_glm46v
     prompt: animation_designer/critic.yaml#prompt
     max_rounds: 3

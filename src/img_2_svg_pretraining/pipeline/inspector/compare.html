@@ -286,6 +286,10 @@
       <button class="tab" id="tab-overview" onclick="showView('overview')">All models</button>
       <button class="tab" id="tab-explain" onclick="showView('explain')">Metrics</button>
     </div>
+    <!-- Framewise export: every per-timestep band behind the cell means, as
+         long-format CSV -- the means live in the tables above, but choosing
+         an aggregation needs the distribution, not its summary. -->
+    <a href="/steps.csv" download style="margin-left:8px">&#8681; steps.csv</a>
   </div>
 </header>
 

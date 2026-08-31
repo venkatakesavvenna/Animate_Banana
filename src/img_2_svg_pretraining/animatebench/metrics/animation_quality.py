@@ -77,7 +77,7 @@ UNENFORCEABLE_RULES = {
                              "unanswerable from one frame"],
 }
 
-STAGES = ("vfs", "ascs", "omission", "sss", "gps", "repetition")
+STAGES = ("vfs", "ascs", "omission", "sss", "gps", "repetition", "nas")
 
 # Opt-in only: named on the command line or it does not run. Deliberately NOT
 # folded into STAGES, for three reasons.
@@ -88,7 +88,7 @@ STAGES = ("vfs", "ascs", "omission", "sss", "gps", "repetition")
 #   - vfs_video is the only node that calls a paid/quota'd external judge for
 #     every cell. Accidental spend should require a typo in an explicit flag,
 #     not merely running the suite.
-EXTRA_STAGES = ("vfs_video", "vfs_band", "ascs_video")
+EXTRA_STAGES = ("vfs_video", "vfs_band", "ascs_video", "nas")
 
 ALL_STAGES = STAGES + EXTRA_STAGES
 
@@ -129,6 +129,9 @@ BAND_LETTER_VALUE = {"A": 4, "B": 3, "C": 2, "D": 1, "E": 0}
 # Sub-scores per metric in the JSON rubric: (json key, stored key).
 SSS_JSON_KEYS = (("criterion_a_appropriateness", "criterion_a_band"),
                  ("criterion_b_coherence", "criterion_b_band"))
+NAS_JSON_KEYS = (("animation_transition_alignment", "alignment_band"),
+                 ("contextual_insight_and_depth", "insight_band"),
+                 ("coherence_and_accuracy", "coherence_band"))
 GPS_JSON_KEYS = (("volume", "volume_band"),
                  ("complexity", "complexity_band"),
                  ("relevance", "relevance_band"))
@@ -953,6 +956,92 @@ def _banded_json(judge, prompt_file: str, metric: str,
     }
 
 
+
+def narration_alignment(judge, source_image, step_frames_, style,
+                        narrations: list[str], context_dump: str) -> dict:
+    """NAS: does each caption describe the transition it accompanies? (Contributor 4)
+
+    Unlike SSS and GPS, this node needs two inputs the banded driver does not
+    carry, so it does not reuse `_banded_json`:
+
+      * the per-timestep NARRATION, which is the thing under evaluation rather
+        than context for it;
+      * a SCIENTIFIC CONTEXT DUMP -- the paper's title, abstract, method and
+        figure caption -- without which "does this caption add insight beyond
+        the picture?" cannot be asked at all.
+
+    A timestep with no narration is SKIPPED rather than scored: there is no
+    caption to judge, and scoring it as a failure would conflate "the narrator
+    said nothing here" with "the narrator said something wrong", which are
+    different defects and only one of them is this metric's business.
+
+    The prompt carries two ceilings the judge applies itself -- a purely visual
+    caption caps at C, and the final band cannot exceed the alignment band --
+    and returns the reasoning under `tie_breaking_rationale`, so a score can be
+    audited against the rule that produced it.
+    """
+    total = len(step_frames_)
+    system = load_and_render("animation_narration.yaml#system", {}, root=PROMPTS_ROOT)
+    adapter = _adapter("animation_narration.yaml", style)
+
+    def judge_step(index: int):
+        narration = (narrations[index - 1] if index - 1 < len(narrations) else "") or ""
+        if not narration.strip():
+            return index, None, None          # nothing to score, not a failure
+        current = step_frames_[index - 1]
+        user = load_and_render("animation_narration.yaml#user", {
+            "style_adapter": adapter, "narration": narration,
+            "context_dump": context_dump or "(no paper context available)",
+            "timestep_idx": str(index), "total_steps": str(total),
+        }, root=PROMPTS_ROOT)
+        images = [Path(source_image)]
+        if index > 1:
+            images.append(step_frames_[index - 2])
+        images.append(current)
+        try:
+            text = judge.ask_text(f"{system}\n\n{user}", images=images,
+                                  tag=f"nas_{style}", accept=_has_final_score)
+        except JudgeError as e:
+            return index, None, f"t{index}: {e}"
+        verdict = parse_json_bands(text, NAS_JSON_KEYS)
+        verdict["timestep"] = index
+        verdict["frame"] = current.name
+        verdict["narration"] = narration
+        return index, verdict, None
+
+    workers = max(1, min(_banded_workers(judge), total))
+    if workers == 1:
+        results = [judge_step(i) for i in range(1, total + 1)]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(judge_step, range(1, total + 1)))
+
+    per_step, errors, skipped = [], [], 0
+    for index, verdict, error in sorted(results, key=lambda r: r[0]):
+        if error:
+            errors.append(error)
+        elif verdict is None:
+            skipped += 1
+        else:
+            per_step.append(verdict)
+
+    valid = [v["final_band"] for v in per_step if v["is_valid"]]
+    mean = _mean([float(b) for b in valid])
+    return {
+        "nas": (mean / BAND_MAX) if mean is not None else None,
+        "nas_band_mean": mean,
+        "nas_steps_scored": len(valid),
+        "nas_steps_total": total,
+        "nas_steps_unnarrated": skipped,
+        "nas_steps_invalid": len(per_step) - len(valid),
+        "nas_step_detail": per_step,
+        "nas_errors": errors,
+        "nas_rubric": "letters",
+    }
+
+
+
+
 def selection_sensibility_bands(judge, source_image, step_frames_, style,
                                 xml_text) -> dict:
     return _banded_json(judge, "animation_selection_bands.yaml", "sss",
@@ -1019,7 +1108,9 @@ def run(judge, *, source_image: Path, frames_dir: Path, style: str,
         frame_px: int | None = None, cache_dir: Path | None = None,
         export_video: Path | None = None,
         video_source: str = "frames",
-        rubric: str = "headers") -> dict:
+        rubric: str = "headers",
+        narrations: list[str] | None = None,
+        context_dump: str = "") -> dict:
     """Score one (sample, style) cell across the requested stages.
 
     Every stage runs that can; nothing is gated. The gates' *inputs* are
@@ -1137,6 +1228,19 @@ def run(judge, *, source_image: Path, frames_dir: Path, style: str,
     # `### FINAL_BAND: <0-4>` ones every stored score was produced by. The
     # letter path needs no prior_summary -- its prompt does not take one -- so
     # it is not gated on prior_summary_at being supplied.
+    # NAS needs the captions themselves plus the paper's own words. Gated on
+    # narrations rather than on `rubric`, because a run can have frames and a
+    # sequence but no narration stage -- in which case there is nothing to
+    # score and saying so is better than reporting zeros.
+    if step_frames_ and narrations:
+        attempt("nas", lambda: narration_alignment(
+            judge, source_image, step_frames_, style, narrations, context_dump))
+    elif "nas" in stages:
+        record["stages_skipped"]["nas"] = (
+            "no per-timestep narration for this cell; run the narrate stage"
+            if step_frames_ else
+            "frame count does not match the sequence's timestep count")
+
     if step_frames_ and rubric == "letters":
         attempt("sss", lambda: selection_sensibility_bands(
             judge, source_image, step_frames_, style, xml_text))

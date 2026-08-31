@@ -472,8 +472,32 @@ METRICS: dict[str, dict] = {
         "terms": ["unnecessary_repetition_count_element",
                   "unnecessary_repetition_count_arrow", "repetition_revisited"],
     },
+    "nas": {
+        "label": "Narration Alignment Score",
+        "stage": "Animation \u00b7 score contributor 3",
+        "doc": "NAS",
+        "what": "Per timestep, whether the CAPTION matches what the animation "
+                "actually does at that moment -- transition alignment, "
+                "contextual insight, and coherence with the surrounding "
+                "narration.",
+        "better": "higher",
+        "range": "0\u20131",
+        "caveat": "The only metric in the tree that reads the sequence's "
+                  "`narrative` field, so it scores the words rather than the "
+                  "picture: an animation can be correct and still narrate "
+                  "badly. Steps with no caption are SKIPPED, not scored 0 -- "
+                  "an unnarrated sequence is missing data, not a bad one. A "
+                  "superficial caption is capped at band C however fluent it "
+                  "reads, and the final band cannot exceed the alignment band.",
+        "formula": "NAS = mean(FINAL_BAND) / 4 over captioned, parseable "
+                   "timesteps. Bands run A=4 to E=0, matching SSS and GPS "
+                   "(note this is the OPPOSITE of the fidelity bands, where "
+                   "BAND A is ordinal 0).",
+        "judged": True,
+        "terms": ["nas_band_mean", "nas_steps_scored", "nas_steps_total",
+                  "nas_steps_invalid", "nas_step_detail", "nas_errors"],
+    },
 }
-
 # Display order within each suite, so the viewer reads top-down by stage.
 SUITE_ORDER: dict[str, list[str]] = {
     "stage1": ["csr", "rendering_fidelity", "component_accuracy", "code_quality"],
@@ -487,7 +511,7 @@ SUITE_ORDER: dict[str, list[str]] = {
     # the study's whole question is whether they disagree.
     "animation": ["vfs", "vfs_video", "vfs_band", "ascs_pass", "ascs_video",
                   "omission_rate", "arrow_omission_count", "sss", "gps",
-                  "repetition_rate"],
+                  "nas", "repetition_rate"],
 }
 
 

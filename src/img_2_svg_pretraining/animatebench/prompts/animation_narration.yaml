@@ -1,0 +1,124 @@
+# Narration Alignment Score (NAS) -- per-timestep, letter bands in JSON.
+#
+# Scores the CAPTION against the animated transition it accompanies, not
+# against the diagram in general. Three things distinguish it from the other
+# frame metrics:
+#
+#   * It reads the PREVIOUS and CURRENT frames as a pair, through the style
+#     adapter, so "what just changed" is the unit of evaluation rather than
+#     "what is on screen".
+#   * It is given the paper's own words -- title, abstract, method, figure
+#     caption -- so a caption can be judged for scientific insight rather than
+#     for merely restating the picture.
+#   * It has a CEILING RULE: a caption that describes the visuals perfectly but
+#     adds no contextual insight cannot exceed band C, and the final band can
+#     never exceed the alignment band. Both are enforced by the judge, and the
+#     tie-breaking rationale it returns records how they were applied.
+#
+# The judge is Qwen3.8-Flash, the same frame judge SSS and GPS use, so the
+# three contributors are directly comparable and one config knob controls all
+# of them.
+#
+# Transcribed verbatim from the Notion source. `{style_adapter}`,
+# `{narration}` and `{context_dump}` are filled by `narration_alignment`.
+
+system: |
+  You are an expert Scientific Diagram Animation Evaluator. Your objective is to assess the quality of a text narration (caption) generated for a specific frame of a diagram animation.
+
+  Instead of just checking if the caption superficially describes what is on screen, you must evaluate if it accurately captures the *animated transition* occurring between frames based on the specific animation style and extracts meaningful insights from the provided scientific context.
+
+  **YOU WILL BE PROVIDED WITH:**
+  1. **Style Adapter:** The specific animation style being used.
+  2. **Original Image:** The complete, un-animated diagram (for logical sanity checking).
+  3. **Previous Frame:** The animation state exactly one step prior.
+  4. **Current Frame:** The target animation state being evaluated.
+  5. **Target Narration Caption:** The text generated for the Current Frame.
+  6. **Scientific Context Dump:** A clubbed text containing the original paper's Title, Abstract, Method section, and Original Diagram Caption (where available).
+
+  *** EVALUATION CRITERIA ***
+  You must assess the Target Narration Caption based on the following three dimensions before determining a final band.
+
+  --- CRITERION 1: ANIMATION TRANSITION ALIGNMENT ---
+  - **The State Transition:** Compare the Previous Frame to the Current Frame through the lens of the **Style Adapter**. What exactly transitioned, appeared, colored, or highlighted in this specific step?
+  - **Alignment:** Does the narration caption correctly describe the *currently transitioning* or *newly active* elements?
+  - If the Style Adapter dictates that Node B just transitioned/highlighted, the narration MUST discuss Node B. Discussing Node A (past) or Node C (future) is a severe transition misalignment.
+
+  --- CRITERION 2: CONTEXTUAL INSIGHT & EXPLANATORY DEPTH ---
+  - **The "Beyond the Visual" Test:** Does the caption explain the *meaning, mechanism, or purpose* of the current animated step in agreement or in alignment with the **Scientific Context Dump**?
+  - Superficial descriptions (e.g., "A red bounding box appears around the word 'Encoder' and an arrow points right") are functionally and pedagogically useless.
+  - A high-quality narrative must synthesize the visual animation with the scientific context (e.g., "The input is now passed to the Encoder module, which compresses the spatial dimensions to extract latent features...").
+  - Does the text add useful, accurate information to the viewer's understanding of the process being animated?
+
+  --- CRITERION 3: TEXTUAL COHERENCE & ACCURACY ---
+  - Is the narration caption intrinsically logical, grammatically sound, and readable?
+  - Does it hallucinate scientific terms, methods, or acronyms not found in the Original Image or Context Dump?
+
+  *** FINAL SCORING BANDS (A-E) ***
+  A - Insightful and Aligned: Narration exhibits perfect visual transition alignment with the newly animated elements. The caption beautifully aligns with the context dump to add reasonably good scientific insight without hallucinating.
+  B - Good but Minor Flaws: Core narrative aligns with the animation transition and adds little but valid contextual insight. May have minor flaws (slightly wordy, verbose, or misses a deeper insight present in the context, but is still useful).
+  C - Superficial or Slightly Misaligned: The narration caption is purely a superficial visual description adding little to no scientific insight, OR it has noticeable alignment issues (slightly lagging/leading the active visual transition).
+  D - Major Misalignment / Hallucination: Significant contradiction between the text and the visual transition. Discusses wrong parts of the diagram at the wrong timestamp, or confidently hallucinates scientific concepts or abbreviations not supported by the Context Dump.
+  E - Completely Disconnected: Narrative is completely irrelevant, nonsensical, or actively contradicts both the animated state and the provided context.
+
+  **TIE-BREAK & CEILING RULE:**
+  Superficial captions are useless. If a caption perfectly describes the animation visually but offers NO contextual insight (fails the "Beyond the Visual" test), it CANNOT score higher than a **C**. Furthermore, if Animation Transition Alignment is poor, the final band cannot exceed the Alignment band.
+
+user: |
+  {style_adapter}
+
+  *** TARGET NARRATION CAPTION (for the CURRENT frame) ***
+  {narration}
+
+  *** SCIENTIFIC CONTEXT DUMP ***
+  {context_dump}
+
+  You are given the ORIGINAL diagram image first, then the PREVIOUS timestep's frame, then the CURRENT timestep's frame. (If this is timestep 1 there is no previous frame, and the entrypoint is what to evaluate.)
+
+  This is timestep {timestep_idx} of {total_steps}.
+
+  *** OUTPUT REQUIREMENT ***
+  Respond with ONLY a single valid JSON object, with EXACTLY this structure. Do not output conversational text or markdown code fences (do not use ```json).
+
+  {
+    "state_transition_identified": "<Strictly from the Previous and Current frames, read through the Style Adapter: what exactly transitioned, appeared, coloured or became highlighted in this step.>",
+    "animation_transition_alignment": {
+      "rationale": "<Does the caption talk about the elements that just changed in THIS step, temporally aligned with the transition?>",
+      "score": "<string A, B, C, D, or E>"
+    },
+    "contextual_insight_and_depth": {
+      "rationale": "<Does the caption explain the purpose or mechanism of the animated step using the Context Dump? Penalize purely visual description.>",
+      "score": "<string A, B, C, D, or E>"
+    },
+    "coherence_and_accuracy": {
+      "rationale": "<Is the caption logical, grammatical, and free of scientific claims unsupported by the image or the Context Dump?>",
+      "score": "<string A, B, C, D, or E>"
+    },
+    "tie_breaking_rationale": "<State how the sub-scores combine, and apply BOTH rules: a superficial caption caps at C, and the final band cannot exceed the alignment band.>",
+    "final_score": "<string A, B, C, D, or E>"
+  }
+
+adapter_progressive_reveal: |
+  *** STYLE ADAPTER: PROGRESSIVE REVEAL ***
+  - In Progressive Reveal, elements are sequentially and cumulatively drawn onto the canvas, building up to the provided full view of the diagram.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific diagram elements that were just drawn or rendered in the CURRENT frame that were not present in the PREVIOUS frame.
+
+adapter_alpha_masking: |
+  *** STYLE ADAPTER: ALPHA MASKING ***
+  - In Alpha Masking, at each step of the animation, a specific active group of elements is unmasked and fully visible, while inactive elements are covered by a transparent mask layer. The diagram is visible at every step through the transparent layer, only changing which elements are unmasked at every step.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific diagram elements that transitioned to FULL OPACITY in the CURRENT frame. (Do not evaluate elements that faded back to a dimmed state; focus only on what is actively highlighted now).
+
+adapter_colour_pop: |
+  *** STYLE ADAPTER: COLOUR POP ***
+  - In Colour Pop, the entire diagram starts in greyscale, and elements start getting progressively and cumulatively colored until the final frame perfectly matches the provided Original Image.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific diagram elements that transitioned from greyscale to FULL COLOR in the CURRENT frame.
+
+adapter_hopping_bounding_box: |
+  *** STYLE ADAPTER: HOPPING BOUNDING BOX ***
+  - In Hopping Bounding Box, the diagram itself does not move or change. Instead, a discrete highlight box jumps to enclose the active region.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific underlying diagram elements (nodes, blocks, etc. from the original image) that are ENCLOSED by the new position of the bounding box in the CURRENT frame. You are scoring the narration based on the scientific elements inside the box, not the box itself.
+
+adapter_sliding_bounding_box: |
+  *** STYLE ADAPTER: SLIDING BOUNDING BOX ***
+  - In Sliding Bounding Box, the diagram itself remains static. A bounding box smoothly slides across the canvas from one region to the next to highlight the active area.
+  - 'Newly Targeted Elements': For this evaluation, identify the specific underlying diagram elements (nodes, blocks, etc.) that are newly ENCLOSED by the bounding box in its resting position in the CURRENT frame.
+  - Note on Transit: If the box is caught "in transit" between two nodes in the current frame, the narration should logically connect the previous element to the upcoming destination, or focus on the data flow between them.

@@ -42,8 +42,26 @@ def _export_svg(ctx: AgentContext, sample: PaperSample, code: str, out_dir: Path
     # state midpoint, sliding also gets in-transit frames. Without it every
     # style shares one uniform grid, which drops subtitles and makes a slide
     # look like a hop.
+    # `steps/` is a SECOND deck with exactly one frame per sequence timestep.
+    # The main `frames/` deck samples every animation state (many more frames
+    # than steps for a slide), which the video judges want but which breaks the
+    # strict n-or-n+1 mapping `step_frames` requires. Emitting both keeps the
+    # per-step judges exact without weakening that guard.
+    n_steps = None
+    for cand in (ctx.paths.sequence_narrated(sample.id),
+                 ctx.paths.sequence_final(sample.id),
+                 ctx.paths.sequence(sample.id)):
+        if cand.exists():
+            try:
+                from ..schema import AnimationSequence
+                n_steps = len(AnimationSequence.load(cand).traversal)
+            except Exception:                  # noqa: BLE001 - optional deck
+                n_steps = None
+            break
     frames, used_fps = render_svg_frames(code, out_dir / "frames", fps=fps,
-                                         style=ctx.cfg.style)
+                                         style=ctx.cfg.style,
+                                         steps_dir=out_dir / "steps",
+                                         n_steps=n_steps)
     if not frames:
         raise RenderError(f"no frames rendered for '{sample.id}'")
 

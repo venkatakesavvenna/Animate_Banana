@@ -203,7 +203,11 @@ def _run_animation(cfg, paths, root, config_name, sample, style, judge, args) ->
     # unmappable cell is skipped rather than guessed -- a frame taken from the
     # wrong step yields a band that is wrong while looking entirely plausible.
     step_frames_, xml_text, prior_at = None, "", None
-    if {"sss", "gps"} & set(stages):
+    narrations: list[str] = []
+    context_dump = ""
+    # NAS needs the same per-timestep frame mapping as SSS/GPS, so it joins the
+    # gate rather than duplicating it.
+    if {"sss", "gps", "nas"} & set(stages):
         seq_path = paths.sequence_narrated(sample.id)
         if not seq_path.exists():
             seq_path = paths.sequence(sample.id)
@@ -211,14 +215,55 @@ def _run_animation(cfg, paths, root, config_name, sample, style, judge, args) ->
         if seq_path.exists() and xml_path.exists():
             seq = AnimationSequence.load(seq_path)
             xml_text = xml_path.read_text(encoding="utf-8")
+            # PREFER THE STEP-ALIGNED DECK. `frames/` samples every animation
+            # state, which for a sliding box is deliberately many more frames
+            # than there are timesteps -- and `step_frames` refuses anything
+            # but n or n+1 rather than guess which frame a step owns. The
+            # exporter therefore also writes `steps/`, one frame per timestep,
+            # each taken at the midpoint of that timestep's own slice. Fall
+            # back to `frames/` for cells exported before that existed.
+            steps_dir = Path(frames_dir).parent / "steps"
+            deck_dir = steps_dir if steps_dir.is_dir() and any(
+                steps_dir.glob("*.png")) else frames_dir
             mapped = frames_mod.step_frames(
-                frames_mod.list_frames(frames_dir), len(seq.traversal))
+                frames_mod.list_frames(deck_dir), len(seq.traversal))
             if mapped is not None:
                 step_frames_ = frames_mod.prepare(
                     mapped[0], args.frame_px,
                     cache_dir=root / "_frames" / style / sample.id / "steps")
                 prior_at = animation_quality.prior_summary_builder(
                     seq, DiagramXml.load(xml_path))
+                # The captions under evaluation, in timestep order. `narrative`
+                # is what the narrative writer emits; `narration` is the older
+                # field name, still present on sequences written before the
+                # rename, so both are read rather than silently scoring blanks.
+                # `traversal` is a list of node IDs (list[str]), not node
+                # objects -- the captions live on `nodes`. Iterating traversal
+                # directly and calling getattr on a string silently yielded ""
+                # for every step, so NAS reported 21 unnarrated steps on a
+                # fully narrated sequence. Resolve ids -> nodes, keeping
+                # playback order, and read both field spellings: `narrative` is
+                # current, `narration` appears on sequences written before the
+                # rename.
+                by_id = {n.id: n for n in seq.nodes}
+                narrations = [
+                    (getattr(by_id.get(nid), "narrative", None)
+                     or getattr(by_id.get(nid), "narration", None) or "")
+                    for nid in seq.traversal]
+
+    if "nas" in stages:
+        # The paper's own words: title + abstract + method + figure caption.
+        # `context_for("full")` raises when a tier's fields are missing, and a
+        # sample without a method section is common -- so degrade to the richest
+        # tier this sample actually supports rather than failing the metric.
+        for tier in ("full", "abstract", "caption"):
+            try:
+                ctx = sample.context_for(tier)
+            except ValueError:
+                continue
+            context_dump = "\n\n".join(
+                f"### {k.upper()}\n{v}" for k, v in ctx.items() if v)
+            break
 
     record = animation_quality.run(
         judge, source_image=sample.image_path, frames_dir=frames_dir,
@@ -228,7 +273,8 @@ def _run_animation(cfg, paths, root, config_name, sample, style, judge, args) ->
         cache_dir=root / "_frames" / style / sample.id,
         export_video=exports / "animation.mp4",
         video_source=getattr(args, "video_source", "frames"),
-        rubric=getattr(args, "rubric", "headers"))
+        rubric=getattr(args, "rubric", "headers"),
+        narrations=narrations, context_dump=context_dump)
 
     # A partial `--stages` run merges into whatever was scored before rather
     # than replacing it. The tree costs ~70 judged calls per cell, so rebuilding
