@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..backends import Message
 from ..extract import extract_json, looks_truncated
+from ..ablation import drop_declared_inputs
 from ..prompts import has_placeholders, load_prompt, render
 from ..runner import AgentContext, StageReport, run_agent
 from ..samples import PaperSample
@@ -104,7 +105,23 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
         "structure_xml": structure_xml,
     }
 
+    # ABLATION FLAGS. Default True, so a config that does not mention them
+    # behaves exactly as before. When an input is withheld the prompt's own
+    # "You will be provided with" declaration of it is stripped too -- a model
+    # told it has the structural graph, and given none, hallucinates depths
+    # rather than working from the code, which would measure prompt
+    # inconsistency instead of the graph's value.
+    send_image = bool(ctx.agent.option("send_image", True))
+    send_xml = bool(ctx.agent.option("send_xml", True))
+    _drop = ({"image"} if not send_image else set()) | (
+        {"xml"} if not send_xml else set())
+    if not send_xml:
+        structure_xml = ""
+        context["structure_xml"] = ""
+
     template = load_prompt(ctx.agent.prompt)
+    if _drop:
+        template = drop_declared_inputs(template, _drop)
     if has_placeholders(template):
         # This form interpolates the strategizer's plan, so it genuinely needs
         # one. Say so rather than rendering an empty outline into the prompt.
@@ -134,7 +151,8 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
         parts = [
             template,
             "### ORIGINAL DIAGRAM CODE\n" + code,
-            "### HIERARCHICAL GRAPH (STRUCTURE XML)\n" + structure_xml,
+            *([] if not send_xml else
+              ["### HIERARCHICAL GRAPH (STRUCTURE XML)\n" + structure_xml]),
             f"### ANIMATION STYLE\n{ctx.cfg.style}\n\n{style.prompt_block()}",
         ]
         paper = _paper_context(ctx, sample)
@@ -142,7 +160,8 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
             parts.append(paper)
         text = "\n\n".join(parts)
 
-    return [Message.user(text, images=[sample.image_path])]
+    return [Message.user(text,
+                        images=[sample.image_path] if send_image else None)]
 
 
 def parse_response(ctx: AgentContext, sample: PaperSample, raw: str) -> str:

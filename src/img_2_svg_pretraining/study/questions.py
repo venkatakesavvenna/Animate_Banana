@@ -20,7 +20,8 @@ import yaml
 
 QUESTION_DIR = Path(__file__).parent / "questions"
 
-VALID_TYPES = {"likert5", "yesno", "choice_ab", "select", "text"}
+VALID_TYPES = {"likert5", "yesno", "choice_ab", "select", "text", "score10", "pick",
+               "choice_pair"}
 
 # Asked once per diagram, before the trial itself. Kept here rather than in each
 # experiment's file because it is the same question everywhere and must stay
@@ -70,8 +71,9 @@ def question_set(experiment: str, *, style_name: str = "",
                  style_description: str = "") -> dict:
     """The questions for one experiment, ready to render."""
     data = _load_raw(experiment)
-    values = {"style_name": style_name.replace("_", " "),
-              "style_description": style_description}
+    values = {"style_name": style_name.replace("_", " ").title(),
+              "style_description": style_description,
+              "style_summary": style_description}
 
     questions = []
     for q in data.get("questions", []):
@@ -88,9 +90,24 @@ def question_set(experiment: str, *, style_name: str = "",
         "experiment": experiment,
         "title": _fill(data.get("title", ""), values),
         "intro": _fill(data.get("intro", ""), values),
-        "familiarity": FAMILIARITY,
+        # The main study asks no familiarity question; a set opts in with
+        # `familiarity: true` at its top level.
+        "familiarity": FAMILIARITY if data.get("familiarity") else None,
+        "gate_closed_text": data.get("gate_closed_text", ""),
         "questions": questions,
     }
+
+
+def visible(question: dict, answers: dict) -> bool:
+    """Whether a question is shown given the answers so far.
+
+    `show_if` is an all-of map of question_id -> required value. A question
+    with no condition is always shown. Used by the server to decide which
+    answers are REQUIRED for submission: a gate that closed early makes the
+    questions behind it not merely hidden but not owed.
+    """
+    cond = question.get("show_if") or {}
+    return all(answers.get(k) == v for k, v in cond.items())
 
 
 def metric_map(experiment: str) -> dict:
@@ -99,9 +116,15 @@ def metric_map(experiment: str) -> dict:
             if q.get("metric")}
 
 
-def required_ids(experiment: str) -> list[str]:
+def required_ids(experiment: str, answers: dict | None = None) -> list[str]:
+    """Question ids that must be answered before submission.
+
+    With `answers`, only questions whose `show_if` is satisfied are required --
+    otherwise a participant who answered "No" at a gate could never submit.
+    """
+    answers = answers or {}
     return [q["id"] for q in _load_raw(experiment).get("questions", [])
-            if not q.get("optional")]
+            if not q.get("optional") and visible(q, answers)]
 
 
 def all_experiments() -> list[str]:

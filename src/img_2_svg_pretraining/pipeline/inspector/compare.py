@@ -748,6 +748,16 @@ def api_explain(label, sample_id, style):
                 **descriptions.describe(key),
                 "instantiated": descriptions.instantiate(key, record),
                 "evidence": _evidence_for(key, record),
+                # Per target too: the explain view has a tikz/svg sub-tab, and
+                # the number already followed it while the instantiated
+                # formula and the evidence table stayed on the primary
+                # target -- an SVG score justified by TikZ evidence.
+                "instantiated_by_target": {
+                    tg: descriptions.instantiate(key, by_target[tg][suite])
+                    for tg in targets if suite in by_target[tg]},
+                "evidence_by_target": {
+                    tg: _evidence_for(key, by_target[tg][suite])
+                    for tg in targets if suite in by_target[tg]},
             })
         if metrics or record.get("error"):
             second_rec = next(
@@ -757,6 +767,11 @@ def api_explain(label, sample_id, style):
                 "suite": suite, "label": suite_label, "metrics": metrics,
                 "error": record.get("error"),
                 "skipped": record.get("coverage_skipped"),
+                "error_by_target": {tg: by_target[tg][suite].get("error")
+                                    for tg in targets if suite in by_target[tg]},
+                "skipped_by_target": {
+                    tg: by_target[tg][suite].get("coverage_skipped")
+                    for tg in targets if suite in by_target[tg]},
                 **({"second_judge": (second_rec.get("provenance") or {}).get(
                     "judge_model")} if second_rec else {}),
                 **descriptions.suite_note(suite),
@@ -826,11 +841,11 @@ _ANIM_NODES = [
     ("omission", "Elimination 3 · Omitted Elements", "animation_omission.yaml",
      "frames", "adapter", "omission_frame_detail"),
     ("sss", "Contributor 1 · Selection Sensibility",
-     "animation_selection_bands.yaml", "user", "adapter", "sss_step_detail"),
+     "animation_selection_final.yaml", "user", "adapter", "sss_step_detail"),
     ("gps", "Contributor 2 · Granularity & Pacing",
-     "animation_pacing_bands.yaml", "user", "adapter", "gps_step_detail"),
+     "animation_pacing_final.yaml", "user", "adapter", "gps_step_detail"),
     ("nas", "Contributor 3 · Narration Alignment",
-     "animation_narration.yaml", "user", "adapter", "nas_step_detail"),
+     "animation_narration_final.yaml", "user", "adapter", "nas_step_detail"),
     ("repetition", "Contributor 4 · Unnecessary Repetition",
      "animation_repetition.yaml", "frames", "adapter", "repetition_frame_detail"),
 ]

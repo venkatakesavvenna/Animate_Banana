@@ -8,7 +8,7 @@
 # Tear the tunnel down when the session ends: kill the pid it prints.
 set -u
 PORT=${1:-8609}
-LOG=/tmp/cf_tunnel_$PORT.log
+LOG=data/study_runs/cf_tunnel_$PORT.log
 : > "$LOG"
 setsid nohup ~/bin/cloudflared tunnel --no-autoupdate \
   --url "http://localhost:$PORT" > "$LOG" 2>&1 < /dev/null &

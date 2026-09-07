@@ -12,7 +12,7 @@ REPO=/fsxvision_new/venkat.kesav/img_2_svg_pretraining
 cd "$REPO"
 N0=10.20.238.24
 SSH="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15"
-done=$(find data/animatebench_v5*cache -path '*evals*' -name animation.json 2>/dev/null|wc -l)
+done=$(find data/animatebench_v5*cache -path '*/evals/*' -name animation.json 2>/dev/null|wc -l)
 scored=$(python3 - <<'PY' 2>/dev/null
 import json,glob
 n=0

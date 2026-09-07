@@ -27,6 +27,9 @@
   .sortb:hover { color: var(--fg); border-color: var(--dim); }
   .sortb.on { color: var(--bg); background: var(--accent);
               border-color: var(--accent); font-weight: 700; }
+  /* All-models sample cells navigate; make that discoverable. */
+  #ov-table td.smp.link { cursor: pointer; text-decoration: underline dotted; }
+  #ov-table td.smp.link:hover { color: var(--accent, #58a6ff); }
 </style>
 <title>AnimateBench — side by side</title>
 <style>
@@ -372,6 +375,18 @@ function onSampleOrStyleChange() {
   if ($("#view-overview") && $("#view-overview").classList.contains("active")) loadOverview();
 }
 
+// Jump from an All-models row to the SAME (sample, model) in the Metrics
+// tab. Style is not a free choice in study view, so pinStyle() resolves it
+// from the sample; load() keeps the Panels view consistent for when the
+// reader tabs back.
+function gotoExplainRow(td) {
+  $("#sample").value = td.dataset.sample;
+  pinStyle();
+  $("#xp-model").value = td.dataset.model;
+  load();
+  showView("explain");
+}
+
 function showView(name) {
   ["panels", "table", "explain", "overview"].forEach(v => {
     $(`#view-${v}`).classList.toggle("active", v === name);
@@ -650,8 +665,14 @@ function renderOverview() {
       return `<td class="val ${metricClass({key: c.key, value: v, better: c.better})}"
                   title="${esc(String(v))}">${fmtMetric(v)}</td>`;
     }).join("");
+    // The sample cell is a jump: it selects this row's sample (style follows
+    // the sample in study view) and this row's model, and lands on the
+    // Metrics tab -- so a number that looks wrong in the matrix is one click
+    // from the evidence behind it. data- attributes rather than inline JS
+    // args: model labels carry spaces and dots that would need escaping.
     return `<tr><td class="mdl">${esc(r.model)}</td>`
-         + `<td class="smp" title="${esc(r.sample)}">${esc(r.sample)}</td>`
+         + `<td class="smp link" data-sample="${esc(r.sample)}" data-model="${esc(r.model)}"
+               title="open ${esc(r.sample)} in the Metrics tab" onclick="gotoExplainRow(this)">${esc(r.sample)}</td>`
          + `<td class="sty">${esc(r.style)}</td>${cells}</tr>`;
   }).join("");
   $("#ov-table").innerHTML =
@@ -718,8 +739,17 @@ function targetValues(m, targets) {
   return `${j2}${other}<span class="v ${cls}">${fmtMetric(v)}</span>`;
 }
 
+// Pick the active sub-tab's version of a per-target field, falling back to
+// the primary-target field for single-target models and older payloads.
+function forTarget(obj, field) {
+  const bt = obj[field + "_by_target"];
+  if (bt && Object.prototype.hasOwnProperty.call(bt, XP_TARGET)) return bt[XP_TARGET];
+  return obj[field];
+}
+
 function explainMetric(m, uid, targets) {
-  const hasEv = m.evidence && Object.keys(m.evidence).length;
+  const evidence = forTarget(m, "evidence"), instantiated = forTarget(m, "instantiated");
+  const hasEv = evidence && Object.keys(evidence).length;
   return `
     <div class="xmetric">
       <div class="xhead">
@@ -728,13 +758,13 @@ function explainMetric(m, uid, targets) {
         ${targetValues(m, targets)}
       </div>
       ${m.formula ? `<div class="xformula">${esc(m.formula)}${
-        m.instantiated
-          ? `\n<span class="xinst">${esc(m.instantiated)}</span>` : ""}</div>` : ""}
+        instantiated
+          ? `\n<span class="xinst">${esc(instantiated)}</span>` : ""}</div>` : ""}
       ${m.what ? `<div class="xwhat">${esc(m.what)}</div>` : ""}
       ${m.caveat ? `<div class="caveat">${esc(m.caveat)}</div>` : ""}
       ${hasEv ? `<button class="toggle" onclick="toggleScript('${uid}')"
                    id="btn-${uid}">&#9662; evidence</button>
-                 <div class="xev collapsed" id="${uid}">${evidenceTable(m.evidence)}</div>`
+                 <div class="xev collapsed" id="${uid}">${evidenceTable(evidence)}</div>`
               : ""}
     </div>`;
 }
@@ -946,8 +976,8 @@ async function loadExplain() {
         ${s.example ? `<div class="xnote xeg">
           <div class="h">${esc(s.example.title)}</div>
           <p>${mdBold(s.example.body)}</p></div>` : ""}
-        ${s.error ? `<div class="caveat">error: ${esc(s.error)}</div>` : ""}
-        ${s.skipped ? `<div class="caveat">coverage skipped: ${esc(s.skipped)}</div>` : ""}
+        ${forTarget(s, "error") ? `<div class="caveat">error: ${esc(forTarget(s, "error"))}</div>` : ""}
+        ${forTarget(s, "skipped") ? `<div class="caveat">coverage skipped: ${esc(forTarget(s, "skipped"))}</div>` : ""}
         ${metrics}
       </div>`);
   }

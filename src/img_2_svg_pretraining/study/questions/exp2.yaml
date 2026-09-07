@@ -1,0 +1,11 @@
+# Exp2 -- ranking. No form: the participant picks between two animations, the
+# loser is replaced by the third, and they pick again. The two picks are the
+# whole response; the app turns them into a rank per condition.
+experiment: exp2
+title: Which would you use?
+tournament: true
+questions:
+  - id: pick
+    prompt: Which of these animations would you be most likely to use yourself?
+    type: pick
+    metric: puwr

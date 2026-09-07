@@ -1,0 +1,70 @@
+# What each animation style means, for participants.
+#
+# `summary` is the one line shown in bold over the animation. `rules` is the
+# expandable definition beside it -- taken verbatim from the ASCS judge's
+# style adapters (animatebench/prompts/animation_style.yaml), so the human is
+# judging the same contract the automatic metric judges. Editing the wording
+# here changes what participants read; it does not change the metric.
+#
+# NOT the `sliding_bbox` / `highlight_dim` / `zoom_pan` entries in styles.py:
+# those are legacy pipeline styles, not the five bench styles, and their prose
+# differs from the bench definition.
+
+progressive_reveal:
+  name: Progressive Reveal
+  summary: >-
+    Each element starts hidden. When visited it appears and stays visible for
+    the rest of the animation, building the figure up from nothing.
+  rules:
+    - "Cumulative addition: the elements in each frame are a logical addition to the previous frames."
+    - "Absolute persistence: anything fully visible in one frame must still be fully visible, in the same place, in the next. Nothing vanishes."
+    - "No masking or hiding: nothing is dimmed or masked; elements stay at full visibility."
+    - "No premature floating elements: arrows, text or nodes must not appear out of context before their logical reveal."
+
+alpha_masking:
+  name: Alpha Masking
+  summary: >-
+    The whole figure is present but faded. Each step brings its elements to
+    full opacity while the rest stay dimmed; unmasked elements stay visible.
+  rules:
+    - "Fade-in reveal: the active elements are clearly visible or fading in to full opacity."
+    - "Background masking: inactive and previously active elements are dimmed to emphasise the active group."
+    - "Semantic persistence: parent containers and background context persist across frames without vanishing."
+    - "Opacity maintenance: opacity only changes for the elements a step is revealing; nothing flickers to full opacity or is dimmed without reason."
+
+colour_pop:
+  name: Colour Pop
+  summary: >-
+    The figure is present throughout in greyscale. Each step brings its
+    elements to full colour while everything else stays desaturated.
+  rules:
+    - "Greyscale integrity: all non-active and unrevealed areas are strictly greyscale."
+    - "Active group colourisation: the active element or group is fully coloured."
+    - "Colour match: colours match the original figure. Inventing new hues -- or colouring a black-and-white figure -- is a violation."
+    - "Cumulative effect: colour builds up and never resets; an element that had colour keeps it."
+    - "No colour bleeding: colour stays within its element and does not bleed into the background."
+
+hopping_bounding_box:
+  name: Hopping Bounding Box
+  summary: >-
+    The figure stays fully visible. A single attention box jumps from one
+    element to the next, one element per step.
+  rules:
+    - "Discrete placement: the box is definitively placed over a target element -- never caught in between elements or on an arrow."
+    - "Box transparency: the interior of the box is transparent and does not obscure what is beneath it."
+    - "Clean enclosure: the box cleanly encloses its target without cutting through it or letting it spill out."
+    - "No text overlap: the box outline does not strike through or cover any label."
+    - "Mobile box, static elements: no diagram element moves or resizes between frames; only the box moves."
+
+sliding_bounding_box:
+  name: Sliding Bounding Box
+  summary: >-
+    The figure stays fully visible. A single attention box travels smoothly
+    between elements, one element per step.
+  rules:
+    - "Smooth transition: the box may be mid-slide; in transit it keeps its shape and does not warp."
+    - "Box transparency: the interior of the box is transparent and does not obscure what is beneath it."
+    - "Clean enclosure: at rest, the box cleanly encloses its target without cutting through it."
+    - "No text overlap: at rest, the box outline does not strike through or cover any label."
+    - "Visible transit: at least one frame shows the box between elements rather than on one."
+    - "Mobile box, static elements: no diagram element moves or resizes between frames; only the box moves."

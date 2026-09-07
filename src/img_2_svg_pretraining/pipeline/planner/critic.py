@@ -29,6 +29,7 @@ from pathlib import Path
 from ..backends import Message
 from ..cache import write_text
 from ..extract import extract_json, looks_truncated
+from ..ablation import drop_declared_inputs
 from ..prompts import load_and_render
 from ..runner import AgentContext, StageReport, run_iterative_agent
 from ..samples import PaperSample
@@ -148,9 +149,15 @@ class _Critic:
 
         code = Path(self.ctx.paths.resolve_code(sample.id)).read_text(encoding="utf-8")
 
-        images = [sample.image_path]
+        # ABLATION FLAG. Withholding the image also disables set-of-mark:
+        # the markers are drawn ON the image, and the prompt's whole first
+        # input is "the diagram image. Numbered markers have been overlaid on
+        # it". Sending a legend for markers the model cannot see would be
+        # worse than sending nothing.
+        send_image = bool(self.ctx.agent.option("send_image", True))
+        images = [sample.image_path] if send_image else None
         legend = "(set-of-mark disabled)"
-        if self.use_som:
+        if self.use_som and send_image:
             marked_path = (self.ctx.paths.root / "marked" /
                            self.ctx.paths.sequence_lineage /
                            f"{sample.id}.round{round_index}.png")
@@ -168,6 +175,8 @@ class _Critic:
             "sequence_json": sequence.to_json(),
         })
 
+        if not send_image:
+            text = drop_declared_inputs(text, {"image"})
         result = self.ctx.backend.generate([Message.user(text, images=images)],
                                            **self.ctx.params())
         if not result.ok:

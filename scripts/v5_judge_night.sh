@@ -23,6 +23,12 @@ N0=10.20.238.24; N1=10.20.233.75
 LOG=$REPO/logs/bench_v5/judge; mkdir -p "$LOG"
 PASSES=${PASSES:-12}
 WORKERS=${WORKERS:-5}
+CELLS=${CELLS:-$REPO/data/v5_judge_cells.json}
+TOTAL=${TOTAL:-432}
+EVAL_ROOTS=${EVAL_ROOTS:-"$REPO/data/animatebench_v5_cache $REPO/data/animatebench_v5_or_cache"}
+CELLS=${CELLS:-$REPO/data/v5_judge_cells.json}
+TOTAL=${TOTAL:-432}
+EVALS_GLOB=${EVALS_GLOB:-$REPO/data/animatebench_v5*cache}
 PROFILE=serve_kimi_stable.sh
 DEADLOCKS=0
 SSH="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no"
@@ -77,14 +83,14 @@ restart_server(){
   say "WARNING: server did not come back"; return 1
 }
 
-done_cells(){ find "$REPO"/data/animatebench_v5*cache -path '*evals*' -name animation.json 2>/dev/null | wc -l; }
+done_cells(){ find $EVAL_ROOTS -path '*/evals/*' -name animation.json 2>/dev/null | wc -l; }
 
-say "supervisor up: $PASSES pass(es), WORKERS=$WORKERS, 432 cells"
+say "supervisor up: $PASSES pass(es), WORKERS=$WORKERS, $TOTAL cells (cells=$CELLS)"
 for p in $(seq 1 $PASSES); do
   server_up || restart_server || { say "abort pass $p"; sleep 60; continue; }
   say "pass $p start (done so far: $(done_cells), profile=$PROFILE, workers=$WORKERS)"
 
-  $SSH $N0 "WORKERS=$WORKERS bash $REPO/scripts/run_v5_judge.sh" >>"$LOG/driver_pass${p}.log" 2>&1 &
+  $SSH $N0 "CELLS=$CELLS EVALS_GLOB='$EVALS_GLOB' WORKERS=$WORKERS bash $REPO/scripts/run_v5_judge.sh" >>"$LOG/driver_pass${p}.log" 2>&1 &
   DRV=$!
 
   stuck=0; last_g=-1; hung=0
@@ -130,7 +136,7 @@ for p in $(seq 1 $PASSES); do
   done
   wait "$DRV" 2>/dev/null
   say "pass $p end (done: $(done_cells), deadlocks so far: $DEADLOCKS)"
-  [ "$(done_cells)" -ge 432 ] && { say "ALL CELLS DONE"; break; }
+  [ "$(done_cells)" -ge "$TOTAL" ] && { say "ALL CELLS DONE"; break; }
   [ "$hung" = 0 ] && sleep 10
 done
-say "=== supervisor finished: $(done_cells)/432 cells"
+say "=== supervisor finished: $(done_cells)/$TOTAL cells"

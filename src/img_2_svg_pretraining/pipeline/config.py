@@ -43,6 +43,12 @@ _AGENT_KEYS = {
     "backend", "prompt", "params", "enabled", "context_tier", "max_rounds",
     "use_set_of_mark", "compile_check", "outputs", "fps", "dpi", "max_depth",
     "gpu", "fidelity_threshold",
+    # Input-removal ablations. Default True everywhere, so omitting them is
+    # identical to the pre-ablation behaviour. When False the agent both stops
+    # sending the input AND strips the prompt's declaration of it -- see
+    # pipeline/ablation.py for why leaving the declaration in place would make
+    # the ablation measure prompt inconsistency rather than the input's value.
+    "send_image", "send_xml",
 }
 
 
@@ -97,6 +103,21 @@ class PipelineConfig:
         two backends pointing at different models never share a cache path.
         """
         cfg = self.backend_cfg(backend_name)
+        # `lineage_alias` shortens THIS backend's contribution to the lineage.
+        #
+        # The lineage repeats the model slug once per agent -- eight times by
+        # the narration stage. A 43-character slug like
+        # `deepseek-deepseek-v4-flash-vision-exp` therefore produces a 380-byte
+        # directory name and the run dies mid-pipeline with
+        #     OSError: [Errno 36] File name too long
+        # after stages 1a-2c have already been paid for and written.
+        #
+        # Opt-in per backend, so no existing config's paths move: absent, the
+        # behaviour is byte-identical to before. An alias must still be unique
+        # per model -- it is what keeps two models' artifacts apart on disk.
+        alias = cfg.get("lineage_alias")
+        if alias:
+            return str(alias).replace("/", "-")
         model = cfg.get("model") or cfg.get("hf_repo") or backend_name
         return str(model).replace("/", "-")
 

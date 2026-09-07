@@ -41,4 +41,12 @@ stratum_fields: [element_density, connectivity_level, has_raster]
 
 attention_check_fraction: 0.0    # raise once degraded stimuli are generated
 calibration_pass_threshold: 0.7
-open_trial_ttl_seconds: 7200
+# How long an unfinished trial holds its quota slot.
+#
+# In-flight trials must count toward a cell's quota, or two people served the
+# same cell at once both fill the last slot. But a closed tab leaves that
+# reservation behind, and at 2h a handful of abandoned tabs can lock a small
+# pool out for the rest of a session -- which is exactly what happened during a
+# stress run: 7 open trials against 7 cells, and the next participant got
+# nothing. 15 minutes is far longer than any real trial takes.
+open_trial_ttl_seconds: 900

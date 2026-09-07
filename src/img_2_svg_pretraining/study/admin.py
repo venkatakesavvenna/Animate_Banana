@@ -75,7 +75,7 @@ def overview():
 
         pools = {}
         for experiment in cfg.enabled_experiments():
-            pools[experiment] = len(build_pool(conn, bundle_id, experiment))
+            pools[experiment] = len(build_pool(conn, bundle_id, experiment, cfg.study_day))
 
     cells = coverage(_db(), cfg, bundle_id)
     retired = sum(1 for c in cells if c["status"] == "retired")

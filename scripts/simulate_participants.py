@@ -61,6 +61,10 @@ def answer(policy, question, rng):
         if policy == "left_biased":
             return "A"
         return rng.choice(["A", "B", "no_preference"])
+    if kind == "score10":
+        return 8 if policy == "straightliner" else rng.randint(0, 10)
+    if kind == "choice_pair":
+        return "A" if policy == "left_biased" else rng.choice(["A", "B", "tie"])
     if kind == "select":
         options = question.get("options") or [{"value": "x"}]
         return (options[0]["value"] if policy == "straightliner"
@@ -117,17 +121,42 @@ def run_one(client, index, policy, seed, stats, lock, stress=False):
                  "payload": {"watched_fraction": 0.62 if policy == "speedrunner" else 0.97}}]
         client.call("/api/events", {"events": events}, pid)
 
+        # A tournament has no form: two picks, posted with the submit.
+        if trial.get("screen") == "tournament":
+            r1 = "A" if policy == "left_biased" else rng.choice(["A", "B"])
+            r2 = r1 if policy in ("left_biased", "straightliner") else rng.choice([r1, "C"])
+            status, body = client.call("/api/trial/%s/submit" % tid,
+                                       {"picks": [r1, r2]}, pid)
+            if status != 200:
+                with lock:
+                    stats["errors"].append("tour submit %s %s" % (status, body))
+                return
+            served += 1
+            continue
+
+        # Questions reveal progressively (show_if), so answer in order and
+        # only what the answers so far make visible -- exactly as the form does.
+        answers = {}
         for q in trial["questions"]["questions"]:
+            cond = q.get("show_if") or {}
+            if any(answers.get(k) != v for k, v in cond.items()):
+                continue
             if q.get("optional") and rng.random() < 0.7:
                 continue
+            answers[q["id"]] = answer(policy, q, rng)
             client.call("/api/trial/%s/answer" % tid,
-                        {"question_id": q["id"], "value": answer(policy, q, rng),
+                        {"question_id": q["id"], "value": answers[q["id"]],
                          "ms_since_open": rng.randint(4000, 90000)}, pid)
-            # Revisions are expected behaviour, so exercise the append path.
-            if policy == "honest" and rng.random() < 0.08:
+            # Revisions are expected behaviour, so exercise the append path --
+            # but not on a gate question: flipping vfs after skipping ascs is
+            # the one revision the real form undoes (it re-reveals the
+            # dependents), and a blind re-post here just earns a 409.
+            gates = {k for qq in trial["questions"]["questions"]
+                     for k in (qq.get("show_if") or {})}
+            if policy == "honest" and rng.random() < 0.08 and q["id"] not in gates:
+                answers[q["id"]] = answer(policy, q, rng)
                 client.call("/api/trial/%s/answer" % tid,
-                            {"question_id": q["id"],
-                             "value": answer(policy, q, rng)}, pid)
+                            {"question_id": q["id"], "value": answers[q["id"]]}, pid)
 
         status, body = client.call("/api/trial/%s/submit" % tid, {}, pid)
         if status != 200:

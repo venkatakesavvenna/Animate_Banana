@@ -15,13 +15,24 @@ import yaml
 # builds pairs by finding two narratives for the same (diagram, style) that
 # differ on exactly this field -- so the moment the -K sweep, a baseline or the
 # verified references land in a bundle, the arm turns on with no code change.
+# Main study.
+#   exp1  absolute   -- one narrative at a time, every method in the bundle
+#   exp2  tournament -- AB vs second-best, winner vs the original talk
+# Selective cohort.
+#   context  pairwise, blind, sides randomised
+#   bench    pairwise, NOT blind, sides fixed (original left, corrected right)
 PAIR_AXIS = {
-    "exp3": ("context_condition", ("with_context", "without_context")),
-    "exp4": ("method", ("animatebanana", "baseline")),
-    "exp5": ("verification_state", ("verified", "pre_verification")),
+    "context": ("context_condition", ("with_context", "without_context")),
+    "bench":   ("verification_state", ("pre_verification", "verified")),
 }
+# Pairwise experiments whose sides are deliberately not randomised.
+FIXED_SIDES = {"bench"}
 
-ABSOLUTE_EXPERIMENTS = ("exp1", "exp2")
+ABSOLUTE_EXPERIMENTS = ("exp1",)
+
+# The ranking tournament: first round between the first two methods, the
+# winner then meets the third. Order matters and is fixed by the design.
+TOURNAMENT = {"exp2": ("animatebanana", "qwen38", "talk")}
 
 # Captions are the ONLY difference between Experiment 1 and Experiment 2. Same
 # media, same frames, caption layer switched off -- so the two rate pixel-
@@ -34,11 +45,12 @@ ABSOLUTE_EXPERIMENTS = ("exp1", "exp2")
 # glance, before the participant has watched anything. Exp4's questions ask
 # about preference, visual quality and pacing, so nothing is lost by making it
 # a visuals-only comparison on both sides.
-SHOWS_CAPTIONS = {"exp1": False, "exp2": True,
-                  "exp3": True, "exp4": False, "exp5": True}
+# exp1 asks about narration (NAS), so captions are on. exp2's talk has no
+# narration track, so captions are off on every side to keep it symmetric.
+SHOWS_CAPTIONS = {"exp1": True, "exp2": False, "context": True, "bench": True}
 
-SCREEN = {"exp1": "absolute", "exp2": "absolute",
-          "exp3": "pairwise", "exp4": "pairwise", "exp5": "verification"}
+SCREEN = {"exp1": "absolute", "exp2": "tournament",
+          "context": "pairwise", "bench": "pairwise"}
 
 
 @dataclass
@@ -46,13 +58,13 @@ class StudyConfig:
     study_version: str = "pilot-1"
     state: str = "open"                       # open | paused | closed
 
-    experiment_order: tuple = ("exp1", "exp2", "exp3", "exp4", "exp5")
+    experiment_order: tuple = ("exp1", "exp2", "context", "bench")
     enabled: dict = field(default_factory=lambda: {
-        "exp1": True, "exp2": True, "exp3": True, "exp4": True, "exp5": True})
+        "exp1": True, "exp2": True, "context": False, "bench": False})
 
     # Per participant, per experiment.
     samples_per_experiment: dict = field(default_factory=lambda: {
-        "exp1": 10, "exp2": 10, "exp3": 10, "exp4": 10, "exp5": 10})
+        "exp1": 10, "exp2": 10, "context": 15, "bench": 15})
 
     # Retire a sample once this many independent judgments exist, then draw a
     # replacement from the same stratification class. Reported as 5-6 in the
@@ -63,9 +75,13 @@ class StudyConfig:
     # Which fields must match when replacing a retired sample.
     stratum_fields: tuple = ("element_density", "connectivity_level", "has_raster")
 
+    # Main study only: serve just the diagrams stamped with this day. None
+    # means no day filtering (the selective cohort, or a single-day pilot).
+    study_day: int | None = None
+
     attention_check_fraction: float = 0.0     # off until degraded stimuli exist
     calibration_pass_threshold: float = 0.7
-    open_trial_ttl_seconds: int = 7200
+    open_trial_ttl_seconds: int = 900
 
     def enabled_experiments(self) -> list[str]:
         return [e for e in self.experiment_order if self.enabled.get(e)]

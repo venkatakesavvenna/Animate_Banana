@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ..backends import Message
 from ..extract import extract_code
+from ..ablation import drop_declared_inputs
 from ..prompts import has_placeholders, load_prompt, render
 from ..runner import AgentContext, StageReport, run_agent
 from ..samples import PaperSample
@@ -83,7 +84,10 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
         "json_sequence": sequence_json,
     }
 
+    send_image = bool(ctx.agent.option("send_image", True))
     template = load_prompt(_resolve_prompt(ctx.agent.prompt, ctx.cfg.style))
+    if not send_image:
+        template = drop_declared_inputs(template, {"image"})
     if has_placeholders(template):
         text = render(template, context)
     else:
@@ -102,7 +106,10 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
             f"### ANIMATION STYLE\n{ctx.cfg.style}\n\n{context['style_block']}",
         ])
 
-    return [Message.user(text, images=[sample.image_path])]
+    if not send_image:
+        text = drop_declared_inputs(text, {"image"})
+    return [Message.user(text,
+                        images=[sample.image_path] if send_image else None)]
 
 
 def parse_response(ctx: AgentContext, sample: PaperSample, raw: str) -> str:

@@ -125,7 +125,24 @@ class _Critic:
 
         revised = extract_code(result.text, self.cfg.target)
         if revised is None:
-            raise ValueError(f"critic response contained no {self.cfg.target} document")
+            # KEEP THE DESIGNER'S ANIMATION rather than losing the cell.
+            #
+            # Measured on Gemini 3.7 Flash at ~8% of cells: asked to repair an
+            # animated SVG, the critic returns a complete LaTeX/TikZ document --
+            # well-formed, ending in \end{document}, so the model ignoring the
+            # target representation rather than any transport fault. Raising
+            # here discarded an entire pipeline that had already been paid for
+            # through nine stages, and the cell then had to be re-run from
+            # scratch, re-paying for every one of them.
+            #
+            # A critic that cannot return the target format has contributed
+            # nothing, so the pre-critic code IS the right answer -- exactly as
+            # the bloat guard below already concludes when a critic's edit is a
+            # regression. The note records what happened so a reader can tell
+            # "critic declined" from "critic approved".
+            return True, code, (f"round {round_index}: critic returned no "
+                                f"{self.cfg.target} document; keeping the "
+                                f"designer's animation unreviewed")
 
         write_text(self.ctx.paths.animation(sample.id, round_index), revised)
 

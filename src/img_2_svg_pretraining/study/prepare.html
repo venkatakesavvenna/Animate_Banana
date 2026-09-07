@@ -32,6 +32,28 @@ button.ghost{background:var(--panel2);color:var(--fg);border:1px solid var(--lin
 .msg.good{color:var(--ok)}
 #calItems > div{margin-bottom:26px}
 .scoreline{font-size:15px;margin-top:12px}
+.hero p{max-width:none}
+.pair{display:grid;grid-template-columns:1fr 84px 1fr;gap:14px;align-items:center;margin-top:16px}
+.pfig{margin:0;text-align:center}
+.pfig img,.anim{width:100%;background:#fff;border:1px solid var(--line);border-radius:6px;
+                aspect-ratio:4/3;object-fit:contain}
+.anim{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.anim img{width:100%;height:100%;object-fit:contain;border:0}
+.animcue{position:absolute;left:0;right:0;bottom:0;background:rgba(26,29,35,.82);color:#fff;
+         font-size:12.5px;padding:6px 10px;text-align:left;min-height:34px}
+.pfig figcaption{font-size:13px;color:var(--dim);margin-top:8px}
+.arrow{display:flex;flex-direction:column;align-items:center;color:var(--accent);font-size:11px;font-weight:600;gap:2px}
+.stylechip{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;
+           background:#dbe7fe;color:#1e40af;font-weight:600;font-size:12px}
+.shot{position:relative;margin:12px 0 16px}
+.shot img{width:100%;border:1px solid var(--line);border-radius:6px;display:block}
+.callout{position:absolute;max-width:44%;background:#fff8dc;border:1px solid #e0c368;
+         border-radius:6px;padding:5px 9px;font-size:12.5px;line-height:1.35;
+         box-shadow:0 2px 6px rgba(0,0,0,.12)}
+.callout b:first-child{display:inline-block;width:18px;height:18px;border-radius:9px;background:var(--accent);
+         color:#fff;text-align:center;line-height:18px;font-size:11px;margin-right:5px}
+ul.tight li{margin-bottom:5px}
+@media (max-width:640px){.pair{grid-template-columns:1fr}.arrow svg{transform:rotate(90deg)}}
 
 /* the shared player + form components style themselves from these */
 .player{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:12px}
@@ -73,47 +95,47 @@ button.ghost{background:var(--panel2);color:var(--fg);border:1px solid var(--lin
 
 <div class="wrap">
   <div id="prep">
-    <div class="card">
-      <h2>What you are judging</h2>
-      <p>You will see a figure from a research paper on the left, and an animated
-         presentation of that same figure on the right. Your job is to say how
-         well the animation presents the figure.</p>
-      <p>There are no right answers, and you are not expected to know the paper.
-         Judge what you can see.</p>
+    <div class="card hero">
+      <h2>What we are doing</h2>
+      <p>We take a figure from a research paper and turn it into a short,
+         narrated animation that walks through it one piece at a time. You will
+         rate how well those animations do their job.</p>
+      <div class="pair">
+        <figure class="pfig">
+          <img id="heroFig" alt="A figure from a paper">
+          <figcaption>The figure, as printed in the paper</figcaption>
+        </figure>
+        <div class="arrow" aria-hidden="true">
+          <svg viewBox="0 0 64 32" width="64" height="32"><path d="M2 16h50M40 5l12 11-12 11"
+            fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>AnimateBanana</span>
+        </div>
+        <figure class="pfig">
+          <div class="anim">
+            <img id="heroAnim" alt="The animated version">
+            <div class="animcue" id="heroCue"></div>
+          </div>
+          <figcaption>The animation, narrated step by step
+            <span class="stylechip" id="heroStyle"></span></figcaption>
+        </figure>
+      </div>
     </div>
 
     <div class="card">
-      <h2>How to watch</h2>
-      <ul>
-        <li><b>Slider</b> is how you move through the animation: drag it, or use
-            the <b>&larr;</b> and <b>&rarr;</b> arrow keys to step a frame at a time.</li>
-        <li>The questions appear once you have taken the slider <b>all the way to
-            the end</b>. Until then they stay hidden.</li>
-        <li><b>Video</b> plays it through automatically instead, at half speed by
-            default.</li>
-        <li>Go back and forth as much as you like — nothing is one-shot.</li>
-        <li>Some animations <b>start almost blank</b> and build up. That is the
-            style, not a fault — but whether it works is exactly the sort of
-            thing worth rating.</li>
+      <h2>The screen you will use</h2>
+      <div class="shot">
+        <img id="shotImg" src="/prep_interface.png" alt="The evaluation screen, annotated">
+        <div class="callout" style="left:2.5%;top:6%"><b>1</b> The original figure. Click it to zoom.</div>
+        <div class="callout" style="left:64%;top:0.6%"><b>2</b> The animation <b>style</b> it is meant to follow. Open "What this style requires" for the exact rule.</div>
+        <div class="callout" style="left:52%;top:41%"><b>3</b> Drag the slider, or use &larr; &rarr;, to step through the animation. Reach the end to unlock the questions.</div>
+        <div class="callout" style="left:64%;top:51.5%"><b>4</b> Answer in order. A later question only appears when an earlier answer makes it relevant.</div>
+        <div class="callout" style="left:58%;top:87.5%"><b>5</b> <b>Submit and continue</b> moves to the next sample. You can change answers until then.</div>
+      </div>
+      <ul class="tight">
+        <li>Reach the <b>end</b> of the animation before answering; the questions stay hidden until you do.</li>
+        <li>There are no right answers and you do not need to know the paper. Judge what you see.</li>
+        <li>In the comparison part you pick one of two; the other is replaced by a third and you pick again.</li>
       </ul>
-    </div>
-
-    <div class="card">
-      <h2>What the questions mean</h2>
-      <ul>
-        <li><b>Coverage</b> — does the animation show what the figure shows?
-            Missing boxes, invented arrows, wrong positions, unreadable labels.</li>
-        <li><b>Quality</b> — does it highlight sensible things in a sensible
-            order, at a comfortable pace?</li>
-        <li><b>Style</b> — each animation is supposed to follow one named style.
-            You are told which; say whether it does.</li>
-        <li><b>Narration</b> (later sections) — does the text make sense on its
-            own, and does it match what is on screen when it appears?</li>
-      </ul>
-      <div class="note">You can change any answer before submitting a trial. Use
-        <b>Previous</b> and <b>Next</b>, or click a chip in the strip above the
-        question. People often revise early answers once they have seen the whole
-        animation — that is expected, not cheating.</div>
     </div>
 
     <div class="foot">
@@ -144,7 +166,33 @@ button.ghost{background:var(--panel2);color:var(--fg);border:1px solid var(--lin
 if (!Session.get()) location.href = "/";
 let ITEMS = [], ANSWERS = {}, PLAYERS = [];
 
+async function hero() {
+  let d;
+  try { d = await api("/api/prep-example"); } catch (e) { return; }
+  if (!d.available) { el(".hero .pair").style.display = "none"; return; }
+  el("#heroFig").src = `/media/${d.figure.media_id}`;
+  el("#heroStyle").textContent = d.style_name;
+  const frames = d.frames, holds = d.holds || [], cues = d.cues || [];
+  frames.forEach((f) => { const i = new Image(); i.src = `/media/${f}`; });
+  let k = 0;
+  const cueAt = (i) => {
+    let t = 0; for (let j = 0; j < i; j++) t += (holds[j] || 1);
+    let text = "";
+    for (const c of cues) if (c.start <= t + 1e-6) text = c.text; else break;
+    return text;
+  };
+  const show = () => {
+    el("#heroAnim").src = `/media/${frames[k]}`;
+    el("#heroCue").textContent = cueAt(k);
+    const hold = Math.min(2.2, Math.max(0.9, (holds[k] || 1) * 0.6));
+    k = (k + 1) % frames.length;
+    setTimeout(show, hold * 1000);
+  };
+  show();
+}
+
 async function boot() {
+  hero();
   const d = await api("/api/prepare");
   ITEMS = d.items || [];
   if (d.passed) { location.href = "/study"; return; }

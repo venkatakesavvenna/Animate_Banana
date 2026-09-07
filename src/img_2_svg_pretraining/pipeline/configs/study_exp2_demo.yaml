@@ -1,0 +1,11 @@
+# Demo instance: the ranking tournament only, all 30 figures, no day filter.
+study_version: exp2-demo
+state: open
+experiment_order: [exp2]
+enabled: {exp1: false, exp2: true, context: false, bench: false}
+samples_per_experiment: {exp2: 30}
+judgments_per_sample: 50
+stratum_fields: [complexity, animation_style]
+attention_check_fraction: 0.0
+calibration_pass_threshold: 0.7
+open_trial_ttl_seconds: 900

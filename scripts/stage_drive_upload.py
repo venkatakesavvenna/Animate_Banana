@@ -74,6 +74,11 @@ def main() -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", default=str(REPO / "data/drive_upload"))
     ap.add_argument("--dataset", default=str(REPO / "data/animatebench_v5"))
+    ap.add_argument("--roots", default="data/animatebench_v5_cache,data/animatebench_v5_or_cache",
+                    help="comma-separated cache roots to scan for exports")
+    ap.add_argument("--figures", choices=("per-model", "common"), default="per-model",
+                    help="'common' puts ONE top-level Original_Images folder "
+                         "shared by all models instead of one per model")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -84,7 +89,7 @@ def main() -> None:
     counts: dict[tuple[str, str], int] = {}
     skipped = 0
     videos: list[tuple[str, str, str, Path]] = []
-    for root in ("data/animatebench_v5_cache", "data/animatebench_v5_or_cache"):
+    for root in args.roots.split(","):
         for mp4 in (REPO / root).rglob("exports/*/*/animation.mp4"):
             lineage, sample = mp4.parent.parent.name, mp4.parent.name
             model, style = model_of(lineage), style_of(lineage)
@@ -95,16 +100,27 @@ def main() -> None:
 
     models = sorted({m for m, _, _, _ in videos})
     figures = 0
-    for model in models:
-        for d in ["Original_Images", *STYLE_DIR.values()]:
-            (out / model / d).mkdir(parents=True, exist_ok=True)
-        # Figures are duplicated into every model folder. They are hard links,
-        # so N copies cost the bytes of one.
+    if args.figures == "common":
+        (out / "Original_Images").mkdir(parents=True, exist_ok=True)
         for s in sorted(Path(args.dataset).iterdir()):
             png = s / f"{s.name}.png"
             if png.exists():
-                link(png, out / model / "Original_Images" / png.name)
+                link(png, out / "Original_Images" / png.name)
                 figures += 1
+    for model in models:
+        dirs = list(STYLE_DIR.values())
+        if args.figures == "per-model":
+            dirs = ["Original_Images", *dirs]
+        for d in dirs:
+            (out / model / d).mkdir(parents=True, exist_ok=True)
+        if args.figures == "per-model":
+            # Figures are duplicated into every model folder. They are hard
+            # links, so N copies cost the bytes of one.
+            for s in sorted(Path(args.dataset).iterdir()):
+                png = s / f"{s.name}.png"
+                if png.exists():
+                    link(png, out / model / "Original_Images" / png.name)
+                    figures += 1
 
     for model, style, sample, mp4 in videos:
         # Model is already the folder name, so the file keeps just the sample id.
@@ -114,7 +130,9 @@ def main() -> None:
     print(f"staged -> {out}\n")
     total = 0
     for model in models:
-        figs = len(list((out / model / "Original_Images").glob("*.png")))
+        fig_dir = (out / model / "Original_Images") if args.figures == "per-model" \
+            else (out / "Original_Images")
+        figs = len(list(fig_dir.glob("*.png")))
         row = []
         for style, folder in STYLE_DIR.items():
             n = len(list((out / model / folder).glob("*.mp4")))

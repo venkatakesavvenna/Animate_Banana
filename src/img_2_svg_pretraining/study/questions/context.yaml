@@ -1,0 +1,20 @@
+# Selective cohort -- Context Utility. Blind preference between narrations
+# generated with and without the paper's context; the animation is the same on
+# both sides. Left/right is randomised per trial; the analysis recovers which
+# side was (+K) from the trial record, never from the click.
+
+experiment: context
+title: Which narration helps more?
+intro: >-
+  The two animations are identical; only the narration differs. Step both to
+  the end, then choose.
+
+questions:
+  - id: pref_insight
+    prompt: Which narration is more insightful in understanding the animation?
+    type: choice_pair
+    options:
+      - {value: A, label: First}
+      - {value: B, label: Second}
+      - {value: tie, label: Both are equally useful}
+    metric: context_preference

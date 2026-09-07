@@ -1,0 +1,18 @@
+# Selective cohort: Context Utility + Bench Quality, ~10 hand-picked users,
+# 15 samples each, on the v3 set (the only one with both (-K) narration and
+# human-corrected reference animations).
+
+study_version: selective-1
+state: open
+
+experiment_order: [context, bench]
+enabled: {exp1: false, exp2: false, context: true, bench: true}
+samples_per_experiment: {context: 15, bench: 15}
+
+# 10 users, every sample seen by all of them.
+judgments_per_sample: 10
+stratum_fields: [element_density, animation_style]
+
+attention_check_fraction: 0.0
+calibration_pass_threshold: 0.7
+open_trial_ttl_seconds: 900

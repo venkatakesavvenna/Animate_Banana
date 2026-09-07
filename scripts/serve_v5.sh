@@ -46,7 +46,10 @@ stop_server() {
 [ "${1:-}" = "stop" ] && { stop_server; exit 0; }
 
 MODEL=${1:?usage: serve_v5.sh <stem>|stop}
-CFG=$CONFIGS/bench_v5_svg_${MODEL}.yaml
+# CFG_OVERRIDE lets a non-v5 suite (e.g. bench_v6_svg_*) reuse this script
+# unchanged. The served model id is still read FROM THAT CONFIG below, so the
+# override cannot desync the script from the YAML.
+CFG=${CFG_OVERRIDE:-$CONFIGS/bench_v5_svg_${MODEL}.yaml}
 [ -f "$REPO/$CFG" ] || { say "no config for $MODEL"; exit 1; }
 
 # Read the repo id from the config so this script and the YAML cannot disagree

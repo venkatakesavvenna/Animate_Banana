@@ -1,0 +1,29 @@
+# Main user study: Animation Quality (exp1) + Ranking (exp2).
+#
+# Run over three days, ten fresh samples per day. `study_day` restricts the
+# pool to diagrams the bundle stamped with that day (from main_selection.json),
+# so day 2's participants never see day 1's figures. Bump it each morning --
+# that is a config change and starts a new config version, as it should.
+
+study_version: main-1
+state: open
+study_day: 1
+
+experiment_order: [exp1, exp2]
+enabled: {exp1: true, exp2: true, context: false, bench: false}
+
+# Capped at 10 trials each for now (user's call, 2026-09-06): exp1 serves 10
+# figures under a mix of methods -- fresh figures first, so a figure only comes
+# back under another method once every figure has been seen -- and exp2 is one
+# tournament per figure. Raise exp1 to 10 x methods to rate every figure under
+# every method.
+samples_per_experiment: {exp1: 10, exp2: 10}
+
+# ~7 users/day were expected; retire a cell at 7 so every user that day sees
+# every sample rather than the first few exhausting the pool.
+judgments_per_sample: 7
+stratum_fields: [complexity, animation_style]
+
+attention_check_fraction: 0.0
+calibration_pass_threshold: 0.7
+open_trial_ttl_seconds: 900

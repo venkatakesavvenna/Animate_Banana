@@ -31,6 +31,7 @@ from pathlib import Path
 
 from ..backends import Message
 from ..extract import extract_json, looks_truncated
+from ..ablation import drop_declared_inputs
 from ..prompts import load_and_render
 from ..runner import AgentContext, StageReport, run_agent
 from ..samples import PaperSample
@@ -99,8 +100,15 @@ def build_request(ctx: AgentContext, sample: PaperSample) -> list[Message]:
             "methods": available.get("methods") or _MISSING,
         })
 
+    # ABLATION FLAG. `context_tier: image_only` already handles the
+    # without-context ablation by selecting `image-only-prompt`; this handles
+    # the orthogonal one, withholding the diagram image itself.
+    send_image = bool(ctx.agent.option("send_image", True))
     text = load_and_render(prompt_ref, context)
-    return [Message.user(text, images=[sample.image_path])]
+    if not send_image:
+        text = drop_declared_inputs(text, {"image"})
+    return [Message.user(text,
+                        images=[sample.image_path] if send_image else None)]
 
 
 def _graft(original: AnimationSequence, data: dict) -> tuple[AnimationSequence, list[str]]:

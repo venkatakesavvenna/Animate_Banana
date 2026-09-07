@@ -22,9 +22,11 @@ from flask import Flask, abort, jsonify, request, send_file
 
 from img_2_svg_pretraining.study import calibration
 from img_2_svg_pretraining.study.admin import admin as admin_bp, STATE as ADMIN_STATE
-from img_2_svg_pretraining.study.config import SCREEN, StudyConfig
+from img_2_svg_pretraining.study.config import (ABSOLUTE_EXPERIMENTS, SCREEN, TOURNAMENT,
+                                                StudyConfig)
 from img_2_svg_pretraining.study.db import StudyDB
-from img_2_svg_pretraining.study.questions import question_set, required_ids
+from img_2_svg_pretraining.study.questions import (
+    _load_raw as _load_raw_set, question_set, required_ids)
 from img_2_svg_pretraining.study.scheduler import (
     build_pool, coverage, next_trial, submit_trial)
 
@@ -35,26 +37,14 @@ STATE: dict = {"db": None, "cfg": None, "bundle": None, "manifest": None,
 
 HERE = Path(__file__).parent
 
-# Shown to the participant so "does it follow the stated style?" is answerable.
-# Copied here rather than imported from `pipeline.styles` to keep the runtime
-# free of that dependency; the text is frozen into the bundle-facing config.
-STYLE_TEXT = {
-    "progressive_reveal":
-        "Elements appear one at a time, building the figure up piece by piece. "
-        "Nothing that has appeared is removed.",
-    "colour_pop":
-        "The whole figure is visible but muted; the part being discussed is "
-        "picked out in colour.",
-    "alpha_masking":
-        "The whole figure is visible but faded; the part being discussed is "
-        "brought to full opacity.",
-    "hopping_bounding_box":
-        "A box jumps from element to element, framing whichever part is being "
-        "discussed.",
-    "sliding_bounding_box":
-        "A box glides smoothly from element to element, framing whichever part "
-        "is being discussed.",
-}
+# Shown over every animation: the style name in bold, its one-line summary,
+# and the judge's own rule list behind a disclosure. Loaded from styles.yaml so
+# the wording is data, and so participants and the ASCS metric judge the same
+# contract. Kept out of `pipeline.styles` to leave the runtime free of that
+# dependency.
+import yaml as _yaml
+STYLES = _yaml.safe_load((HERE / "styles.yaml").read_text(encoding="utf-8"))
+STYLE_TEXT = {k: v["summary"] for k, v in STYLES.items()}
 
 
 def _init(bundle: str, config_path: str, db_path: str) -> None:
@@ -189,7 +179,7 @@ def api_state():
         total_target = 0
         live = []
         for experiment in cfg.enabled_experiments():
-            pool = build_pool(conn, bundle_id, experiment)
+            pool = build_pool(conn, bundle_id, experiment, cfg.study_day)
             if not pool:
                 continue
             live.append(experiment)
@@ -198,7 +188,8 @@ def api_state():
             # 5 figures (e.g. +K and -K narratives of the same diagram) can
             # only ever serve 5 -- counting cells parks the progress bar at 67%
             # on a session that is actually finished.
-            reachable = len({c["diagram_id"] for c in pool})
+            reachable = (len(pool) if experiment in ABSOLUTE_EXPERIMENTS
+                         else len({c["diagram_id"] for c in pool}))
             total_target += min(cfg.target_for(experiment), reachable)
     return jsonify({
         "participant_id": pid,
@@ -209,6 +200,45 @@ def api_state():
         "live_experiments": live,
         "per_experiment": done,
     })
+
+
+@app.get("/api/prep-example")
+def api_prep_example():
+    """One real figure -> animation pair for the "what we are doing" hero.
+
+    Deterministic (smallest diagram id with an AnimateBanana narrative) so
+    every participant sees the same example and no study stimulus is singled
+    out at random. It is an illustration, not a trial, so nothing is logged.
+    """
+    _participant_or_401()
+    bundle_id = STATE["manifest"]["bundle_id"]
+    with _db()._connect() as conn:
+        row = conn.execute(
+            "SELECT n.narrative_id, n.animation_style, n.payload_json,"
+            " d.figure_media_id, d.figure_w, d.figure_h, d.title"
+            " FROM narrative n JOIN diagram d"
+            " ON d.bundle_id=n.bundle_id AND d.diagram_id=n.diagram_id"
+            " WHERE n.bundle_id=? AND n.method='animatebanana'"
+            " AND n.is_attention_check=0 AND n.context_condition!='without_context'"
+            " ORDER BY n.n_frames DESC, n.diagram_id LIMIT 1", (bundle_id,)).fetchone()
+    if not row:
+        return jsonify({"available": False})
+    n = json.loads(row["payload_json"])
+    style = row["animation_style"]
+    return jsonify({
+        "available": True,
+        "figure": {"media_id": row["figure_media_id"], "w": row["figure_w"],
+                   "h": row["figure_h"], "title": row["title"]},
+        "frames": n["frames"], "frame_w": n.get("frame_w"), "frame_h": n.get("frame_h"),
+        "holds": n["timeline"]["holds"], "cues": n["timeline"]["cues"],
+        "style_name": STYLES.get(style, {}).get("name", style.replace("_", " ")),
+    })
+
+
+@app.get("/prep_interface.png")
+def prep_interface_png():
+    """Annotated screenshot of the trial screen, captured from this very UI."""
+    return send_file(HERE / "prep_interface.png", mimetype="image/png")
 
 
 @app.get("/api/prepare")
@@ -333,8 +363,13 @@ def api_trial_current():
     # the client is what stops a future "just add it for debugging" edit from
     # reintroducing a real leak.
     style = trial.pop("animation_style")
-    trial["style_name"] = style.replace("_", " ")
-    trial["style_description"] = STYLE_TEXT.get(style, "")
+    info = STYLES.get(style, {})
+    trial["style_name"] = info.get("name") or style.replace("_", " ").title()
+    trial["style_description"] = info.get("summary", "")
+    trial["style_rules"] = info.get("rules", [])
+    qs = _load_raw_set(trial["experiment"])
+    if qs.get("side_labels"):
+        trial["side_labels"] = qs["side_labels"]
     trial["questions"] = question_set(
         trial["experiment"], style_name=style,
         style_description=STYLE_TEXT.get(style, ""))
@@ -359,6 +394,13 @@ def api_trial_current():
         trial["familiarity_carried"] = json.loads(prior["value"])
         _db().add_response(trial["trial_id"], pid, "familiarity",
                            json.loads(prior["value"]))
+
+    # Answers already recorded for this trial, so a reload rehydrates the form
+    # instead of showing a blank one over a half-populated server record. The
+    # client cannot be the sole source of truth: a dropped POST used to leave a
+    # chip on screen with nothing behind it, and submit then failed as
+    # "incomplete" for a question the participant had visibly answered.
+    trial["saved_answers"] = _db().latest_answers(trial["trial_id"])
 
     _db().add_event(trial["trial_id"], pid, "trial_open")
     return jsonify(trial)
@@ -396,10 +438,43 @@ def api_submit(trial_id: str):
     if row["status"] != "open":
         return jsonify({"ok": True, "already": True})
 
-    answered = set(_db().latest_answers(trial_id))
-    missing = [q for q in required_ids(row["experiment"])
-               if q not in answered] + (["familiarity"] if "familiarity" not in answered
-                                        else [])
+    if row["experiment"] in TOURNAMENT:
+        # A tournament submits two picks, not a question set. The client
+        # sends the slot letters it chose in each round; the server derives
+        # the rank from them and stores rank + both picks as ordinary answers,
+        # so the append-only response log holds everything the analysis needs.
+        data = request.get_json(force=True, silent=True) or {}
+        picks = data.get("picks") or []
+        ids = json.loads(row["presentation_ids"])
+        conds = json.loads(row["presentation_conditions"])
+        if len(ids) != 3 or len(picks) != 2 or not all(p in "AB" or p == "C" for p in picks):
+            return jsonify({"error": "a tournament needs two picks"}), 409
+        # Round 1: A vs B. Round 2: round-1 winner vs C.
+        r1_winner = picks[0]                          # "A" or "B"
+        r1_loser = "B" if r1_winner == "A" else "A"
+        r2_winner = picks[1]                          # r1_winner or "C"
+        if r2_winner not in (r1_winner, "C"):
+            return jsonify({"error": "round-2 pick must be the round-1 winner or C"}), 409
+        r2_loser = "C" if r2_winner == r1_winner else r1_winner
+        rank = {r2_winner: 1, r2_loser: 2, r1_loser: 3}
+        slot_of = dict(zip("ABC", conds))
+        _db().add_response(trial_id, pid, "round1_pick", slot_of[r1_winner])
+        _db().add_response(trial_id, pid, "round2_pick", slot_of[r2_winner])
+        _db().add_response(trial_id, pid, "rank",
+                           {slot_of[k]: v for k, v in rank.items()})
+        _db().add_event(trial_id, pid, "trial_submit")
+        submit_trial(_db(), trial_id)
+        return jsonify({"ok": True, "rank": {slot_of[k]: v for k, v in rank.items()}})
+
+    answers = _db().latest_answers(trial_id)
+    answered = set(answers)
+    # Required is a function of what has been answered: a question behind a
+    # closed gate is not owed. Without this a "No" at VFS could never submit.
+    missing = [q for q in required_ids(row["experiment"], answers)
+               if q not in answered]
+    qset = question_set(row["experiment"])
+    if qset["familiarity"] and "familiarity" not in answered:
+        missing.append("familiarity")
     if missing:
         # The client disables submit, but the client is a suggestion; this is
         # the rule.

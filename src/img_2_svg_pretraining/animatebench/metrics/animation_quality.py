@@ -136,6 +136,25 @@ GPS_JSON_KEYS = (("volume", "volume_band"),
                  ("complexity", "complexity_band"),
                  ("relevance", "relevance_band"))
 
+# The FINAL prompts (Medha, 2026-08-31: *_final.yaml) changed the output
+# contract: per-rule REASONING STRINGS plus one final_score letter, no
+# per-criterion letter grades. The reasonings are stored verbatim as text --
+# they must NEVER go through `_letter_band`, whose first-standalone-A-E regex
+# would happily read a "band" out of uppercased prose. Hence `text_keys`,
+# a separate lane through `parse_json_bands`.
+SSS_FINAL_TEXT_KEYS = (
+    ("rule_1_appropriateness_reasoning", "rule_1_appropriateness_reasoning"),
+    ("rule_2_coherence_reasoning", "rule_2_coherence_reasoning"))
+GPS_FINAL_TEXT_KEYS = (
+    ("rule_1_volume_reasoning", "rule_1_volume_reasoning"),
+    ("rule_2_complexity_reasoning", "rule_2_complexity_reasoning"),
+    ("rule_3_relevance_reasoning", "rule_3_relevance_reasoning"))
+NAS_FINAL_TEXT_KEYS = (
+    ("rule_1_alignment_reasoning", "rule_1_alignment_reasoning"),
+    ("rule_2_narrative_context_reasoning", "rule_2_narrative_context_reasoning"),
+    ("rule_3_coherence_and_factuality_reasoning",
+     "rule_3_coherence_and_factuality_reasoning"))
+
 
 # -- shared helpers --------------------------------------------------------
 
@@ -810,7 +829,8 @@ def _letter_band(value) -> int | None:
     return BAND_LETTER_VALUE.get(match.group(1)) if match else None
 
 
-def parse_json_bands(text: str, keys: tuple[tuple[str, str], ...]) -> dict:
+def parse_json_bands(text: str, keys: tuple[tuple[str, str], ...],
+                     text_keys: tuple[tuple[str, str], ...] = ()) -> dict:
     """Recover a banded verdict from the JSON reply.
 
     Mirrors `parse_bands`: `is_valid` is False when `final_score` cannot be
@@ -837,6 +857,10 @@ def parse_json_bands(text: str, keys: tuple[tuple[str, str], ...]) -> dict:
             result[f"{stored}_rationale"] = block.get("rationale")
         else:
             result[stored] = _letter_band(block)
+
+    for json_key, stored in text_keys:
+        value = data.get(json_key)
+        result[stored] = value if isinstance(value, str) else None
 
     result["final_band"] = _letter_band(data.get("final_score"))
     result["newly_targeted_elements"] = data.get("newly_targeted_elements")
@@ -875,7 +899,8 @@ def _has_final_score(text: str) -> bool:
 def _banded_json(judge, prompt_file: str, metric: str,
                  keys: tuple[tuple[str, str], ...],
                  step_frames_: list[Path], source_image: Path, style: str,
-                 xml_text: str) -> dict:
+                 xml_text: str,
+                 text_keys: tuple[tuple[str, str], ...] = ()) -> dict:
     """`_banded` for the JSON/letter rubric.
 
     Kept separate rather than branching inside `_banded`: the two rubrics
@@ -908,7 +933,7 @@ def _banded_json(judge, prompt_file: str, metric: str,
                                   accept=_has_final_score)
         except JudgeError as e:
             return index, None, f"t{index}: {e}"
-        verdict = parse_json_bands(text, keys)
+        verdict = parse_json_bands(text, keys, text_keys)
         verdict["timestep"] = index
         verdict["frame"] = current.name
         return index, verdict, None
@@ -958,7 +983,8 @@ def _banded_json(judge, prompt_file: str, metric: str,
 
 
 def narration_alignment(judge, source_image, step_frames_, style,
-                        narrations: list[str], context_dump: str) -> dict:
+                        narrations: list[str], context_dump: str,
+                        xml_text: str = "") -> dict:
     """NAS: does each caption describe the transition it accompanies? (Contributor 4)
 
     Unlike SSS and GPS, this node needs two inputs the banded driver does not
@@ -981,17 +1007,20 @@ def narration_alignment(judge, source_image, step_frames_, style,
     audited against the rule that produced it.
     """
     total = len(step_frames_)
-    system = load_and_render("animation_narration.yaml#system", {}, root=PROMPTS_ROOT)
-    adapter = _adapter("animation_narration.yaml", style)
+    # The FINAL prompt lists the XML schema as input 7 and asks the judge to
+    # map targeted elements onto XML ids -- promptv1 never sent it.
+    system = load_and_render("animation_narration_final.yaml#system", {}, root=PROMPTS_ROOT)
+    adapter = _adapter("animation_narration_final.yaml", style)
 
     def judge_step(index: int):
         narration = (narrations[index - 1] if index - 1 < len(narrations) else "") or ""
         if not narration.strip():
             return index, None, None          # nothing to score, not a failure
         current = step_frames_[index - 1]
-        user = load_and_render("animation_narration.yaml#user", {
+        user = load_and_render("animation_narration_final.yaml#user", {
             "style_adapter": adapter, "narration": narration,
             "context_dump": context_dump or "(no paper context available)",
+            "xml_text": xml_text or "(no XML schema available)",
             "timestep_idx": str(index), "total_steps": str(total),
         }, root=PROMPTS_ROOT)
         images = [Path(source_image)]
@@ -1003,7 +1032,7 @@ def narration_alignment(judge, source_image, step_frames_, style,
                                   tag=f"nas_{style}", accept=_has_final_score)
         except JudgeError as e:
             return index, None, f"t{index}: {e}"
-        verdict = parse_json_bands(text, NAS_JSON_KEYS)
+        verdict = parse_json_bands(text, (), NAS_FINAL_TEXT_KEYS)
         verdict["timestep"] = index
         verdict["frame"] = current.name
         verdict["narration"] = narration
@@ -1044,16 +1073,18 @@ def narration_alignment(judge, source_image, step_frames_, style,
 
 def selection_sensibility_bands(judge, source_image, step_frames_, style,
                                 xml_text) -> dict:
-    return _banded_json(judge, "animation_selection_bands.yaml", "sss",
-                        SSS_JSON_KEYS, step_frames_, source_image, style,
-                        xml_text)
+    # The FINAL prompt: no per-criterion letter grades, so the band-key map
+    # is empty and the per-rule reasonings ride the text lane instead.
+    return _banded_json(judge, "animation_selection_final.yaml", "sss",
+                        (), step_frames_, source_image, style,
+                        xml_text, text_keys=SSS_FINAL_TEXT_KEYS)
 
 
 def granularity_pacing_bands(judge, source_image, step_frames_, style,
                              xml_text) -> dict:
-    return _banded_json(judge, "animation_pacing_bands.yaml", "gps",
-                        GPS_JSON_KEYS, step_frames_, source_image, style,
-                        xml_text)
+    return _banded_json(judge, "animation_pacing_final.yaml", "gps",
+                        (), step_frames_, source_image, style,
+                        xml_text, text_keys=GPS_FINAL_TEXT_KEYS)
 
 
 def selection_sensibility(judge, source_image, step_frames_, style, xml_text,
@@ -1234,7 +1265,8 @@ def run(judge, *, source_image: Path, frames_dir: Path, style: str,
     # score and saying so is better than reporting zeros.
     if step_frames_ and narrations:
         attempt("nas", lambda: narration_alignment(
-            judge, source_image, step_frames_, style, narrations, context_dump))
+            judge, source_image, step_frames_, style, narrations, context_dump,
+            xml_text=xml_text))
     elif "nas" in stages:
         record["stages_skipped"]["nas"] = (
             "no per-timestep narration for this cell; run the narrate stage"

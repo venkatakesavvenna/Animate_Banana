@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -59,6 +60,8 @@ CREATE TABLE IF NOT EXISTS diagram (
     element_count       INTEGER, edge_count INTEGER, node_count INTEGER,
     element_density     TEXT, connectivity REAL, connectivity_level TEXT,
     hierarchy_depth     INTEGER, has_raster INTEGER DEFAULT 0,
+    study_day           INTEGER,
+    complexity          TEXT,                   -- complex | easy (main study)
     PRIMARY KEY (bundle_id, diagram_id)
 );
 
@@ -124,6 +127,10 @@ CREATE TABLE IF NOT EXISTS trial (
     presentation_a_condition TEXT NOT NULL,
     presentation_b_id   TEXT REFERENCES narrative(narrative_id),
     presentation_b_condition TEXT,
+    -- All contenders in served order (JSON lists). A tournament has three;
+    -- a_/b_ above stay populated for the first two so older readers work.
+    presentation_ids    TEXT,
+    presentation_conditions TEXT,
     position_seed       TEXT NOT NULL,
     show_captions       INTEGER NOT NULL DEFAULT 0,
     assignment_reason   TEXT NOT NULL,
@@ -234,6 +241,16 @@ class StudyDB:
                 conn.execute(pragma)
             conn.executescript(SCHEMA)
             conn.executescript(INDEXES)
+            # Additive migration for databases created before the tournament
+            # columns existed. Never rewrite, only add.
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(trial)")}
+            for col in ("presentation_ids", "presentation_conditions"):
+                if col not in cols:
+                    conn.execute(f"ALTER TABLE trial ADD COLUMN {col} TEXT")
+            dcols = {r[1] for r in conn.execute("PRAGMA table_info(diagram)")}
+            for col, typ in (("study_day", "INTEGER"), ("complexity", "TEXT")):
+                if col not in dcols:
+                    conn.execute(f"ALTER TABLE diagram ADD COLUMN {col} {typ}")
 
     @contextmanager
     def _connect(self, immediate: bool = False):
@@ -246,8 +263,17 @@ class StudyDB:
             if immediate:
                 # Take the write lock up front. Upgrading a read transaction to
                 # a write one mid-way is the classic sqlite deadlock, and trial
-                # assignment reads counts before it inserts.
-                conn.execute("BEGIN IMMEDIATE")
+                # assignment reads counts before it inserts. Under a 16-thread
+                # burst even the 15s busy wait was exceeded once; a few more
+                # attempts cost nothing when idle and save a 500 under load.
+                for attempt in range(3):
+                    try:
+                        conn.execute("BEGIN IMMEDIATE")
+                        break
+                    except sqlite3.OperationalError as exc:
+                        if "locked" not in str(exc) or attempt == 2:
+                            raise
+                        time.sleep(0.2 * (attempt + 1))
             yield conn
             if immediate:
                 conn.execute("COMMIT")
@@ -279,15 +305,17 @@ class StudyDB:
                     (diagram_id, bundle_id, title, figure_media_id, figure_w, figure_h,
                      source_collection, domain, layout_type, context_dependence,
                      element_count, edge_count, node_count, element_density,
-                     connectivity, connectivity_level, hierarchy_depth, has_raster)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                     connectivity, connectivity_level, hierarchy_depth, has_raster,
+                     study_day, complexity)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                     d["diagram_id"], bundle_id, d.get("title"), d["figure_media_id"],
                     d.get("figure_w"), d.get("figure_h"), d.get("source_collection"),
                     d.get("domain"), d.get("layout_type"), d.get("context_dependence"),
                     d.get("element_count"), d.get("edge_count"), d.get("node_count"),
                     d.get("element_density"), d.get("connectivity"),
                     d.get("connectivity_level"), d.get("hierarchy_depth"),
-                    int(bool(d.get("has_raster")))))
+                    int(bool(d.get("has_raster"))),
+                    d.get("study_day"), d.get("complexity")))
 
             for n in manifest["narratives"] + manifest.get("attention_checks", []):
                 tl = n["timeline"]
@@ -344,7 +372,7 @@ class StudyDB:
                            roll_no: str = "", is_expert: bool = False,
                            background: dict | None = None) -> str:
         pid = new_id()
-        with self._connect() as conn:
+        with self._connect(immediate=True) as conn:
             conn.execute("""
                 INSERT INTO participant
                 (participant_id, education_level, background_json, config_version,
@@ -365,7 +393,7 @@ class StudyDB:
         return dict(row) if row else None
 
     def set_stage(self, participant_id: str, stage: str) -> None:
-        with self._connect() as conn:
+        with self._connect(immediate=True) as conn:
             conn.execute("UPDATE participant SET stage=?, last_seen_at=datetime('now')"
                          " WHERE participant_id=?", (stage, participant_id))
 
@@ -403,7 +431,7 @@ class StudyDB:
                   slot: str | None = None, client_seq: int | None = None,
                   t_video: float | None = None, t_wall_client: str | None = None,
                   payload: dict | None = None) -> None:
-        with self._connect() as conn:
+        with self._connect(immediate=True) as conn:
             conn.execute("""
                 INSERT INTO event
                 (trial_id, participant_id, type, slot, client_seq, t_video,
@@ -415,7 +443,7 @@ class StudyDB:
     def annotate_participant(self, participant_id: str, kind: str, reason: str,
                              author: str) -> None:
         """Exclusion is an annotation. It never touches a response row."""
-        with self._connect() as conn:
+        with self._connect(immediate=True) as conn:
             conn.execute("INSERT INTO participant_annotation"
                          " (participant_id, kind, reason, author) VALUES (?,?,?,?)",
                          (participant_id, kind, reason, author))

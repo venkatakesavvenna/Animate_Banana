@@ -178,6 +178,17 @@ def decode_video_frames(video: Path, out_dir: Path, ffmpeg: str) -> list[Path]:
     return _sorted_frames(out_dir)
 
 
+def _loads_lenient(text: str) -> dict:
+    """json.loads that tolerates markdown fences around the object."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end < 0:
+            raise ValueError("no JSON object found")
+        return json.loads(text[start:end + 1])
+
+
 def build_reference_narrative(sample: PaperSample, style: str, target: str,
                               media: MediaStore, log: BuildLog,
                               workdir: Path) -> dict | None:
@@ -203,7 +214,14 @@ def build_reference_narrative(sample: PaperSample, style: str, target: str,
     if not narration.exists():
         log.skip(sample.id, style, "reference video has no narration")
         return None
-    steps = json.loads(narration.read_text(encoding="utf-8")).get("sequence", [])
+    # 13 of the v3 reference narrations were saved with the model's closing
+    # ``` fence still attached; the JSON inside is intact. Strip fences rather
+    # than skip a fifth of the reference set.
+    try:
+        steps = _loads_lenient(narration.read_text(encoding="utf-8")).get("sequence", [])
+    except ValueError as exc:
+        log.skip(sample.id, style, "reference narration unparseable: %s" % exc)
+        return None
     if not steps:
         log.skip(sample.id, style, "reference narration has no steps")
         return None
@@ -303,6 +321,144 @@ def build_baseline_narrative(sample: PaperSample, style: str, root: Path,
     }
 
 
+def build_dropin_narrative(sample: PaperSample, style: str, root: Path,
+                           method: str, media: MediaStore, log: BuildLog,
+                           workdir: Path) -> dict | None:
+    """A third-party arm delivered as frame-group SVGs (see `dropin.py`)."""
+    from . import dropin
+
+    svg = dropin.find_svg(root, sample.id, style)
+    if svg is None:
+        log.skip(sample.id, style, f"{method}: no drop-in SVG for this style")
+        return None
+    svg_text = svg.read_text(encoding="utf-8")
+    steps = dropin.load_steps(dropin.find_narration(root, sample.id), svg_text)
+    if not steps:
+        log.skip(sample.id, style, f"{method}: SVG has no frame groups")
+        return None
+
+    frames = dropin.prerendered_frames(root, sample.id, style)
+    source = "dropin_prerendered"
+    # Their render emits one PNG per frame group plus one final hold; anything
+    # else means the PNGs are for a different version of the file, so render
+    # from the SVG we actually have.
+    if len(frames) not in (len(steps), len(steps) + 1):
+        try:
+            frames = dropin.render_frames(svg, workdir / method / sample.id / style)
+        except Exception as exc:                                    # noqa: BLE001
+            log.skip(sample.id, style, f"{method}: render failed: {exc}")
+            return None
+        source = "dropin_rendered"
+    if len(frames) < len(steps):
+        log.skip(sample.id, style, f"{method}: {len(frames)} frames for {len(steps)} steps")
+        return None
+
+    holds = dropin.durations(steps)
+    nodes = [{"narrative": st["narrative"], "duration": d} for st, d in zip(steps, holds)]
+    if len(frames) == len(steps) + 1:
+        # The extra final frame is the last state held; give it the tail and
+        # let the last narrated step keep its own gap.
+        nodes.append({"narrative": "", "duration": 1.0})
+    timeline = build_timeline(len(frames), nodes)
+    frame_media = [media.add_image(f, FRAME_MAX_WIDTH) for f in frames]
+    words = sum(len(n["narrative"].split()) for n in nodes)
+
+    return {
+        "narrative_id": narrative_id(sample.id, style, method,
+                                     "not_applicable", "not_applicable", 1),
+        "diagram_id": sample.id, "animation_style": style,
+        "method": method,
+        "context_condition": "not_applicable",
+        "verification_state": "not_applicable",
+        "correction_type": None, "correction_magnitude": None,
+        "narrative_version": 1,
+        "frames": [m["media_id"] for m in frame_media],
+        "frame_w": frame_media[0]["w"], "frame_h": frame_media[0]["h"],
+        "n_frames": len(frames), "n_steps": len(steps),
+        "spoken_step_fraction": (sum(1 for n in nodes if n["narrative"]) / len(nodes)),
+        "narration_words": words,
+        "timeline": timeline.to_dict(),
+        "timing_source": "dropin_data_time_start",
+        "is_attention_check": False,
+        "source": source,
+    }
+
+
+TALK_FPS = 1          # one frame per second of talk: a slider over a lecture
+TALK_MAX_FRAMES = 240 # four minutes; longer talks are sampled more sparsely
+
+
+def build_talk_narrative(sample: PaperSample, style: str, zip_path: Path,
+                         media: MediaStore, log: BuildLog, workdir: Path) -> dict | None:
+    """The paper's original conference talk, as the third contender in the
+    ranking experiment.
+
+    It is a human presentation, not an animation of the figure, so it is
+    never offered in the absolute experiment and carries no style contract of
+    its own; `animation_style` is copied from the sample so the tournament
+    cell groups correctly. Decoded at 1 fps into the same frame-deck player as
+    everything else -- a different player for one contender would itself be a
+    cue to which is which.
+    """
+    import zipfile
+    try:
+        zf = zipfile.ZipFile(zip_path)
+    except (OSError, zipfile.BadZipFile) as exc:
+        log.skip(sample.id, style, f"talk zip unreadable: {exc}")
+        return None
+    entry = next((n for n in zf.namelist()
+                  if n.endswith(f"/{sample.id}/video.mp4")), None)
+    if entry is None:
+        log.skip(sample.id, style, "no original talk in zip")
+        return None
+    out = workdir / "talks" / sample.id
+    out.mkdir(parents=True, exist_ok=True)
+    video = out / "video.mp4"
+    video.write_bytes(zf.read(entry))
+
+    ffmpeg = _ffmpeg()
+    # Probe duration cheaply via ffmpeg's own stderr rather than a separate
+    # ffprobe binary, which imageio-ffmpeg does not ship.
+    probe = subprocess.run([ffmpeg, "-i", str(video)], capture_output=True, text=True)
+    m = re.search(r"Duration: (\d+):(\d+):(\d+\.?\d*)", probe.stderr)
+    seconds = (int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3])) if m else 0.0
+    fps = TALK_FPS if seconds <= TALK_MAX_FRAMES else TALK_MAX_FRAMES / seconds
+    result = subprocess.run(
+        [ffmpeg, "-y", "-loglevel", "error", "-i", str(video),
+         "-vf", f"fps={fps:.4f},scale='min({FRAME_MAX_WIDTH},iw)':-2",
+         str(out / "frame-%04d.png")], capture_output=True, text=True)
+    if result.returncode != 0:
+        log.skip(sample.id, style, f"talk decode failed: {result.stderr[:120]}")
+        return None
+    frames = _sorted_frames(out)
+    if len(frames) < 2:
+        log.skip(sample.id, style, "talk decoded to under 2 frames")
+        return None
+
+    hold = seconds / len(frames) if seconds else 1.0 / fps
+    nodes = [{"narrative": "", "duration": hold} for _ in frames]
+    timeline = build_timeline(len(frames), nodes)
+    frame_media = [media.add_image(f, FRAME_MAX_WIDTH) for f in frames]
+    return {
+        "narrative_id": narrative_id(sample.id, style, "talk",
+                                     "not_applicable", "not_applicable", 1),
+        "diagram_id": sample.id, "animation_style": style,
+        "method": "talk",
+        "context_condition": "not_applicable",
+        "verification_state": "not_applicable",
+        "correction_type": None, "correction_magnitude": None,
+        "narrative_version": 1,
+        "frames": [m["media_id"] for m in frame_media],
+        "frame_w": frame_media[0]["w"], "frame_h": frame_media[0]["h"],
+        "n_frames": len(frames), "n_steps": len(nodes),
+        "spoken_step_fraction": 0.0, "narration_words": 0,
+        "timeline": timeline.to_dict(),
+        "is_attention_check": False,
+        "source": "original_talk",
+        "talk_seconds": round(seconds, 1),
+    }
+
+
 def _ffmpeg() -> str:
     import imageio_ffmpeg
     return imageio_ffmpeg.get_ffmpeg_exe()
@@ -363,7 +519,9 @@ def build_narrative(sample: PaperSample, paths: CachePaths, style: str,
 def build(configs: list[tuple], out: Path, name: str, labels_path: str | None,
           method: str, context_arm: str, verification_state: str,
           reference: bool = False, only: list | None = None,
-          baseline_root: str | None = None) -> dict:
+          baseline_root: str | None = None, talks_zip: str | None = None,
+          labels_json: str | None = None,
+          dropins: list[tuple[str, str]] | None = None) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     media = MediaStore(out / "media")
     log = BuildLog()
@@ -377,8 +535,10 @@ def build(configs: list[tuple], out: Path, name: str, labels_path: str | None,
     refdir = Path(tempfile.mkdtemp(prefix="study_refdecode_"))
     emitted_reference: set = set()
     emitted_baseline: set = set()
+    emitted_talk: set = set()
+    emitted_dropin: set = set()
 
-    for config_path, style_override, config_arm in configs:
+    for config_path, style_override, config_arm, config_method in configs:
         cfg = load_config(config_path)
         if style_override:
             # The style lives in the sequence lineage, so overriding it here is
@@ -404,7 +564,7 @@ def build(configs: list[tuple], out: Path, name: str, labels_path: str | None,
             tier = effective_context_tier(sample, configured_tier)
             record = build_narrative(
                 sample, paths, style, media, log,
-                method=method,
+                method=config_method,
                 # `context_condition` is an EXPERIMENT arm, not a per-sample
                 # property. Deriving it from each sample's effective tier would
                 # label a plain Exp1/Exp2 bundle as a mix of with/without
@@ -422,6 +582,22 @@ def build(configs: list[tuple], out: Path, name: str, labels_path: str | None,
             # emitted once per config -- same narrative_id twice, double the
             # decode, and any per-narrative count silently doubled.
             emitted_key = (sample.id, style)
+
+            if talks_zip and emitted_key not in emitted_talk:
+                talk = build_talk_narrative(sample, style, Path(talks_zip),
+                                            media, log, refdir)
+                if talk is not None:
+                    narratives.append(talk)
+                    emitted_talk.add(emitted_key)
+
+            for drop_root, drop_method in (dropins or []):
+                if (sample.id, style, drop_method) in emitted_dropin:
+                    continue
+                drop = build_dropin_narrative(sample, style, Path(drop_root),
+                                              drop_method, media, log, refdir)
+                if drop is not None:
+                    narratives.append(drop)
+                    emitted_dropin.add((sample.id, style, drop_method))
 
             if baseline_root and emitted_key not in emitted_baseline:
                 base = build_baseline_narrative(
@@ -450,7 +626,11 @@ def build(configs: list[tuple], out: Path, name: str, labels_path: str | None,
                 strat = stratification(paths.xml(sample.id))
                 entry = {
                     "diagram_id": sample.id,
-                    "title": sample.title,
+                    # A title is shown under the figure. Some dataset titles are
+                    # leftover template text ("\\LaTeX\\ Guidelines for Author
+                    # Response"); anything with TeX in it is not a title.
+                    "title": (sample.title if sample.title and "\\" not in sample.title
+                              else None),
                     "figure_media_id": figure["media_id"],
                     "figure_w": figure["w"], "figure_h": figure["h"],
                     "source_collection": sample.id.split("_")[0],
@@ -461,13 +641,15 @@ def build(configs: list[tuple], out: Path, name: str, labels_path: str | None,
                     entry["element_density"] = bucket(strat["element_count"], 15, 40)
                     entry["connectivity_level"] = bucket(strat["connectivity"], 0.5, 1.2)
                 entry.update(labels.get(sample.id, {}))
+                if labels_json and sample.id in labels_json:
+                    entry.update(labels_json[sample.id])
                 diagrams[sample.id] = entry
 
     manifest = {
         "bundle_schema_version": BUNDLE_SCHEMA_VERSION,
         "bundle_id": name,
-        "configs": [{"config": str(c), "style": st, "context_arm": arm}
-                    for c, st, arm in configs],
+        "configs": [{"config": str(c), "style": st, "context_arm": arm, "method": m}
+                    for c, st, arm, m in configs],
         "diagrams": sorted(diagrams.values(), key=lambda d: d["diagram_id"]),
         "narratives": narratives,
         "attention_checks": [],
@@ -508,6 +690,15 @@ def main() -> None:
     ap.add_argument("--baseline-root", default=None,
                     help="directory of end-to-end baseline renders, added as "
                          "the other side of Experiment 4")
+    ap.add_argument("--talks-zip", default=None,
+                    help="zip of original conference talks, added as method=talk")
+    ap.add_argument("--dropin", action="append", default=None,
+                    help="'<root>=method:<name>': a folder of frame-group SVGs "
+                         "+ narration JSON (see build/dropin.py), added as "
+                         "that method for every figure it covers")
+    ap.add_argument("--selection", default=None,
+                    help="main_selection.json: restricts --only to its samples "
+                         "and stamps day + complexity onto each diagram")
     ap.add_argument("--only", default=None,
                     help="comma-separated diagram ids to restrict the build to")
     ap.add_argument("--verification-state", default="not_applicable",
@@ -516,15 +707,47 @@ def main() -> None:
     args = ap.parse_args()
 
     out = Path(args.out)
+    sel_labels = None
+    if args.selection:
+        sel = json.loads(Path(args.selection).read_text(encoding="utf-8"))
+        sel_labels = {}
+        for day, ids in enumerate(sel["days"], start=1):
+            for sid in ids:
+                info = sel["samples"][sid]
+                sel_labels[sid] = {"study_day": day,
+                                   "complexity": "complex" if info["complex"] else "easy",
+                                   "element_count_median": sel["median_elements"]}
+        if not args.only:
+            args.only = ",".join(sel_labels)
     styles = args.style or [None]
     pairs = []
     for spec in args.config:
-        cfg_path, _, arm = spec.partition("=")
+        # "<path>=k:v,k:v" -- keys: method, arm. Bare "<path>=with_context"
+        # still means arm, for the older selective-cohort invocation.
+        cfg_path, _, opts = spec.partition("=")
+        method, arm = args.method, args.context_arm
+        for kv in filter(None, opts.split(",")):
+            k, _, v = kv.partition(":")
+            if not v:
+                arm = k
+            elif k == "method":
+                method = v
+            elif k == "arm":
+                arm = v
         for st in styles:
-            pairs.append((cfg_path, st, arm or args.context_arm))
+            pairs.append((cfg_path, st, arm, method))
+    dropins = []
+    for spec in args.dropin or []:
+        root, _, opts = spec.partition("=")
+        m = next((kv.partition(":")[2] for kv in opts.split(",") if kv.startswith("method:")), None)
+        if not m:
+            ap.error(f"--dropin needs '=method:<name>': {spec}")
+        dropins.append((root, m))
     manifest = build(pairs, out, args.name or out.name, args.labels,
                      args.method, args.context_arm, args.verification_state,
                      reference=args.reference, baseline_root=args.baseline_root,
+                     talks_zip=args.talks_zip, labels_json=sel_labels,
+                     dropins=dropins,
                      only=[x.strip() for x in args.only.split(",")] if args.only else None)
 
     print(f"\nbundle: {out}")

@@ -202,6 +202,46 @@ body.fs-locked{overflow:hidden}
 .bt-inner p{color:var(--dim);font-size:15px;margin:0 0 26px}
 #btGo{background:var(--accent);color:#fff;border:0;border-radius:6px;padding:12px 26px;
       font:inherit;font-weight:600;cursor:pointer}
+/* ---- style panel over every animation ---- */
+#stylebar{margin:12px 18px 0;padding:10px 14px;background:var(--panel);
+          border:1px solid var(--line);border-radius:8px;display:flex;
+          align-items:baseline;gap:10px;flex-wrap:wrap}
+#stylebar b{font-size:15px}
+#stylebar .sb-sum{color:var(--dim);font-size:13.5px;flex:1;min-width:240px}
+#stylebar details{width:100%;font-size:13px;color:var(--dim)}
+#stylebar summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:12.5px}
+#stylebar ol{margin:8px 0 0;padding-left:20px;line-height:1.55}
+
+/* ---- one-page question list ---- */
+.qf-q{padding:16px 0 18px;border-bottom:1px solid var(--line)}
+.qf-q:last-of-type{border-bottom:0}
+.qf-num{color:var(--dim);font-weight:600;margin-right:4px}
+.qf-yn .qf-opt{min-width:120px;justify-content:center;font-weight:600}
+.qf-yes.qf-sel{background:#dcf5ea;border-color:var(--ok)}
+.qf-no.qf-sel{background:#fde4e4;border-color:var(--bad)}
+.qf-score{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.qf-dd{font:inherit;font-size:16px;padding:8px 12px;border:1px solid var(--line);
+       border-radius:6px;background:var(--panel2);color:var(--fg);min-width:150px}
+.qf-anchor{font-size:13px;color:var(--dim)}
+.qf-closed{margin-top:16px;padding:14px 16px;background:#e8f7f0;border-left:3px solid var(--ok);
+           border-radius:0 6px 6px 0;color:#0f6b4d;font-size:14.5px}
+
+/* ---- tournament ---- */
+#tour{padding:18px}
+.tour-q{font-size:19px;margin:0 0 6px}
+.tour-sub{color:var(--dim);font-size:13.5px;margin-bottom:14px}
+.tour-round{display:inline-block;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
+            color:var(--dim);margin-bottom:10px}
+.tour-pick{display:flex;gap:12px;margin-top:12px}
+.tour-pick button{flex:1;background:var(--panel);color:var(--fg);border:2px solid var(--line);
+                  border-radius:8px;padding:14px;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+.tour-pick button:hover{border-color:var(--accent)}
+.tour-pick button:disabled{opacity:.4;cursor:not-allowed}
+#players > div.tour-out{opacity:.18;filter:grayscale(1);transition:opacity .6s,filter .6s;pointer-events:none}
+#players > div.tour-in{animation:tourIn .5s ease-out}
+@keyframes tourIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.tour-done{margin-top:14px;padding:12px 16px;background:#e8f7f0;border-radius:6px;color:#0f6b4d}
+
 #done,#loading{padding:60px;text-align:center;color:var(--dim)}
 #done h2{color:var(--fg)}
 </style>
@@ -227,7 +267,12 @@ body.fs-locked{overflow:hidden}
     </div>
   </div>
   <div id="right">
+    <div id="stylebar" style="display:none">
+      <b id="sbName"></b><span class="sb-sum" id="sbSum"></span>
+      <details><summary>What this style requires</summary><ol id="sbRules"></ol></details>
+    </div>
     <div id="players"></div>
+    <div id="tour" style="display:none"></div>
     <div id="qwrap">
       <div id="intro"></div>
       <div id="form"></div>
@@ -254,6 +299,67 @@ body.fs-locked{overflow:hidden}
 <script src="/forms.js"></script>
 <script>
 let players = [], form = null, trial = null, openedAt = 0;
+
+function setNote(text, bad) {
+  const n = document.querySelector('[data-role="note"]');
+  if (!n) return;
+  n.textContent = text;
+  n.style.color = bad ? "var(--bad)" : "var(--dim)";
+}
+
+/* An answer POST that fails must not be lost. It used to be swallowed with a
+ * console.warn, so the chip appeared on screen with nothing behind it and
+ * submit later refused as "incomplete" for a question the participant could
+ * plainly see they had answered. */
+// Answer writes still on the wire. Submit waits for them: a participant who
+// picks the last dropdown and clicks submit in the same second otherwise
+// races their own answer to the server and earns a 409 for it.
+const inflight = new Set();
+
+async function postAnswer(qid, value, attempts) {
+  const p = _postAnswer(qid, value, attempts);
+  inflight.add(p);
+  try { return await p; } finally { inflight.delete(p); }
+}
+
+async function _postAnswer(qid, value, attempts) {
+  attempts = attempts || 3;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await api(`/api/trial/${trial.trial_id}/answer`, { method: "POST",
+        body: JSON.stringify({ question_id: qid, value,
+                               ms_since_open: Date.now() - openedAt })});
+      return true;
+    } catch (e) {
+      if (e.status === 409 || e.status === 404) return false;  // not retryable
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  return false;
+}
+
+/* Submit, and if the server says something is missing, re-send it from what
+ * the form holds and try once more. The client and the server can only drift
+ * because a write was lost, and the client still has the value -- so repair it
+ * rather than making the participant answer it again. */
+async function submitWithRepair() {
+  if (inflight.size) await Promise.allSettled([...inflight]);
+  try {
+    return await api(`/api/trial/${trial.trial_id}/submit`, { method: "POST" });
+  } catch (e) {
+    if (e.status !== 409 || !form) throw e;
+    let missing = [];
+    try { missing = (JSON.parse(e.message.slice(e.message.indexOf("{"))).missing) || []; }
+    catch (_) { throw e; }
+    const local = form.answers();
+    const repairable = missing.filter((q) => local[q] !== undefined);
+    if (!repairable.length) throw e;
+    setNote(`Re-saving ${repairable.length} answer(s)\u2026`);
+    Events.push({ type: "answer_repair", payload: { questions: repairable } });
+    for (const q of repairable) await postAnswer(q, local[q], 4);
+    return await api(`/api/trial/${trial.trial_id}/submit`, { method: "POST" });
+  }
+}
 // Keyed BY PARTICIPANT. A single global key meant the second person to use a
 // browser inherited the first one's "already seen" list and got no section
 // intros at all -- which is why they appeared only sometimes.
@@ -273,20 +379,22 @@ function markSeen(experiment) {
 // What changes between experiments, in the participant's terms. They are never
 // told which condition they are seeing -- only what they are now being asked.
 const STAGE_COPY = {
-  exp1: {title: "Judging the animation",
-         body: "You will see a figure and an animated version of it, with no "
-             + "narration. Judge the visuals only."},
-  exp2: {title: "Now judging the narration",
-         body: "Same kind of animation, but this time the narration is shown. "
-             + "Judge the words and how well they fit what is on screen."},
-  exp3: {title: "Now comparing two presentations",
-         body: "From here on you will see two presentations of the same figure "
-             + "side by side, and choose between them."},
-  exp4: {title: "Another comparison",
-         body: "Two more presentations of the same figure. Same task: say which "
-             + "one works better."},
-  exp5: {title: "One last comparison",
-         body: "Two presentations of the same figure. Say which one works better."},
+  exp1: {title: "Part 1 \u00b7 Animation quality",
+         body: "You will see a figure and an animated version of it, with its "
+             + "narration. Watch it to the end, then answer the questions that "
+             + "appear underneath -- later questions only show up when the "
+             + "earlier ones make them relevant."},
+  exp2: {title: "Part 2 \u00b7 Which would you use?",
+         body: "Two presentations of the same figure, side by side. Pick the one "
+             + "you would rather use yourself. The one you did not pick is "
+             + "replaced by a third; pick again."},
+  context: {title: "Part 1 \u00b7 Narration",
+            body: "Same animation, two different narrations. Say which narration "
+                + "helps you understand the animation more."},
+  bench: {title: "Part 2 \u00b7 Corrections",
+          body: "The original animation on the left, and a version that a person "
+              + "checked and corrected on the right. You are told which is "
+              + "which. Say whether the corrections noticeably improve it."},
 };
 
 function showBetween(experiment, index, total) {
@@ -312,17 +420,19 @@ function allWatched() {
 function refreshUnlockBar() {
   const bar = el("#unlockbar");
   if (!players.length) { bar.style.display = "none"; return; }
-  const done = allWatched();
+  const onstage = players.filter((p, i) => el("#players").children[i]
+    ? el("#players").children[i].style.display !== "none" : true);
+  const done = onstage.length > 0 && onstage.every((p) => p.watched());
   document.body.classList.toggle("unlocked", done);
   if (done) { bar.style.display = "none"; return; }
   bar.style.display = "flex";
   bar.classList.remove("done");
-  const total = players.length;
-  const ready = players.filter((p) => p.watched()).length;
+  const total = onstage.length;
+  const ready = onstage.filter((p) => p.watched()).length;
   el("#unlocktext").textContent = total > 1
     ? "Move BOTH sliders all the way to the end to unlock the questions."
     : "Move the slider all the way to the end to unlock the questions.";
-  const pct = Math.round(100 * players.reduce(
+  const pct = Math.round(100 * onstage.reduce(
     (a, p) => a + (p.count() > 1 ? p.maxSeen() / (p.count() - 1) : 1), 0) / total);
   el("#unlockprog").textContent = total > 1
     ? `${ready} of ${total} viewed \u00b7 ${pct}%` : `${pct}%`;
@@ -389,41 +499,127 @@ async function load() {
     el("#players").appendChild(holder);
     const mount = document.createElement("div");
     holder.appendChild(mount);
-    slot.label = data.slots.length > 1
-      ? (slot.slot === "A" ? "Left (A)" : "Right (B)") : "Animation";
+    const named = (data.side_labels || {})[slot.slot];
+    slot.label = named ? named : (data.slots.length > 1
+      ? ({A: "Left (A)", B: "Right (B)", C: "Right (C)"}[slot.slot]) : "Animation");
     players.push(mountPlayer(mount, slot, {
       onEvent: (e) => { Events.push(e); refreshUnlockBar(); },
-      onWatched: () => { if (form) form.refreshGate(); refreshUnlockBar(); },
+      onWatched: () => {
+        if (form) form.refreshGate();
+        if (window.__tourGate) window.__tourGate();
+        refreshUnlockBar();
+      },
     }));
   });
 
-  el("#intro").textContent = data.questions.intro || "";
-  form = mountForm(el("#form"), data.questions, {
+  // Style, in bold, over every animation -- with the judge's own rule list a
+  // click away. Participants and the ASCS metric judge the same contract.
+  el("#sbName").textContent = data.style_name || "";
+  el("#sbSum").textContent = data.style_description || "";
+  el("#sbRules").innerHTML = (data.style_rules || []).map((r) => `<li>${esc(r)}</li>`).join("");
+  el("#stylebar").style.display = data.style_name ? "flex" : "none";
+
+  window.__tourGate = null;
+  if (data.screen === "tournament") {
+    // Drop the previous trial's form object, not just its DOM. Left in place,
+    // the players' onWatched still called its refreshGate against elements
+    // that no longer exist, threw, and never reached the tournament gate --
+    // so nobody arriving from Part 1 could ever enable the pick buttons.
+    form = null;
+    el("#form").innerHTML = "";
+    mountTournament(data);
+  } else {
+    el("#tour").style.display = "none";
+    form = mountForm(el("#form"), data.questions, {
     canSubmit: allWatched,
-    onAnswer: async (qid, value) => {
-      try {
-        await api(`/api/trial/${trial.trial_id}/answer`, { method: "POST",
-          body: JSON.stringify({ question_id: qid, value,
-                                 ms_since_open: Date.now() - openedAt })});
-      } catch (e) { console.warn("answer failed", e); }
-    },
+    onAnswer: (qid, value) => postAnswer(qid, value),
     onComplete: async () => {
       Events.flush();
+      setNote("Saving\u2026");
       try {
-        await api(`/api/trial/${trial.trial_id}/submit`, { method: "POST" });
+        await submitWithRepair();
       } catch (e) {
-        // The server is the rule, not the disabled button. If it refuses,
-        // say why rather than silently doing nothing.
-        alert("Could not submit: " + e.message);
+        setNote("Could not submit: " + e.message, true);
         return;
       }
       load();
     },
-  });
+    }, data.saved_answers || {});
+  }
 
   el("#loading").style.display = "none";
   el("#main").style.display = "flex";
   refreshUnlockBar();
+}
+
+/* Ranking by elimination, without ever showing all three at once:
+ *   round 1  A vs B  -> pick
+ *   the loser fades; C slides into its place
+ *   round 2  winner vs C -> pick
+ * rank: final winner 1, its opponent 2, the round-1 loser 3. The server
+ * derives the rank from the two picks; the client sends only slot letters. */
+function mountTournament(data) {
+  const tour = el("#tour");
+  tour.style.display = "block";
+  const holders = Array.from(el("#players").children);      // A, B, C in order
+  const idx = { A: 0, B: 1, C: 2 };
+  holders[idx.C].style.display = "none";                     // C waits offstage
+  const picks = [];
+  const question = (data.questions.questions[0] || {}).prompt
+    || "Which of these animations would you be most likely to use yourself?";
+
+  function watchedAll(letters) {
+    return letters.every((L) => players[idx[L]].watched());
+  }
+  function paint(round, left, right) {
+    tour.innerHTML = `
+      <span class="tour-round">Round ${round} of 2</span>
+      <h2 class="tour-q">${esc(question)}</h2>
+      <div class="tour-sub">Step both animations to the end, then choose.</div>
+      <div class="tour-pick">
+        <button data-pick="${left}">${esc(players[idx[left]].label)}</button>
+        <button data-pick="${right}">${esc(players[idx[right]].label)}</button>
+      </div>`;
+    const gate = () => tour.querySelectorAll("button").forEach((b) =>
+      b.disabled = !watchedAll([left, right]));
+    gate();
+    window.__tourGate = gate;
+    tour.querySelectorAll("button").forEach((b) => b.onclick = () => choose(b.dataset.pick, left, right));
+  }
+  function choose(pick, left, right) {
+    picks.push(pick);
+    Events.push({ type: "tournament_pick", payload: { round: picks.length, pick, versus: [left, right] } });
+    if (picks.length === 1) {
+      const loser = pick === left ? right : left;
+      holders[idx[loser]].classList.add("tour-out");
+      setTimeout(() => {
+        holders[idx[loser]].style.display = "none";
+        holders[idx.C].style.display = "";
+        holders[idx.C].classList.add("tour-in");
+        // The newcomer takes the loser's position on screen.
+        el("#players").insertBefore(holders[idx.C], pick === "A" ? null : holders[idx.A]);
+        players[idx.C].label = pick === "A" ? "Right (C)" : "Left (C)";
+        refreshUnlockBar();
+        paint(2, pick === "A" ? "A" : "C", pick === "A" ? "C" : "B");
+      }, 650);
+    } else {
+      submitTournament();
+    }
+  }
+  async function submitTournament() {
+    tour.innerHTML = `<div class="tour-done">Saving your ranking\u2026</div>`;
+    Events.flush();
+    try {
+      await api(`/api/trial/${trial.trial_id}/submit`, { method: "POST",
+        body: JSON.stringify({ picks }) });
+    } catch (e) {
+      tour.innerHTML = `<div class="tour-done" style="background:#fde4e4;color:var(--bad)">
+        Could not save: ${esc(e.message)}</div>`;
+      return;
+    }
+    load();
+  }
+  paint(1, "A", "B");
 }
 
 el("#figimg").onclick = () =>

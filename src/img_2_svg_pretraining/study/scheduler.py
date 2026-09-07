@@ -26,7 +26,8 @@ import hashlib
 import json
 
 from img_2_svg_pretraining.study.config import (
-    ABSOLUTE_EXPERIMENTS, PAIR_AXIS, SCREEN, SHOWS_CAPTIONS, StudyConfig)
+    ABSOLUTE_EXPERIMENTS, FIXED_SIDES, PAIR_AXIS, SCREEN, SHOWS_CAPTIONS,
+    TOURNAMENT, StudyConfig)
 from img_2_svg_pretraining.study.db import StudyDB, new_id
 
 
@@ -44,8 +45,12 @@ def cell_key(experiment: str, narrative_ids: list[str]) -> str:
 
 # ----------------------------------------------------------------- pools --
 
-def build_pool(conn, bundle_id: str, experiment: str) -> list[dict]:
+def build_pool(conn, bundle_id: str, experiment: str,
+               study_day: int | None = None) -> list[dict]:
     """Candidate cells for one experiment.
+
+    With `study_day`, only diagrams the bundle stamped with that day are
+    offered -- the main study runs ten fresh figures per day.
 
     Absolute experiments offer one narrative each. Pairwise experiments pair
     two narratives of the same (diagram, style) that differ on exactly the axis
@@ -55,21 +60,48 @@ def build_pool(conn, bundle_id: str, experiment: str) -> list[dict]:
     rows = [dict(r) for r in conn.execute(
         "SELECT * FROM narrative WHERE bundle_id=? AND is_attention_check=0",
         (bundle_id,)).fetchall()]
+    if study_day is not None:
+        todays = {r["diagram_id"] for r in conn.execute(
+            "SELECT diagram_id FROM diagram WHERE bundle_id=? AND study_day=?",
+            (bundle_id, study_day)).fetchall()}
+        rows = [n for n in rows if n["diagram_id"] in todays]
 
     if experiment in ABSOLUTE_EXPERIMENTS:
-        # RQ1/RQ2 are about OUR system, so only our own pipeline output is
-        # rated in isolation. The bench's human-verified reference and the
-        # end-to-end baseline exist solely as the other side of Experiments 5
-        # and 4; offering either as a standalone absolute trial would have
-        # participants scoring someone else's animation as though it were
-        # ours, and the RQ1/RQ2 means would quietly absorb it.
+        # Every generating METHOD is rated in isolation -- that is the point
+        # of the main study's Experiment 1 (AnimateBanana vs each baseline on
+        # the same figures). What is excluded: the human-verified bench
+        # reference (it is the other side of the bench experiment, not a
+        # system) and the original talk (a human presentation, not an
+        # animation of the figure).
         return [{"cell_key": cell_key(experiment, [n["narrative_id"]]),
                  "diagram_id": n["diagram_id"],
                  "animation_style": n["animation_style"],
-                 "narratives": [n], "conditions": ["single"]}
+                 "narratives": [n], "conditions": [n["method"]]}
                 for n in rows
                 if n["verification_state"] != "verified"
-                and n["method"] == "animatebanana"]
+                and n["method"] != "talk"
+                and n["context_condition"] != "without_context"]
+
+    if experiment in TOURNAMENT:
+        # One cell per diagram holding all three contenders, in the design's
+        # fixed order. A diagram missing any contender is not offered: a
+        # two-way "tournament" would rank on different evidence.
+        order = TOURNAMENT[experiment]
+        by_diagram: dict[str, dict] = {}
+        for n in rows:
+            if n["method"] in order and n["context_condition"] != "without_context" \
+                    and n["verification_state"] != "verified":
+                by_diagram.setdefault(n["diagram_id"], {})[n["method"]] = n
+        pool = []
+        for diagram_id, variants in by_diagram.items():
+            if all(m in variants for m in order):
+                ns = [variants[m] for m in order]
+                pool.append({
+                    "cell_key": cell_key(experiment, [n["narrative_id"] for n in ns]),
+                    "diagram_id": diagram_id,
+                    "animation_style": ns[0]["animation_style"],
+                    "narratives": ns, "conditions": list(order)})
+        return pool
 
     field, (cond_a, cond_b) = PAIR_AXIS[experiment]
     by_group: dict[tuple, dict] = {}
@@ -123,7 +155,7 @@ def _stratum(diagram: dict, style: str, fields: tuple) -> tuple:
 # ------------------------------------------------------------- selection --
 
 def _select_cell(pool, counts, seen_cells, diagrams, cfg, participant_id,
-                 experiment) -> dict | None:
+                 experiment, seen_diagrams=frozenset()) -> dict | None:
     """Least-judged eligible cell, breaking ties toward under-served strata.
 
     Retirement and stratum-matched replacement fall out of this ordering rather
@@ -154,7 +186,8 @@ def _select_cell(pool, counts, seen_cells, diagrams, cfg, participant_id,
     def sort_key(c):
         st = _stratum(diagrams.get(c["diagram_id"], {}), c["animation_style"],
                       cfg.stratum_fields)
-        return (counts.get(c["cell_key"], 0),      # fill evenly
+        return (c["diagram_id"] in seen_diagrams,  # fresh figures first
+                counts.get(c["cell_key"], 0),      # then fill evenly
                 served.get(st, 0),                 # then under-served strata
                 _hash_int(participant_id, experiment, c["cell_key"]))
 
@@ -168,11 +201,11 @@ def _public_payload(row: dict, narratives: dict, figure: dict | None = None) -> 
     lineage or any filesystem path. Media is addressed by trial and slot, so a
     payload cannot betray which side is which.
     """
-    slots = [{"slot": "A"}] if row["presentation_b_id"] is None else \
-            [{"slot": "A"}, {"slot": "B"}]
-    for slot in slots:
-        key = "presentation_a_id" if slot["slot"] == "A" else "presentation_b_id"
-        payload = narratives[row[key]]
+    ids = json.loads(row["presentation_ids"]) if row.get("presentation_ids") else \
+          [row["presentation_a_id"]] + ([row["presentation_b_id"]] if row["presentation_b_id"] else [])
+    slots = [{"slot": letter} for letter, _ in zip("ABC", ids)]
+    for slot, nid in zip(slots, ids):
+        payload = narratives[nid]
         slot.update({"duration": payload["timeline"]["duration"],
                      # Bare content hashes. They name bytes, not conditions --
                      # which is the whole point of addressing media by hash.
@@ -237,8 +270,7 @@ def next_trial(db: StudyDB, participant_id: str, cfg: StudyConfig) -> dict | Non
             (participant_id,)).fetchone()
         if open_row:
             row = dict(open_row)
-            ids = [row["presentation_a_id"]] + \
-                  ([row["presentation_b_id"]] if row["presentation_b_id"] else [])
+            ids = json.loads(row["presentation_ids"])
             return _public_payload(row, _narrative_payloads(conn, ids),
                                    _figure(conn, row))
 
@@ -261,7 +293,7 @@ def next_trial(db: StudyDB, participant_id: str, cfg: StudyConfig) -> dict | Non
         for candidate in cfg.enabled_experiments():
             if done.get(candidate, 0) >= cfg.target_for(candidate):
                 continue           # this participant is done with it
-            candidate_pool = build_pool(conn, bundle_id, candidate)
+            candidate_pool = build_pool(conn, bundle_id, candidate, cfg.study_day)
             if not candidate_pool:
                 continue           # arm has no stimuli yet; it ships dark
 
@@ -269,18 +301,24 @@ def next_trial(db: StudyDB, participant_id: str, cfg: StudyConfig) -> dict | Non
                 "SELECT cell_key, diagram_id FROM trial"
                 " WHERE participant_id=? AND experiment=?",
                 (participant_id, candidate)).fetchall()
-            # A diagram is offered at most once per experiment. Rating the same
-            # figure in three styles back to back is the over-familiarity the
-            # experiment-major ordering exists to avoid. Across experiments it
-            # is allowed, and intended.
+            # A diagram is offered at most once per pairwise/tournament
+            # experiment. In the absolute experiment the design wants the SAME
+            # figure rated under every method by the same person (that is what
+            # makes the per-method scores comparable), so there a diagram may
+            # come back under another method -- but only after every other
+            # figure has been seen once, so the two ratings are never back to
+            # back. Across experiments repeats are allowed, and intended.
             seen_cells = {r["cell_key"] for r in prior}
             seen_diagrams = {r["diagram_id"] for r in prior}
-            eligible = [c for c in candidate_pool
-                        if c["diagram_id"] not in seen_diagrams]
+            if candidate in ABSOLUTE_EXPERIMENTS:
+                eligible = candidate_pool
+            else:
+                eligible = [c for c in candidate_pool
+                            if c["diagram_id"] not in seen_diagrams]
 
             counts = _judgment_counts(conn, candidate)
             picked = _select_cell(eligible, counts, seen_cells, diagrams, cfg,
-                                  participant_id, candidate)
+                                  participant_id, candidate, seen_diagrams)
             if picked is not None:
                 experiment, cell, pool = candidate, picked, candidate_pool
                 break
@@ -293,7 +331,12 @@ def next_trial(db: StudyDB, participant_id: str, cfg: StudyConfig) -> dict | Non
         trial_id = new_id()
         narratives, conditions = cell["narratives"], cell["conditions"]
         seed = str(_hash_int(trial_id, participant_id, cell["cell_key"]))
-        if len(narratives) == 2 and int(seed) % 2 == 1:
+        # Pairwise sides are randomised so preference can be recovered from
+        # condition rather than position -- EXCEPT where the design is
+        # deliberately unblinded (bench: original left, corrected right). A
+        # tournament keeps the design's order: the first two meet first.
+        if len(narratives) == 2 and experiment not in FIXED_SIDES \
+                and int(seed) % 2 == 1:
             narratives = [narratives[1], narratives[0]]
             conditions = [conditions[1], conditions[0]]
 
@@ -307,16 +350,19 @@ def next_trial(db: StudyDB, participant_id: str, cfg: StudyConfig) -> dict | Non
              cell_key, diagram_id, animation_style, bundle_id,
              presentation_a_id, presentation_a_condition,
              presentation_b_id, presentation_b_condition,
+             presentation_ids, presentation_conditions,
              position_seed, show_captions, assignment_reason,
              is_attention_check, counts_toward_target, config_version,
              status, served_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',datetime('now'))""", (
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'open',datetime('now'))""", (
             trial_id, participant_id, trial_index, experiment,
             done.get(experiment, 0), cell["cell_key"], cell["diagram_id"],
             cell["animation_style"], bundle_id,
             narratives[0]["narrative_id"], conditions[0],
-            narratives[1]["narrative_id"] if len(narratives) == 2 else None,
-            conditions[1] if len(conditions) == 2 else None,
+            narratives[1]["narrative_id"] if len(narratives) >= 2 else None,
+            conditions[1] if len(conditions) >= 2 else None,
+            json.dumps([n["narrative_id"] for n in narratives]),
+            json.dumps(list(conditions)),
             seed, int(SHOWS_CAPTIONS.get(experiment, True)),
             json.dumps({"judgments_before": counts.get(cell["cell_key"], 0),
                         "quota": cfg.judgments_per_sample,
@@ -327,8 +373,7 @@ def next_trial(db: StudyDB, participant_id: str, cfg: StudyConfig) -> dict | Non
         #    a freshly served one take literally the same path.
         row = dict(conn.execute("SELECT * FROM trial WHERE trial_id=?",
                                 (trial_id,)).fetchone())
-        ids = [row["presentation_a_id"]] + \
-              ([row["presentation_b_id"]] if row["presentation_b_id"] else [])
+        ids = json.loads(row["presentation_ids"])
         return _public_payload(row, _narrative_payloads(conn, ids),
                                _figure(conn, row))
 
@@ -346,7 +391,7 @@ def coverage(db: StudyDB, cfg: StudyConfig, bundle_id: str) -> list[dict]:
         reap_abandoned(conn, cfg.open_trial_ttl_seconds)
         for experiment in cfg.enabled_experiments():
             counts = _judgment_counts(conn, experiment)
-            for cell in build_pool(conn, bundle_id, experiment):
+            for cell in build_pool(conn, bundle_id, experiment, cfg.study_day):
                 n = counts.get(cell["cell_key"], 0)
                 out.append({
                     "experiment": experiment, "cell_key": cell["cell_key"],

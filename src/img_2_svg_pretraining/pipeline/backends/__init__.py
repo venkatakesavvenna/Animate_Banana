@@ -33,7 +33,10 @@ DEFAULT_KEY_ENV = {
 
 # Keys consumed by the factory itself; everything else is passed to the
 # backend constructor.
-_FACTORY_KEYS = {"type", "api_key_env", "api_key", "api_key_file", "cache_dir"}
+# `lineage_alias` is consumed by PipelineConfig.backend_model to shorten cache
+# paths; it is not a backend constructor argument and must not be forwarded.
+_FACTORY_KEYS = {"type", "api_key_env", "api_key", "api_key_file", "cache_dir",
+                 "lineage_alias"}
 
 
 def resolve_api_keys(backend_type: str, cfg: dict) -> list[str]:

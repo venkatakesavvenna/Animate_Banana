@@ -1,0 +1,21 @@
+# Selective cohort -- Bench Quality Assessment. NOT blind, by design: the
+# participant is told the right-hand side is the verified, corrected benchmark
+# sample and the left is the original. Sides are therefore FIXED, not
+# randomised (`fixed_sides: true`), and the question is about whether the
+# correction is a noticeable improvement.
+
+experiment: bench
+title: Did the correction help?
+intro: >-
+  On the right you will see a verified and corrected sample from our
+  benchmark; on the left, the original, uncorrected version. Step both to the
+  end.
+fixed_sides: true
+side_labels: {A: "Original (uncorrected)", B: "Verified and corrected"}
+
+questions:
+  - id: improved
+    prompt: Do the corrections result in a noticeable improvement in the perceived quality of the animation?
+    type: yesno
+    layout: horizontal
+    metric: bench_improvement

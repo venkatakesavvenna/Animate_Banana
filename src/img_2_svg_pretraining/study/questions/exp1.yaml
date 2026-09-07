@@ -1,0 +1,49 @@
+# Main study, Experiment 1 -- Animation Quality Assessment.
+#
+# One sample per page, every question on that page. The questions appear
+# PROGRESSIVELY: VFS first; ASCS only if VFS is yes; SSS and NAS only if both
+# are yes. A "no" at either gate ends the sample -- the participant is prompted
+# to move on. `show_if` is an all-of condition over earlier answers.
+#
+# `metric` names the bench key each question correlates with, for the
+# human<->LLM agreement analysis. Wording is data; edit freely.
+
+experiment: exp1
+title: Animation quality
+intro: >-
+  Step through the animation to the end, then answer. Later questions appear
+  only if the earlier ones are answered "Yes".
+
+questions:
+  - id: vfs
+    prompt: Does the animation show all the elements of the diagram correctly?
+    type: yesno
+    layout: horizontal
+    metric: vfs
+
+  - id: ascs
+    prompt: "The expected animation style is {style_name}. Does the above animation follow this style?"
+    help: "{style_summary}"
+    type: yesno
+    layout: horizontal
+    metric: ascs_pass
+    show_if: {vfs: true}
+
+  - id: sss
+    prompt: Is the selection of the next element to animate a sensible one?
+    type: score10
+    anchors: {0: Bad selection overall, 10: Correct selection overall}
+    metric: sss
+    show_if: {vfs: true, ascs: true}
+
+  - id: nas
+    prompt: Does the narration align with the given animation?
+    type: score10
+    anchors: {0: Misaligned and arbitrary, 10: Well aligned and insightful}
+    metric: nas
+    show_if: {vfs: true, ascs: true}
+
+# Shown instead of the remaining questions when a gate answer is "No".
+gate_closed_text: >-
+  Thanks -- that answers it for this sample. Use "Submit and continue" to move
+  on to the next one.

@@ -21,12 +21,13 @@
 set -uo pipefail
 REPO=/fsxvision_new/venkat.kesav/img_2_svg_pretraining
 cd "$REPO"
-C=animatebanana-v5
+C=${C:-animatebanana-v5}
 PY=/environments/img_2_svg_pretraining/bin/python
 LOG=$REPO/logs/bench_v5/judge; mkdir -p "$LOG"
 WORKERS=${WORKERS:-12}
 STAGES=${STAGES:-"sss gps nas"}
 CELLS=${CELLS:-$REPO/data/v5_judge_cells.json}
+EVALS_GLOB=${EVALS_GLOB:-data/animatebench_v5*cache}
 
 say(){ echo "[$(date '+%m-%d %H:%M:%S')] $*" | tee -a "$LOG/driver.log"; }
 
@@ -43,7 +44,8 @@ judge_one() {
   docker exec -u "$(id -u):$(id -g)" -e PLAYWRIGHT_BROWSERS_PATH=/environments/playwright-browsers "$C" bash -lc \
     "cd /code && PYTHONPATH=src $PY -u -m img_2_svg_pretraining.animatebench.run_eval \
        animation --config src/img_2_svg_pretraining/pipeline/configs/${cfg}.yaml \
-       --style $style --only $sample --stages $STAGES --judge-backend kimi_judge" \
+       --style $style --only $sample --stages $STAGES --judge-backend kimi_judge \
+       --rubric letters" \
     >"$out" 2>&1
   echo "$? $tag"
 }
@@ -58,10 +60,17 @@ export C PY LOG STAGES
 # built from zero judge input. Any record carrying connection failures dies,
 # partial scores included -- re-running is cheap because successful judge
 # calls replay from the response cache.
-python3 - <<'PURGE'
+# The purge is scoped to the CONFIGS NAMED IN THE CELLS FILE, not just the
+# EVALS_GLOB: on 09-01 a driver launched with the default (v5) glob while
+# judging zs cells purged a record from the FINISHED v5 run. A run must never
+# be able to delete another run's records, whatever its env says.
+EVALS_GLOB="$EVALS_GLOB" CELLS="$CELLS" python3 - <<'PURGE'
 import json, glob, os
+own = {c["config"] for c in json.load(open(os.environ["CELLS"]))}
 purged = 0
-for f in glob.glob("data/animatebench_v5*cache/animatebench_v5/evals/*/*/*/animation.json"):
+for f in glob.glob(os.environ["EVALS_GLOB"] + "/*/evals/*/*/*/animation.json"):
+    if f.split("/evals/")[1].split("/")[0] not in own:
+        continue
     try: d = json.load(open(f))
     except Exception: os.unlink(f); purged += 1; continue
     errs = str(d.get("sss_errors", "")) + str(d.get("gps_errors", "")) + str(d.get("nas_errors", ""))
