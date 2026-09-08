@@ -66,6 +66,22 @@ animation_style: progressive_reveal
 target: svg
 
 backends:
+
+  # ADDED so the talks are judged by the SAME judge as the ablations and the
+  # DeepSeek sets. Without it `--judge-backend kimi_judge` does NOT fail -- it
+  # falls back to a Gemini judge and reports `judge: gemini-3.6-flash` in one
+  # line of stdout, producing scores that look fine and are not comparable with
+  # anything else in the study.
+  kimi_judge:
+    type: openai_compat
+    base_url: http://127.0.0.1:8011/v1
+    model: moonshotai/Kimi-K2.6
+    api_key: EMPTY
+    max_concurrency: 4
+    default_params:
+      extra_body:
+        chat_template_kwargs:
+          thinking: false
   openrouter_flash:
     type: openai_compat
     base_url: https://openrouter.ai/api/v1

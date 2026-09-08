@@ -24,6 +24,18 @@ WORKER=${WORKER:?set WORKER ip}
 PORT=${PORT:-8011}
 NAME=${NAME:-kimi-mn}
 SNAP_GLOB='/opt/dlami/nvme/vkkimi/hf/hub/models--moonshotai--Kimi-K2.6/snapshots/*'
+
+# HARD NODE GUARD. Using nodes the user had not named cost them their bonus on
+# 2026-09-08. HEAD/WORKER are no longer trusted as free-form variables: anything
+# outside the pair the user named is refused here, before a single SSH.
+ALLOWED_NODES="10.20.235.133 10.20.239.233"
+for _n in "${HEAD:-}" "${WORKER:-}"; do
+  case " $ALLOWED_NODES " in
+    *" $_n "*) ;;
+    *) echo "REFUSING: node '$_n' is not one the user named ($ALLOWED_NODES)." >&2; exit 1;;
+  esac
+done
+
 SSH="ssh -n -o BatchMode=yes -o StrictHostKeyChecking=no"
 
 run(){ $SSH "$1" "$2"; }

@@ -19,7 +19,8 @@ REPO = Path(__file__).resolve().parents[1]
 EVALS = REPO / "data/presentations_cache/presentations_ds/evals"
 OUT = REPO / "data/presentation_scores"
 
-METRICS = {"VFS_BAND": "vfs_band", "ASCS_VIDEO": "ascs_video"}
+METRICS = {"VFS_BAND": "vfs_band", "ASCS_VIDEO": "ascs_video",
+           "SSS": "sss", "GPS": "gps", "NAS": "nas"}
 SHARED = ("suite", "style", "stages_run", "stages_skipped", "written_at", "provenance")
 
 
@@ -58,6 +59,14 @@ def main() -> int:
         row["ascs_video_pass"] = d.get("ascs_video_pass")
         row["frames_judged"] = d.get("vfs_band_frame_count")
         row["deck_source"] = d.get("vfs_band_source")
+        for m in ("sss", "gps", "nas"):
+            row[m] = d.get(m)
+            # NAS is absent by DESIGN where the talk shipped no timed
+            # transcript: 24 of 35 have only transcript.txt, so there is
+            # nothing to align and an invented caption would be worse than a
+            # blank. Recorded as unnarrated, never as 0.
+            row[m + "_measured"] = d.get(m) is not None
+        row["nas_unnarrated"] = (d.get("nas_steps_unnarrated") == d.get("nas_steps_total"))
         row["measured"] = band is not None
         rows.append(row)
 

@@ -50,6 +50,14 @@ backends:
       # Short, unique per model. The full slug repeats once per agent in
       # the lineage and overruns the 255-byte filename limit at stage 2e.
       lineage_alias: kimik26
+      # 40 MINUTES, NOT THE 600s DEFAULT (backends/base.py:87).
+      # The designer writes a COMPLETE animated SVG with reasoning on:
+      # measured 478s and 550s for the two that succeeded, while the other
+      # six in the same batch died as 'exhausted 4 retries: Request timed
+      # out' -- 6 of 8 cells lost at stage 3a, with every earlier stage
+      # reporting 8 ok. Under 16-way concurrency each request is slower
+      # still, so the ceiling has to clear the worst case, not the median.
+      timeout: 2400
       # vLLM ignores the key; the OpenAI client requires one to be present.
       api_key: EMPTY
       # Against a dedicated local server, batching only pays off with several
@@ -166,12 +174,23 @@ planner:
 
 animator:
   designer:
+    # 65536, NOT 32768. Kimi emits a reasoning preamble before the document and
+    # on this stage the two together overrun the budget: a failed cell produced
+    # 107KB that opened with "The user wants me to convert..." and cut off
+    # MID-ATTRIBUTE inside an xlink:href -- so the response held `<svg` but no
+    # closing tag, and the parser rejected it as "no svg document in the
+    # response". The runner logged `designer: 0 ok, 6 failed` while every
+    # earlier stage said 8 ok.
+    #
+    # Reasoning stays ON -- it is what makes the animation good -- so the budget
+    # is what moves. max_model_len is 131072 and the designer prompt (diagram
+    # SVG + sequence) sits well under the remainder, so 65536 fits.
     backend: served
     # `{style}` is expanded at run time by designer._resolve_prompt.
     prompt: animation_designer/svg_designer.yaml#{style}
     params:
       temperature: 0.2
-      max_tokens: 32768
+      max_tokens: 65536
 
   critic:
     enabled: false
